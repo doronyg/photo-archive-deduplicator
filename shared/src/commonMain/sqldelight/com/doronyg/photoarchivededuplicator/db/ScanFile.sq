@@ -1,0 +1,36 @@
+CREATE TABLE scanFile (
+    path TEXT NOT NULL PRIMARY KEY,
+    directoryPath TEXT NOT NULL,
+    name TEXT NOT NULL,
+    extension TEXT,
+    sizeBytes INTEGER NOT NULL,
+    modifiedAt INTEGER,
+    lastScanned INTEGER NOT NULL
+);
+
+CREATE INDEX scanFileDirectoryIndex ON scanFile(directoryPath);
+
+-- Update-then-insert keeps columns added in later phases (e.g. hashes) on unchanged rows.
+updateFile:
+UPDATE scanFile
+SET sizeBytes = :sizeBytes, modifiedAt = :modifiedAt, lastScanned = :lastScanned
+WHERE path = :path;
+
+insertFileIfAbsent:
+INSERT OR IGNORE INTO scanFile(path, directoryPath, name, extension, sizeBytes, modifiedAt, lastScanned)
+VALUES (:path, :directoryPath, :name, :extension, :sizeBytes, :modifiedAt, :lastScanned);
+
+selectPathsInDirectory:
+SELECT path FROM scanFile WHERE directoryPath = :directoryPath;
+
+selectByPath:
+SELECT * FROM scanFile WHERE path = :path;
+
+selectAll:
+SELECT * FROM scanFile ORDER BY path;
+
+deleteByPath:
+DELETE FROM scanFile WHERE path = :path;
+
+deleteInDirectory:
+DELETE FROM scanFile WHERE directoryPath = :directoryPath;
