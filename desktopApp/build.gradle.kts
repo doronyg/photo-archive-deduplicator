@@ -25,6 +25,9 @@ compose.desktop {
         jvmArgs += "--enable-native-access=ALL-UNNAMED"
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
+            // The bundled runtime is trimmed with jlink; java.sql is required by the SQLite JDBC driver.
+            // Re-check with ./gradlew :desktopApp:suggestRuntimeModules after adding dependencies.
+            modules("java.instrument", "java.sql", "jdk.unsupported")
             packageName = "PhotoArchiveDeduplicator"
             packageVersion = "1.0.0"
         }

@@ -2,6 +2,7 @@ package com.doronyg.photoarchivededuplicator.scan
 
 import app.cash.sqldelight.EnumColumnAdapter
 import app.cash.sqldelight.async.coroutines.awaitAsList
+import app.cash.sqldelight.async.coroutines.awaitAsOne
 import app.cash.sqldelight.async.coroutines.awaitAsOneOrNull
 import app.cash.sqldelight.db.SqlDriver
 import com.doronyg.photoarchivededuplicator.db.FilesDatabase
@@ -38,6 +39,17 @@ data class FileRecord(
     val modifiedAt: Long?,
     val lastScanned: Long,
 )
+
+/** A directory plus the total size of the files directly inside it (not recursive). */
+data class DirectoryOverview(val directory: DirectoryRecord, val fileBytes: Long)
+
+data class InventorySummary(
+    val directoriesByStatus: Map<DirectoryStatus, Long>,
+    val fileCount: Long,
+    val totalBytes: Long,
+) {
+    val directoryCount: Long get() = directoriesByStatus.values.sum()
+}
 
 /** Result of listing a single directory; children only, not recursive. */
 data class DirectoryListing(
@@ -128,6 +140,39 @@ class DirectoryRepository(
             directories.recordFailure(status, attempts, key)
             directories.selectByPath(key).awaitAsOneOrNull()!!.toRecord()
         }
+    }
+
+    suspend fun countWithStatus(status: DirectoryStatus): Long = io {
+        directories.countWithStatus(status).awaitAsOne()
+    }
+
+    /** Subdirectories of [parent], or the scan roots when [parent] is null. */
+    suspend fun childOverviews(parent: Path?): List<DirectoryOverview> = io {
+        directories.selectChildOverviews(parent?.toString()).awaitAsList().map {
+            DirectoryOverview(
+                directory = ScanDirectory(
+                    it.path, it.parentPath, it.status, it.retryCount, it.fileCount, it.modifiedAt, it.lastScanned,
+                ).toRecord(),
+                fileBytes = it.fileBytes,
+            )
+        }
+    }
+
+    suspend fun filesIn(directory: Path): List<FileRecord> = io {
+        files.selectInDirectory(directory.toString()).awaitAsList().map { it.toRecord() }
+    }
+
+    suspend fun directoriesWithStatus(status: DirectoryStatus): List<DirectoryRecord> = io {
+        directories.selectWithStatus(status).awaitAsList().map { it.toRecord() }
+    }
+
+    suspend fun summary(): InventorySummary = io {
+        val totals = files.selectTotals().awaitAsOne()
+        InventorySummary(
+            directoriesByStatus = directories.countByStatus().awaitAsList().associate { it.status to it.directoryCount },
+            fileCount = totals.fileCount,
+            totalBytes = totals.totalBytes ?: 0L,
+        )
     }
 
     suspend fun directory(path: Path): DirectoryRecord? = io {

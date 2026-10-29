@@ -30,17 +30,22 @@ kotlin {
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.sqldelight.runtime)
             implementation(libs.sqldelight.async.extensions)
-            implementation(libs.okio)
+            // api: okio.Path appears in the public API (scan models, ScanTarget)
+            api(libs.okio)
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)
             implementation(libs.kotlinx.coroutines.test)
             implementation(libs.okio.fakefilesystem)
         }
-        // Both test targets run on the host JVM, so both use the in-memory JDBC SQLite driver
-        jvmTest.dependencies {
+        // Desktop stores the inventory in a SQLite file via JDBC; jvmTest inherits this
+        jvmMain.dependencies {
             implementation(libs.sqldelight.sqlite.driver)
         }
+        androidMain.dependencies {
+            implementation(libs.sqldelight.android.driver)
+        }
+        // Android host tests also run on the JVM, so they use the in-memory JDBC driver too
         getByName("androidHostTest").dependencies {
             implementation(libs.sqldelight.sqlite.driver)
         }

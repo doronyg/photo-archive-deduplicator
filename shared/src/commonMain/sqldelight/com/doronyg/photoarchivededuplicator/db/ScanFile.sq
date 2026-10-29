@@ -34,3 +34,9 @@ DELETE FROM scanFile WHERE path = :path;
 
 deleteInDirectory:
 DELETE FROM scanFile WHERE directoryPath = :directoryPath;
+
+selectInDirectory:
+SELECT * FROM scanFile WHERE directoryPath = :directoryPath ORDER BY name;
+
+selectTotals:
+SELECT count(*) AS fileCount, coalesce(sum(sizeBytes), 0) AS totalBytes FROM scanFile;

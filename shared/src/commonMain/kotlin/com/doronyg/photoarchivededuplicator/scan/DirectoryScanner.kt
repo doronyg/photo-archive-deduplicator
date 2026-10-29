@@ -48,36 +48,40 @@ class DirectoryScanner(
     private val config: ScanConfig = ScanConfig(),
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val clock: () -> Long = { Clock.System.now().toEpochMilliseconds() },
-) {
-    /** Starts a new (re)scan of [root]; previously recorded data is reconciled, not discarded. */
-    suspend fun startScan(root: Path) {
+) : InventoryScanner {
+    override suspend fun startScan(root: Path, onEvent: suspend (ScanEvent) -> Unit) {
         repository.seedRoot(root)
-        resume()
+        resume(onEvent)
     }
 
     /** Continues any unfinished scan, including directories interrupted mid-listing. */
-    suspend fun resume() {
+    override suspend fun resume(onEvent: suspend (ScanEvent) -> Unit) {
         repository.resetInterrupted()
+        onEvent(ScanEvent.Started(pendingDirectories = repository.countWithStatus(DirectoryStatus.PENDING)))
         while (true) {
             val batch = repository.fetchPendingBatch(config.batchSize)
             if (batch.isEmpty()) break
             for (dir in batch) {
                 currentCoroutineContext().ensureActive()
-                scanDirectory(dir)
+                onEvent(ScanEvent.DirectoryStarted(dir))
+                scanDirectory(dir, onEvent)
             }
         }
     }
 
-    private suspend fun scanDirectory(dir: Path) {
+    private suspend fun scanDirectory(dir: Path, onEvent: suspend (ScanEvent) -> Unit) {
         repository.markInProgress(dir)
         val listing = try {
             withContext(ioDispatcher) { readListing(dir) }
         } catch (e: IOException) {
             val record = repository.recordFailure(dir, config.maxAttempts)
-            if (record.status == DirectoryStatus.PENDING) delay(backoff(record.retryCount))
+            val willRetry = record.status == DirectoryStatus.PENDING
+            onEvent(ScanEvent.DirectoryFailed(dir, record.retryCount, willRetry, e.message))
+            if (willRetry) delay(backoff(record.retryCount))
             return
         }
         repository.recordListing(dir, listing, clock())
+        onEvent(ScanEvent.DirectoryCompleted(dir, listing.subdirectories.size, listing.files.size))
     }
 
     /** Blocking; call on [ioDispatcher]. */

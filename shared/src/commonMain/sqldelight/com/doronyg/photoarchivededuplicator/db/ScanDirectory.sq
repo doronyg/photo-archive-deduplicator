@@ -64,3 +64,20 @@ SELECT path FROM subtree;
 
 deleteByPath:
 DELETE FROM scanDirectory WHERE path = :path;
+
+-- Browsing. A null :parentPath selects the scan roots.
+selectChildOverviews:
+SELECT d.*,
+       coalesce((SELECT sum(f.sizeBytes) FROM scanFile f WHERE f.directoryPath = d.path), 0) AS fileBytes
+FROM scanDirectory d
+WHERE d.parentPath IS :parentPath
+ORDER BY d.path;
+
+selectWithStatus:
+SELECT * FROM scanDirectory WHERE status = :status ORDER BY path;
+
+countWithStatus:
+SELECT count(*) FROM scanDirectory WHERE status = :status;
+
+countByStatus:
+SELECT status, count(*) AS directoryCount FROM scanDirectory GROUP BY status;
