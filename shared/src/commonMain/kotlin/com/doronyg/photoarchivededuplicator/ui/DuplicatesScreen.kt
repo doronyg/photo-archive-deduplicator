@@ -1,12 +1,15 @@
 package com.doronyg.photoarchivededuplicator.ui
 
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.Button
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -26,6 +29,8 @@ import androidx.compose.ui.unit.dp
 import com.doronyg.photoarchivededuplicator.scan.DirectoryRepository
 import com.doronyg.photoarchivededuplicator.PathActions
 import com.doronyg.photoarchivededuplicator.scan.DuplicateCandidateGroup
+import com.doronyg.photoarchivededuplicator.scan.DuplicateCandidateFilter
+import com.doronyg.photoarchivededuplicator.scan.DuplicateFileType
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import okio.Path
@@ -34,6 +39,8 @@ import okio.Path.Companion.toPath
 @Composable
 fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathActions: PathActions, modifier: Modifier = Modifier) {
     var rootText by rememberSaveable { mutableStateOf((target as? ScanTarget.Fixed)?.root?.toString().orEmpty()) }
+    var fileType by rememberSaveable { mutableStateOf(DuplicateFileType.ALL) }
+    var filenamePattern by rememberSaveable { mutableStateOf("") }
     var roots by remember { mutableStateOf(emptyList<Path>()) }
     var groups by remember { mutableStateOf<List<DuplicateCandidateGroup>?>(null) }
     var searchedRoot by remember { mutableStateOf("") }
@@ -54,7 +61,6 @@ fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathAc
 
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("Duplicate candidates", style = MaterialTheme.typography.titleLarge)
-        Text("Same exact name (case-sensitive) and size only — not verified duplicates. Times are evidence, not a filter. No files are changed.")
         OutlinedTextField(
             value = rootText,
             onValueChange = { rootText = it; groups = null },
@@ -63,39 +69,72 @@ fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathAc
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(enabled = !busy && rootText.isNotBlank(), onClick = {
-                val selected = rootText.trim()
+        if (target is ScanTarget.ChosenFolder) {
+            OutlinedButton(enabled = !busy, onClick = {
                 scope.launch {
-                    busy = true
-                    error = null
-                    groups = null
                     try {
-                        groups = repository.duplicateCandidates(selected.toPath())
-                        searchedRoot = selected
+                        target.pickDirectory()?.let { rootText = it; groups = null }
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
-                        error = "Search failed: ${e.message}"
-                    } finally {
-                        busy = false
+                        error = "Could not choose folder: ${e.message}"
                     }
                 }
-            }) { Text(if (busy) "Searching…" else "Find candidates") }
-            if (target is ScanTarget.ChosenFolder) {
-                OutlinedButton(enabled = !busy, onClick = {
-                    scope.launch {
-                        try {
-                            target.pickDirectory()?.let { rootText = it; groups = null }
-                        } catch (e: CancellationException) {
-                            throw e
-                        } catch (e: Exception) {
-                            error = "Could not choose folder: ${e.message}"
-                        }
-                    }
-                }) { Text("Choose folder…") }
+            }) { Text("Choose folder…") }
+        }
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            DuplicateFileType.entries.forEach { type ->
+                FilterChip(
+                    selected = fileType == type,
+                    onClick = { fileType = type; groups = null },
+                    enabled = !busy,
+                    label = {
+                        Text(when (type) {
+                            DuplicateFileType.ALL -> "All"
+                            DuplicateFileType.IMAGES -> "Images"
+                            DuplicateFileType.VIDEOS -> "Videos"
+                            DuplicateFileType.DOCUMENTS -> "Documents"
+                        })
+                    },
+                )
             }
         }
+        OutlinedTextField(
+            value = filenamePattern,
+            onValueChange = { filenamePattern = it; groups = null },
+            label = { Text("Filename wildcard (optional)") },
+            supportingText = {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("Case-insensitive, e.g. IMG*.jpg. * = any text, ? = one character; dot is literal. Types use file extensions.")
+                    Text("Same exact name (case-sensitive) and size only — not verified duplicates. Times are evidence, not a filter. No files are changed.")
+                }
+            },
+            enabled = !busy,
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Button(enabled = !busy && rootText.isNotBlank(), onClick = {
+            val selected = rootText.trim()
+            val filter = DuplicateCandidateFilter(fileType, filenamePattern)
+            scope.launch {
+                busy = true
+                error = null
+                groups = null
+                try {
+                    groups = repository.duplicateCandidates(selected.toPath(), filter)
+                    searchedRoot = selected
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    error = "Search failed: ${e.message}"
+                } finally {
+                    busy = false
+                }
+            }
+        }) { Text(if (busy) "Searching…" else "Find candidates") }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             if (groups == null) {
@@ -106,7 +145,7 @@ fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathAc
             }
             groups?.let { results ->
                 item { Text("${results.size} candidate groups under $searchedRoot. Search again after changing inventory or exclusions.") }
-                if (results.isEmpty()) item { Text("No candidate groups found in the stored inventory.") }
+                if (results.isEmpty()) item { Text("No candidate groups match these filters in the stored inventory.") }
                 results.forEach { group ->
                     item {
                         HorizontalDivider()

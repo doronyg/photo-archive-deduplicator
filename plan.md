@@ -175,6 +175,15 @@ Start with a desktop JVM scanner. Keep its interface independent of the later du
 
 Group files by filename and size.
 
+The Duplicates tab supports All, Images, Videos, and Documents categories based on
+case-insensitive filename extensions. An optional case-insensitive whole-filename
+wildcard is combined with the category: `*` matches any text, `?` matches one
+character, and all other characters (including `.`) are literal. For example,
+`IMG*.jpg` matches `img_123.JPG`. A blank wildcard does not restrict results.
+Filters affect only candidate searches in the stored inventory, not scanning,
+exclusions, or the exact case-sensitive name-and-size grouping rule. Searches and
+filtering run in the repository's database lane, never on the UI thread.
+
 For each group, report:
 - Number of candidates.
 - All candidate paths.
