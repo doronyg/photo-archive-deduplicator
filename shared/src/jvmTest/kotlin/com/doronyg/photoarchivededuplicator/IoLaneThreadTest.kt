@@ -1,9 +1,10 @@
 package com.doronyg.photoarchivededuplicator
 
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
@@ -19,11 +20,16 @@ import java.util.concurrent.TimeUnit
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import kotlin.test.assertFalse
 
 class IoLaneThreadTest {
+    private fun threadedTest(block: suspend CoroutineScope.() -> Unit) =
+        runBlocking { withTimeout(10_000, block) }
+
     @Test
-    fun jdbcTransactionRemainsOnItsOpeningThreadAndCheckpointWaits() = runBlocking {
-        val lane = IoLane.dedicated("inventory-db-test")
+    fun jdbcTransactionRemainsOnItsOpeningThreadAndCheckpointWaits() = threadedTest {
+        val executor = IoThread("inventory-db-test")
+        val lane = IoLane("inventory-db-test", executor.dispatcher, executor::close)
         // SQLite :memory: is connection-local: open/schema/query/close on the same lane.
         val driver = lane.run("open") { SuspendingQueryDriver(createInMemoryDriver()) }
         val repository = DirectoryRepository(createFilesDatabase(driver), databaseLane = lane)
@@ -34,9 +40,15 @@ class IoLaneThreadTest {
             driver.suspendNextChildQuery = true
             val listing = async { repository.recordListing(root, DirectoryListing(emptyList(), emptyList()), 1) }
             withTimeout(3000) { driver.entered.await() }
-            val checkpoint = async { repository.checkpointScanSession(ScanSessionRecord(root, 10)) }
-            delay(20)
-            assertTrue(!checkpoint.isCompleted)
+            val blockedStatementCount = withContext(executor.dispatcher) { driver.statements }
+            val checkpoint = async(start = CoroutineStart.UNDISPATCHED) {
+                repository.checkpointScanSession(ScanSessionRecord(root, 10))
+            }
+            // Drain dispatched work while the transaction is still suspended.
+            withContext(executor.dispatcher) {
+                assertEquals(blockedStatementCount, driver.statements)
+            }
+            assertFalse(checkpoint.isCompleted)
             driver.release.complete(Unit)
             withTimeout(3000) { listing.await(); checkpoint.await() }
             assertEquals(10L, repository.currentScanSession()!!.activeMillis)
@@ -47,26 +59,40 @@ class IoLaneThreadTest {
     }
 
     @Test
-    fun databaseThreadIsPinnedAcrossSuspension() = runBlocking {
-        val lane = IoLane.dedicated("inventory-db-test")
+    fun databaseThreadIsPinnedAcrossSuspension() = threadedTest {
+        val executor = IoThread("inventory-db-test")
+        val lane = IoLane("inventory-db-test", executor.dispatcher, executor::close)
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
         val thread = try {
-            lane.run("transaction") {
-                val before = Thread.currentThread()
-                delay(10)
-                assertEquals(before, Thread.currentThread())
-                assertTrue(before.name.contains("inventory-db-test"))
-                before
+            val transaction = async {
+                lane.run("transaction") {
+                    val before = Thread.currentThread()
+                    entered.complete(Unit)
+                    release.await()
+                    assertEquals(before, Thread.currentThread())
+                    assertTrue(before.name.contains("inventory-db-test"))
+                    before
+                }
             }
+            entered.await()
+            // This queued task can run only after the transaction suspends on the same thread.
+            withContext(executor.dispatcher) {}
+            assertFalse(transaction.isCompleted)
+            release.complete(Unit)
+            transaction.await()
         } finally {
+            release.complete(Unit)
             lane.close {}
         }
-        withTimeout(3000) {
-            while (thread.isAlive) delay(5)
+        withContext(Dispatchers.IO) {
+            thread.join(3000)
+            assertFalse(thread.isAlive)
         }
     }
 
     @Test
-    fun cancellationOfBlockingFilesystemCallCannotCloseLaneEarly() = runBlocking {
+    fun cancellationOfBlockingFilesystemCallCannotCloseLaneEarly() = threadedTest {
         val lane = IoLane.dedicated("inventory-filesystem-test")
         val database = IoLane.dedicated("inventory-db-test")
         val entered = CompletableDeferred<Unit>()
@@ -82,9 +108,8 @@ class IoLaneThreadTest {
             assertEquals(42, withTimeout(3000) { database.run("query") { 42 } })
             assertEquals("responsive", async(Dispatchers.Default) { "responsive" }.await())
             listing.cancel()
-            val close = async { lane.close {} }
-            delay(20)
-            assertTrue(!close.isCompleted)
+            val close = async(start = CoroutineStart.UNDISPATCHED) { lane.close {} }
+            assertFalse(close.isCompleted)
             release.countDown()
             close.await()
         } finally {
@@ -96,7 +121,7 @@ class IoLaneThreadTest {
     }
 
     @Test
-    fun blockingDatabaseDoesNotBlockFilesystemOrUi() = runBlocking {
+    fun blockingDatabaseDoesNotBlockFilesystemOrUi() = threadedTest {
         val database = IoLane.dedicated("inventory-db-test")
         val filesystem = IoLane.dedicated("inventory-filesystem-test")
         val entered = CompletableDeferred<Unit>()

@@ -1,6 +1,8 @@
 package com.doronyg.photoarchivededuplicator
 
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.async
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
@@ -8,8 +10,70 @@ import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.seconds
 
 class DiagnosticsTest {
+    @Test
+    fun failingFileWriterCannotDelayHealthyConsoleAndRecoversAfterBackoff() = runTest(timeout = 10.seconds) {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val console = mutableListOf<String>()
+        val persisted = mutableListOf<String>()
+        var attempts = 0
+        var closes = 0
+        val logger = DiagnosticLogger(dispatcher, sink = { console += it.message }, sinkDispatcher = dispatcher,
+            fileSink = object : DiagnosticFileSink {
+                override fun write(entry: LogEntry) {
+                    if (++attempts == 1) error("disk temporarily unavailable")
+                    persisted += entry.message
+                }
+                override fun close() { closes++ }
+            })
+        try {
+            logger.i("Test", "failed write")
+            logger.i("Test", "next write")
+            advanceTimeBy(401)
+            runCurrent()
+            assertEquals(listOf("failed write", "next write"), console)
+            assertEquals(emptyList(), persisted)
+            assertEquals(1, logger.state.value.fileFailures)
+            logger.shutdown()
+            assertEquals(listOf("next write"), persisted)
+            assertEquals(1, closes)
+            assertEquals(0, logger.state.value.sinkFailures)
+        } finally {
+            logger.close()
+        }
+    }
+
+    @Test
+    fun concurrentShutdownsDrainAcceptedEntriesAndCloseFileOnce() = runTest(timeout = 10.seconds) {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val written = mutableListOf<String>()
+        val console = mutableListOf<String>()
+        var closes = 0
+        val logger = DiagnosticLogger(dispatcher, sink = { console += it.message }, sinkDispatcher = dispatcher,
+            fileSink = object : DiagnosticFileSink {
+                override fun write(entry: LogEntry) { written += entry.message }
+                override fun close() { closes++ }
+            })
+        try {
+            logger.i("Lifecycle", "last accepted entry")
+            val first = async(start = CoroutineStart.UNDISPATCHED) { logger.shutdown() }
+            val second = async(start = CoroutineStart.UNDISPATCHED) { logger.shutdown() }
+            runCurrent()
+            assertTrue(!first.isCompleted && !second.isCompleted)
+            first.await()
+            second.await()
+            logger.i("Lifecycle", "after shutdown")
+            runCurrent()
+            assertEquals(listOf("last accepted entry"), written)
+            assertEquals(written, console)
+            assertEquals(1, closes)
+        } finally {
+            logger.close()
+        }
+    }
+
     @Test
     fun boundedQueueBatchesAndCountsOverflow() = runTest {
         val logger = DiagnosticLogger(StandardTestDispatcher(testScheduler), capacity = 2, retained = 2, sink = {})
