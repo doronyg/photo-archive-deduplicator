@@ -17,17 +17,18 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.doronyg.photoarchivededuplicator.scan.DirectoryRepository
 import com.doronyg.photoarchivededuplicator.PathActions
+import com.doronyg.photoarchivededuplicator.UiPreferences
 import com.doronyg.photoarchivededuplicator.scan.DuplicateCandidateGroup
 import com.doronyg.photoarchivededuplicator.scan.DuplicateCandidateFilter
 import com.doronyg.photoarchivededuplicator.scan.DuplicateFileType
@@ -37,10 +38,11 @@ import okio.Path
 import okio.Path.Companion.toPath
 
 @Composable
-fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathActions: PathActions, modifier: Modifier = Modifier) {
-    var rootText by rememberSaveable { mutableStateOf((target as? ScanTarget.Fixed)?.root?.toString().orEmpty()) }
-    var fileType by rememberSaveable { mutableStateOf(DuplicateFileType.ALL) }
-    var filenamePattern by rememberSaveable { mutableStateOf("") }
+fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathActions: PathActions, preferences: UiPreferences, modifier: Modifier = Modifier) {
+    val choices by preferences.state.collectAsState()
+    val rootText = choices.duplicateRoot
+    val fileType = choices.duplicateFileType
+    val filenamePattern = choices.duplicateFilenamePattern
     var roots by remember { mutableStateOf(emptyList<Path>()) }
     var groups by remember { mutableStateOf<List<DuplicateCandidateGroup>?>(null) }
     var searchedRoot by remember { mutableStateOf("") }
@@ -51,7 +53,12 @@ fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathAc
     LaunchedEffect(repository) {
         try {
             roots = repository.childOverviews(null).map { it.directory.path }
-            if (rootText.isBlank()) rootText = roots.firstOrNull()?.toString().orEmpty()
+            val defaultRoot = (target as? ScanTarget.Fixed)?.root ?: roots.firstOrNull()
+            if (defaultRoot != null) {
+                preferences.update {
+                    if (it.duplicateRoot.isBlank()) it.copy(duplicateRoot = defaultRoot.toString()) else it
+                }
+            }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -63,7 +70,7 @@ fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathAc
         Text("Duplicate candidates", style = MaterialTheme.typography.titleLarge)
         OutlinedTextField(
             value = rootText,
-            onValueChange = { rootText = it; groups = null },
+            onValueChange = { value -> preferences.update { it.copy(duplicateRoot = value) }; groups = null },
             label = { Text("Search under absolute folder path") },
             enabled = !busy,
             singleLine = true,
@@ -73,7 +80,10 @@ fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathAc
             OutlinedButton(enabled = !busy, onClick = {
                 scope.launch {
                     try {
-                        target.pickDirectory()?.let { rootText = it; groups = null }
+                        target.pickDirectory()?.let { path ->
+                            preferences.update { it.copy(duplicateRoot = path) }
+                            groups = null
+                        }
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
@@ -89,7 +99,7 @@ fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathAc
             DuplicateFileType.entries.forEach { type ->
                 FilterChip(
                     selected = fileType == type,
-                    onClick = { fileType = type; groups = null },
+                    onClick = { preferences.update { it.copy(duplicateFileType = type) }; groups = null },
                     enabled = !busy,
                     label = {
                         Text(when (type) {
@@ -104,7 +114,7 @@ fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathAc
         }
         OutlinedTextField(
             value = filenamePattern,
-            onValueChange = { filenamePattern = it; groups = null },
+            onValueChange = { value -> preferences.update { it.copy(duplicateFilenamePattern = value) }; groups = null },
             label = { Text("Filename wildcard (optional)") },
             supportingText = {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -140,7 +150,9 @@ fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathAc
             if (groups == null) {
                 item { Text("Previously scanned roots (select or enter any subtree):") }
                 items(roots) { root ->
-                    TextButton(enabled = !busy, onClick = { rootText = root.toString() }) { Text(root.toString()) }
+                    TextButton(enabled = !busy, onClick = {
+                        preferences.update { it.copy(duplicateRoot = root.toString()) }
+                    }) { Text(root.toString()) }
                 }
             }
             groups?.let { results ->

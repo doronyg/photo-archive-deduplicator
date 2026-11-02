@@ -1,0 +1,13 @@
+CREATE TABLE uiPreference (
+    key TEXT NOT NULL PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
+selectAll:
+SELECT key, value FROM uiPreference;
+
+clear:
+DELETE FROM uiPreference;
+
+put:
+INSERT INTO uiPreference(key, value) VALUES (:key, :value);

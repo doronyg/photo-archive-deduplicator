@@ -30,6 +30,7 @@ the header comment, to see that a file lives under `build/`.
 | `db/ScanFileQueries.kt` | `ScanFile.sq` (named queries) | One function per query, e.g. `updateFile` |
 | `db/DirectoryExclusion.kt`, `db/DirectoryExclusionQueries.kt` | `DirectoryExclusion.sq` | User-entered excluded roots and optional reasons, independent of inventory |
 | `db/ScanSession.kt`, `db/ScanSessionQueries.kt` | `ScanSession.sq` | Active elapsed time and last-selected logical scan root |
+| `db/UiPreference.kt`, `db/UiPreferenceQueries.kt` | `UiPreference.sq` | Local UI choices stored as key/value entries |
 | `db/FilesDatabase.kt` | All `.sq` files + Gradle config | Database interface, `Schema`, factory |
 | `db/shared/FilesDatabaseImpl.kt` | All `.sq` files + Gradle config | Implementation, `CREATE TABLE`/`INDEX` statements |
 
@@ -103,9 +104,10 @@ files get a null creation time until their next listing. Desktop's JDBC schema c
 upgrades `PRAGMA user_version`; Android's SQLDelight SQLiteOpenHelper invokes the same
 generated migration. Do not delete the database to upgrade it.
 
-Already-installed version 2 databases are left untouched: this correction adds no version
-bump and does not rerun migration 1 on them. Their earlier column order is supported by
-SQLDelight's explicit named-column queries. An unreleased intermediate version 1 containing
+Migration 1 is not rerun on already-installed version 2 databases. Their earlier column
+order is supported by SQLDelight's explicit named-column queries. Version 3 adds only the
+`uiPreference` table through `com/doronyg/photoarchivededuplicator/db/2.sqm`, preserving
+inventory, exclusions, and scan sessions. An unreleased intermediate version 1 containing
 some of the new columns/tables is not the historical migration target; do not infer its
 schema by dropping the session table from today's schema.
 
@@ -127,6 +129,20 @@ survive, and exercise the new exclusions, creation-time, duplicate, and session 
 They also reopen the previously installed v2 layout and verify its inventory, exclusions,
 creation times, and session are unchanged. Android host tests run these tests through JDBC;
 they do not emulate Android SQLiteOpenHelper.
+
+## Remembered UI choices
+
+The selected tab, scan folder, browse navigation stack, duplicate-search folder and
+filters, and log text/level/follow filters are restored before the container is returned.
+Enum values are stored by name, not ordinal. Browse paths occupy separate indexed
+entries so filenames containing newlines or other delimiters round-trip unchanged.
+
+An app-lifetime writer conflates pending edits and saves complete snapshots in a single
+database-lane transaction. UI callbacks only update in-memory state and enqueue work.
+Normal shutdown drains accepted edits before closing the driver; a force-kill can lose
+queued or in-flight edits. Save failures are logged and surfaced in the UI; a later
+changed edit attempts to save the complete current state again.
+Restoring settings does not start scans, rerun duplicate searches, or open files.
 
 ## Resuming and elapsed time
 

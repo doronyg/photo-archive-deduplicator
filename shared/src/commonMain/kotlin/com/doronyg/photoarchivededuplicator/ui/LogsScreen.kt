@@ -14,6 +14,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.doronyg.photoarchivededuplicator.Diagnostics
 import com.doronyg.photoarchivededuplicator.PathActions
+import com.doronyg.photoarchivededuplicator.UiChoices
+import com.doronyg.photoarchivededuplicator.UiPreferences
 import com.doronyg.photoarchivededuplicator.diagnosticLogDirectory
 import com.doronyg.photoarchivededuplicator.LogLevel
 import com.doronyg.photoarchivededuplicator.LogEntry
@@ -43,11 +45,17 @@ internal suspend fun filterLogEntries(
 }
 
 @Composable
-fun LogsScreen(pathActions: PathActions, modifier: Modifier = Modifier) {
+fun LogsScreen(pathActions: PathActions, modifier: Modifier = Modifier, preferences: UiPreferences? = null) {
     val snapshot by Diagnostics.logger.state.collectAsState()
-    var filter by remember { mutableStateOf("") }
-    var minimum by remember { mutableStateOf(LogLevel.D) }
-    var follow by remember { mutableStateOf(true) }
+    var transientChoices by remember { mutableStateOf(UiChoices()) }
+    val choices = preferences?.state?.collectAsState()?.value ?: transientChoices
+    val updateChoices: ((UiChoices) -> UiChoices) -> Unit = { transform ->
+        if (preferences != null) preferences.update(transform)
+        else transientChoices = transform(transientChoices)
+    }
+    val filter = choices.logFilter
+    val minimum = choices.logMinimum
+    val follow = choices.logFollow
     val visible by produceState(emptyList<LogEntry>(), snapshot.entries, filter, minimum) {
         value = filterLogEntries(snapshot.entries, filter, minimum)
     }
@@ -70,11 +78,11 @@ fun LogsScreen(pathActions: PathActions, modifier: Modifier = Modifier) {
         logDirectory.exceptionOrNull()?.let {
             Text("Could not resolve log folder: ${it.message}", color = MaterialTheme.colorScheme.error)
         }
-        OutlinedTextField(filter, { filter = it }, label = { Text("Filter tag, message or thread") },
+        OutlinedTextField(filter, { value -> updateChoices { it.copy(logFilter = value) } }, label = { Text("Filter tag, message or thread") },
             singleLine = true, modifier = Modifier.fillMaxWidth())
         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             LogLevel.entries.forEach { level ->
-                FilterChip(selected = minimum == level, onClick = { minimum = level }, label = { Text("${level.name}+") })
+                FilterChip(selected = minimum == level, onClick = { updateChoices { it.copy(logMinimum = level) } }, label = { Text("${level.name}+") })
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -86,7 +94,7 @@ fun LogsScreen(pathActions: PathActions, modifier: Modifier = Modifier) {
                     clipboard.setText(AnnotatedString(text))
                 }
             }) { Text("Copy all visible") }
-            TextButton(onClick = { follow = !follow }) { Text(if (follow) "Pause scroll" else "Follow") }
+            TextButton(onClick = { updateChoices { it.copy(logFollow = !it.logFollow) } }) { Text(if (follow) "Pause scroll" else "Follow") }
         }
         SelectionContainer(Modifier.weight(1f)) {
             LazyColumn(state = list, modifier = Modifier.fillMaxSize()) {

@@ -27,6 +27,7 @@ class AppContainer internal constructor(
     internal val filesystemLane: IoLane,
     workerDispatcher: CoroutineDispatcher = Dispatchers.Default,
     createScanner: (DirectoryRepository, IoLane) -> InventoryScanner,
+    initialUiChoices: UiChoices = UiChoices(),
 ) {
     /** Lives as long as the app; scans run here, not in a composition scope. */
     private val appJob = SupervisorJob()
@@ -37,12 +38,14 @@ class AppContainer internal constructor(
     val repository = DirectoryRepository(createFilesDatabase(driver), databaseLane = databaseLane)
     private val scanner: InventoryScanner = createScanner(repository, filesystemLane)
     val scanController = ScanController(scanner, appScope, repository)
+    val uiPreferences = UiPreferences(initialUiChoices, appScope, repository::saveUiChoices)
 
     /** Desktop awaits this after its UI exits, before the process can terminate. */
     suspend fun shutdown() = withContext(NonCancellable) {
         shutdownLock.withLock {
             if (closed) return@withLock
             scanController.pause()
+            uiPreferences.shutdown()
             appJob.cancelAndJoin()
             try {
                 // Native path actions are not children of appJob. Drain the filesystem
@@ -75,7 +78,9 @@ internal suspend fun createAppContainer(
         return databaseLane.run("initialize driver/schema") {
             val driver = Diagnostics.logger.blockingOperation(LogTags.DATABASE, "open driver/schema/migrations") { openDriver() }
             try {
-                AppContainer(driver, databaseLane, filesystemLane, workerDispatcher, createScanner).also { created = it }
+                val choices = loadUiChoicesInLane(createFilesDatabase(driver))
+                AppContainer(driver, databaseLane, filesystemLane, workerDispatcher, createScanner, choices)
+                    .also { created = it }
             } catch (e: Throwable) {
                 Diagnostics.logger.blockingOperation(LogTags.DATABASE, "failed initialization driver.close") { driver.close() }
                 throw e

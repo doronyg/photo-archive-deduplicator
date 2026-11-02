@@ -9,6 +9,9 @@ import app.cash.sqldelight.async.coroutines.awaitAsOneOrNull
 import app.cash.sqldelight.db.SqlDriver
 import com.doronyg.photoarchivededuplicator.Diagnostics
 import com.doronyg.photoarchivededuplicator.IoLane
+import com.doronyg.photoarchivededuplicator.UiChoices
+import com.doronyg.photoarchivededuplicator.encodeUiChoices
+import com.doronyg.photoarchivededuplicator.loadUiChoicesInLane
 import com.doronyg.photoarchivededuplicator.db.FilesDatabase
 import com.doronyg.photoarchivededuplicator.db.ScanDirectory
 import com.doronyg.photoarchivededuplicator.db.ScanFile
@@ -93,6 +96,17 @@ class DirectoryRepository internal constructor(
     private val files = database.scanFileQueries
     private val excluded = database.directoryExclusionQueries
     private val scanSession = Mutex()
+
+    internal suspend fun loadUiChoices(): UiChoices = io("load UI choices") { loadUiChoicesInLane(database) }
+
+    internal suspend fun saveUiChoices(choices: UiChoices) = io("save UI choices transaction") {
+        database.transaction {
+            database.uiPreferenceQueries.clear()
+            encodeUiChoices(choices).forEach { (key, value) ->
+                database.uiPreferenceQueries.put(key, value)
+            }
+        }
+    }
 
     internal suspend fun <T> scanning(block: suspend () -> T): T =
         Diagnostics.logger.operation(LogTags.DATABASE, "scan mutex wait/hold") { scanSession.withLock { block() } }

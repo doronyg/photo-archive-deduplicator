@@ -22,6 +22,7 @@ import androidx.compose.ui.unit.dp
 import com.doronyg.photoarchivededuplicator.scan.ScanController
 import com.doronyg.photoarchivededuplicator.scan.ScanProgress
 import com.doronyg.photoarchivededuplicator.scan.ScanState
+import com.doronyg.photoarchivededuplicator.UiPreferences
 import okio.Path
 import okio.Path.Companion.toPath
 import kotlinx.coroutines.Dispatchers
@@ -45,14 +46,14 @@ sealed interface ScanTarget {
 }
 
 @Composable
-fun ScanScreen(controller: ScanController, target: ScanTarget, modifier: Modifier = Modifier) {
+fun ScanScreen(controller: ScanController, target: ScanTarget, preferences: UiPreferences, modifier: Modifier = Modifier) {
     val state by controller.state.collectAsState()
     val running = state is ScanState.Running
     val scope = rememberCoroutineScope()
 
     Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
         when (target) {
-            is ScanTarget.ChosenFolder -> ChosenFolderControls(controller, target, running)
+            is ScanTarget.ChosenFolder -> ChosenFolderControls(controller, target, running, preferences)
             is ScanTarget.Fixed -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = {
                     scope.launch(Dispatchers.Main) {
@@ -74,15 +75,16 @@ fun ScanScreen(controller: ScanController, target: ScanTarget, modifier: Modifie
 }
 
 @Composable
-private fun ChosenFolderControls(controller: ScanController, target: ScanTarget.ChosenFolder, running: Boolean) {
-    var rootText by rememberSaveable { mutableStateOf("") }
+private fun ChosenFolderControls(controller: ScanController, target: ScanTarget.ChosenFolder, running: Boolean, preferences: UiPreferences) {
+    val choices by preferences.state.collectAsState()
+    val rootText = choices.scanRoot
     var pickerError by rememberSaveable { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedTextField(
                 value = rootText,
-                onValueChange = { rootText = it },
+                onValueChange = { value -> preferences.update { it.copy(scanRoot = value) } },
                 label = { Text("Folder to scan") },
                 singleLine = true,
                 enabled = !running,
@@ -92,7 +94,7 @@ private fun ChosenFolderControls(controller: ScanController, target: ScanTarget.
                 scope.launch(Dispatchers.Main) {
                     pickerError = null
                     try {
-                        target.pickDirectory()?.let { rootText = it }
+                        target.pickDirectory()?.let { path -> preferences.update { it.copy(scanRoot = path) } }
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {

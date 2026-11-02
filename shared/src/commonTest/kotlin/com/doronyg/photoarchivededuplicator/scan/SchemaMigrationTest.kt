@@ -1,6 +1,7 @@
 package com.doronyg.photoarchivededuplicator.scan
 
 import com.doronyg.photoarchivededuplicator.db.FilesDatabase
+import com.doronyg.photoarchivededuplicator.UiChoices
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
@@ -34,7 +35,7 @@ class SchemaMigrationTest {
                     INSERT INTO scanFile VALUES
                     ('/archive/existing.jpg', '/archive', 'existing.jpg', 'jpg', 42, 456, 789)
                 """.trimIndent(), 0).await()
-                assertEquals(2L, FilesDatabase.Schema.version)
+                assertEquals(3L, FilesDatabase.Schema.version)
                 guarded.execute(null, "PRAGMA user_version = 1", 0).await()
             }
             // Uses the same schema constructor as production desktop. Android's driver
@@ -52,6 +53,7 @@ class SchemaMigrationTest {
                 reopened.addExclusion(root / "private", "Keep out")
                 assertEquals(listOf(DirectoryExclusion(root / "private", "Keep out")), reopened.exclusions())
                 assertNull(reopened.currentScanSession())
+                assertEquals(UiChoices(), reopened.loadUiChoices())
                 assertEquals(root, reopened.resumableScanSession().root)
                 assertEquals(DirectoryStatus.COMPLETED, reopened.directory(root)!!.status)
                 reopened.resetInterrupted(root)
@@ -73,7 +75,7 @@ class SchemaMigrationTest {
     }
 
     @Test
-    fun reopeningAlreadyInstalledVersionTwoDoesNotMigrateOrChangeInventory() = runTest {
+    fun migratingInstalledVersionTwoAddsPreferencesWithoutChangingInventory() = runTest {
         val driver = createMigrationTestDriver(migrate = false)
         val io = TrackingIoDispatcher(StandardTestDispatcher(testScheduler))
         val guarded = IoGuardedDriver(driver, io)
@@ -81,7 +83,7 @@ class SchemaMigrationTest {
         try {
             withContext(io) {
                 // Installed v2 placed createdAt before lastScanned. Named queries must
-                // work with that layout too; there is no version bump or v2 rewrite.
+                // work with that layout too; v3 must add preferences without rewriting it.
                 for (statement in historicalVersionOneSchema) {
                     guarded.execute(null, statement.replace(
                         "lastScanned INTEGER NOT NULL", "createdAt INTEGER, lastScanned INTEGER NOT NULL",
@@ -117,6 +119,10 @@ class SchemaMigrationTest {
                 assertEquals(exclusions, reopened.exclusions())
                 assertEquals(session, reopened.currentScanSession())
                 assertTrue(reopened.currentScanSession()!!.finished)
+                assertEquals(UiChoices(), reopened.loadUiChoices())
+                val choices = UiChoices(scanRoot = "/saved")
+                reopened.saveUiChoices(choices)
+                assertEquals(choices, reopened.loadUiChoices())
             } finally {
                 reopenedDriver.close()
             }

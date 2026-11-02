@@ -14,6 +14,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -27,11 +28,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.doronyg.photoarchivededuplicator.scan.DirectoryOverview
 import com.doronyg.photoarchivededuplicator.PathActions
+import com.doronyg.photoarchivededuplicator.UiPreferences
 import com.doronyg.photoarchivededuplicator.scan.DirectoryRepository
 import com.doronyg.photoarchivededuplicator.scan.DirectoryStatus
 import com.doronyg.photoarchivededuplicator.scan.FileRecord
 import com.doronyg.photoarchivededuplicator.scan.InventorySummary
 import okio.Path
+import okio.Path.Companion.toPath
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
@@ -43,9 +46,10 @@ private data class BrowseContent(
 
 /** Read-only view of the inventory: drill down from the scan roots. */
 @Composable
-fun BrowseScreen(repository: DirectoryRepository, pathActions: PathActions, modifier: Modifier = Modifier, scanning: Boolean = false) {
+fun BrowseScreen(repository: DirectoryRepository, pathActions: PathActions, preferences: UiPreferences, modifier: Modifier = Modifier, scanning: Boolean = false) {
     // Empty stack = list of scan roots
-    var stack by remember { mutableStateOf(listOf<Path>()) }
+    val choices by preferences.state.collectAsState()
+    val stack = remember(choices.browseStack) { choices.browseStack.map { it.toPath() } }
     var refreshCount by remember { mutableIntStateOf(0) }
     var content by remember { mutableStateOf<BrowseContent?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -76,7 +80,7 @@ fun BrowseScreen(repository: DirectoryRepository, pathActions: PathActions, modi
             content?.summary?.let { SummaryLine(it, Modifier.weight(1f)) }
             OutlinedButton(onClick = { refreshCount++ }) { Text("Refresh") }
         }
-        Breadcrumbs(stack, onNavigate = { depth -> stack = stack.take(depth) })
+        Breadcrumbs(stack, onNavigate = { depth -> preferences.update { it.copy(browseStack = it.browseStack.take(depth)) } })
         current?.let { folder ->
             PathLink("Open folder in file manager: $folder", action = { pathActions.openFolder(folder) })
             if (excluded) {
@@ -109,7 +113,9 @@ fun BrowseScreen(repository: DirectoryRepository, pathActions: PathActions, modi
                 }
                 items(browse.directories, key = { it.directory.path.toString() }) { overview ->
                     Column {
-                        DirectoryRow(overview, onOpen = { stack = stack + overview.directory.path })
+                        DirectoryRow(overview, onOpen = {
+                            preferences.update { it.copy(browseStack = it.browseStack + overview.directory.path.toString()) }
+                        })
                         PathLink("Open in file manager", action = { pathActions.openFolder(overview.directory.path) })
                     }
                 }

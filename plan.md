@@ -102,6 +102,18 @@ Start with the Android application target and a minimal interface. A polished de
 
 A CLI remains a good option for the desktop bulk-scanning workflow.
 
+UI choices are stored locally with the inventory on desktop and Android: the
+selected tab, scan folder, browse navigation stack, duplicate-search folder and
+filters, and log text/level/follow filters. Restoring choices never starts a scan
+or opens a file. Search results, running/busy state, and unsaved exclusion edits
+are not preferences.
+
+Preference updates change in-memory state immediately and queue serialized,
+transactional database writes off the UI thread. Normal shutdown drains pending
+writes before closing the database. A force-kill can lose an in-flight or queued
+change; saving failures are logged and shown in the UI rather than silently
+discarded.
+
 ## 4. Test-driven development approach
 
 Use a pragmatic TDD workflow:

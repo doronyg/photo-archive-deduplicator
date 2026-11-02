@@ -14,23 +14,20 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.doronyg.photoarchivededuplicator.AppContainer
 import com.doronyg.photoarchivededuplicator.PathActions
 import com.doronyg.photoarchivededuplicator.Diagnostics
+import com.doronyg.photoarchivededuplicator.UiTab
 import com.doronyg.photoarchivededuplicator.scan.ScanState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-
-private enum class InventoryTab(val title: String) { SCAN("Scan"), BROWSE("Browse"), DUPLICATES("Duplicates"), EXCLUSIONS("Exclusions"), LOGS("Logs") }
 
 /** Loading is owned by the platform process, not cancelled when this composition disappears. */
 @Composable
@@ -69,28 +66,33 @@ fun InventoryApp(loadContainer: suspend () -> AppContainer, scanTarget: ScanTarg
  */
 @Composable
 fun InventoryApp(container: AppContainer, scanTarget: ScanTarget, pathActions: PathActions) {
-    var selectedTab by rememberSaveable { mutableIntStateOf(InventoryTab.SCAN.ordinal) }
+    val choices by container.uiPreferences.state.collectAsState()
+    val preferencesError by container.uiPreferences.error.collectAsState()
+    val selectedTab = choices.selectedTab
     val scanState by container.scanController.state.collectAsState()
     MaterialTheme {
         Surface(modifier = Modifier.fillMaxSize()) {
             // safeDrawingPadding keeps content clear of Android system bars; no-op on desktop
             Column(Modifier.safeDrawingPadding()) {
-                PrimaryTabRow(selectedTabIndex = selectedTab) {
-                    InventoryTab.entries.forEach { tab ->
+                preferencesError?.let {
+                    Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(8.dp))
+                }
+                PrimaryTabRow(selectedTabIndex = selectedTab.ordinal) {
+                    UiTab.entries.forEach { tab ->
                         Tab(
-                            selected = selectedTab == tab.ordinal,
-                            onClick = { selectedTab = tab.ordinal },
+                            selected = selectedTab == tab,
+                            onClick = { container.uiPreferences.update { it.copy(selectedTab = tab) } },
                             text = { Text(tab.title) },
                         )
                     }
                 }
                 val content = Modifier.fillMaxSize().padding(16.dp)
-                when (InventoryTab.entries[selectedTab]) {
-                    InventoryTab.SCAN -> ScanScreen(container.scanController, scanTarget, content)
-                    InventoryTab.BROWSE -> BrowseScreen(container.repository, pathActions, content, scanState is ScanState.Running)
-                    InventoryTab.DUPLICATES -> DuplicatesScreen(container.repository, scanTarget, pathActions, content)
-                    InventoryTab.EXCLUSIONS -> ExclusionsScreen(container.repository, scanState is ScanState.Running, content)
-                    InventoryTab.LOGS -> LogsScreen(pathActions, content)
+                when (selectedTab) {
+                    UiTab.SCAN -> ScanScreen(container.scanController, scanTarget, container.uiPreferences, content)
+                    UiTab.BROWSE -> BrowseScreen(container.repository, pathActions, container.uiPreferences, content, scanState is ScanState.Running)
+                    UiTab.DUPLICATES -> DuplicatesScreen(container.repository, scanTarget, pathActions, container.uiPreferences, content)
+                    UiTab.EXCLUSIONS -> ExclusionsScreen(container.repository, scanState is ScanState.Running, content)
+                    UiTab.LOGS -> LogsScreen(pathActions, content, container.uiPreferences)
                 }
             }
         }
