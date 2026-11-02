@@ -1,0 +1,24 @@
+CREATE TABLE fileScore (
+    id INTEGER NOT NULL PRIMARY KEY,
+    filePath TEXT NOT NULL,
+    directoryPath TEXT NOT NULL,
+    inputSizeBytes INTEGER NOT NULL,
+    inputModifiedAt INTEGER,
+    inputCreatedAt INTEGER,
+    scoreType TEXT NOT NULL,
+    algorithmId TEXT NOT NULL,
+    algorithmVersion TEXT NOT NULL,
+    configurationId TEXT NOT NULL,
+    value REAL NOT NULL,
+    createdAt INTEGER NOT NULL,
+    UNIQUE(filePath, scoreType, algorithmId, algorithmVersion, configurationId)
+);
+
+CREATE TABLE fileScoreFactor (
+    scoreId INTEGER NOT NULL REFERENCES fileScore(id),
+    ordinal INTEGER NOT NULL,
+    factorKey TEXT NOT NULL,
+    contribution REAL NOT NULL,
+    explanation TEXT NOT NULL,
+    PRIMARY KEY(scoreId, ordinal)
+);

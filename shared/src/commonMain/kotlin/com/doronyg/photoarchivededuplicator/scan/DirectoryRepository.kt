@@ -15,6 +15,10 @@ import com.doronyg.photoarchivededuplicator.loadUiChoicesInLane
 import com.doronyg.photoarchivededuplicator.db.FilesDatabase
 import com.doronyg.photoarchivededuplicator.db.ScanDirectory
 import com.doronyg.photoarchivededuplicator.db.ScanFile
+import com.doronyg.photoarchivededuplicator.retention.FileScore
+import com.doronyg.photoarchivededuplicator.retention.FileScoreInput
+import com.doronyg.photoarchivededuplicator.retention.ScoreFactor
+import com.doronyg.photoarchivededuplicator.retention.ScoreIdentity
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
@@ -346,6 +350,123 @@ class DirectoryRepository internal constructor(
 
     suspend fun allFiles(): List<FileRecord> = io("allFiles") {
         files.selectAll().awaitAsList().map { it.toRecord() }
+    }
+
+    suspend fun fileScores(
+        paths: List<Path>,
+        identity: ScoreIdentity? = null,
+        scoreType: String? = null,
+        algorithmVersion: String? = null,
+        currentOnly: Boolean = false,
+    ): List<FileScore> =
+        io("fileScores count=${paths.size}") {
+            require(identity == null || scoreType == null || identity.type == scoreType) {
+                "Score type contradicts the supplied identity."
+            }
+            require(identity == null || algorithmVersion == null || identity.algorithmVersion == algorithmVersion) {
+                "Algorithm version contradicts the supplied identity."
+            }
+            val queries = database.fileScoreQueries
+            val rows = paths.map { it.toString() }.distinct().chunked(400).flatMap { chunk ->
+                if (identity == null) {
+                    queries.selectForPaths(paths = chunk, scoreType = scoreType, algorithmVersion = algorithmVersion,
+                        currentOnly = if (currentOnly) 1L else 0L)
+                        .awaitAsList()
+                } else {
+                    queries.selectForPathsAndIdentity(
+                        paths = chunk,
+                        scoreType = identity.type,
+                        algorithmId = identity.algorithmId,
+                        algorithmVersion = identity.algorithmVersion,
+                        configurationId = identity.configurationId,
+                        currentOnly = if (currentOnly) 1L else 0L,
+                    ).awaitAsList()
+                }
+            }
+            val factors = rows.map { it.id }.chunked(400).flatMap {
+                database.fileScoreFactorQueries.selectForScores(it).awaitAsList()
+            }.groupBy { it.scoreId }
+            rows.map { row ->
+                FileScore(
+                    input = FileScoreInput(row.filePath.toPath(), row.directoryPath.toPath(),
+                        row.inputSizeBytes, row.inputModifiedAt, row.inputCreatedAt),
+                    identity = ScoreIdentity(row.scoreType, row.algorithmId, row.algorithmVersion, row.configurationId),
+                    value = row.value_,
+                    factors = factors[row.id].orEmpty().map {
+                        ScoreFactor(it.factorKey, it.contribution, it.explanation)
+                    },
+                    createdAt = row.createdAt,
+                )
+            }
+        }
+
+    suspend fun saveFileScore(score: FileScore): Boolean =
+        score.input.path in saveFileScores(listOf(score))
+
+    suspend fun saveFileScores(scores: List<FileScore>): Set<Path> = io("saveFileScores transaction count=${scores.size}") {
+        scores.forEach { score ->
+            require(score.value.isFinite()) { "File score must be finite." }
+            require(score.factors.all { it.contribution.isFinite() }) { "Score contributions must be finite." }
+        }
+        if (scores.isEmpty()) return@io emptySet()
+        database.transactionWithResult {
+            buildSet {
+                for (score in scores) {
+                    if (saveFileScoreInLane(score)) add(score.input.path)
+                }
+            }
+        }
+    }
+
+    private suspend fun saveFileScoreInLane(score: FileScore): Boolean {
+        val input = score.input
+        val current = files.selectByPath(input.path.toString()).awaitAsOneOrNull()?.toRecord()
+        if (current == null || FileScoreInput.from(current) != input) {
+            Diagnostics.logger.w(LogTags.DATABASE, "Discarding stale file score: ${input.path}")
+            return false
+        }
+        val queries = database.fileScoreQueries
+        val identity = score.identity
+        queries.insertIfAbsent(
+            filePath = input.path.toString(),
+            directoryPath = input.directoryPath.toString(),
+            inputSizeBytes = input.sizeBytes,
+            inputModifiedAt = input.modifiedAt,
+            inputCreatedAt = input.createdAt,
+            scoreType = identity.type,
+            algorithmId = identity.algorithmId,
+            algorithmVersion = identity.algorithmVersion,
+            configurationId = identity.configurationId,
+            value = score.value,
+            createdAt = score.createdAt,
+        )
+        val id = queries.selectIdentityId(
+            filePath = input.path.toString(),
+            scoreType = identity.type,
+            algorithmId = identity.algorithmId,
+            algorithmVersion = identity.algorithmVersion,
+            configurationId = identity.configurationId,
+        ).awaitAsOne()
+        queries.updateScore(
+            directoryPath = input.directoryPath.toString(),
+            inputSizeBytes = input.sizeBytes,
+            inputModifiedAt = input.modifiedAt,
+            inputCreatedAt = input.createdAt,
+            value = score.value,
+            createdAt = score.createdAt,
+            id = id,
+        )
+        database.fileScoreFactorQueries.deleteForScore(id)
+        score.factors.forEachIndexed { index, factor ->
+            database.fileScoreFactorQueries.insertFactor(
+                scoreId = id,
+                ordinal = index.toLong(),
+                factorKey = factor.key,
+                contribution = factor.contribution,
+                explanation = factor.explanation,
+            )
+        }
+        return true
     }
 
     private suspend fun <T> io(name: String, block: suspend () -> T): T =

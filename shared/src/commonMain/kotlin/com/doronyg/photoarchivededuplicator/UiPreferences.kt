@@ -3,6 +3,10 @@ package com.doronyg.photoarchivededuplicator
 import app.cash.sqldelight.async.coroutines.awaitAsList
 import com.doronyg.photoarchivededuplicator.db.FilesDatabase
 import com.doronyg.photoarchivededuplicator.scan.DuplicateFileType
+import com.doronyg.photoarchivededuplicator.scan.DuplicateSortCriterion
+import com.doronyg.photoarchivededuplicator.scan.DuplicateSortRule
+import com.doronyg.photoarchivededuplicator.scan.SortDirection
+import com.doronyg.photoarchivededuplicator.scan.defaultDuplicateSortRules
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.NonCancellable
@@ -26,6 +30,7 @@ data class UiChoices(
     val duplicateRoot: String = "",
     val duplicateFileType: DuplicateFileType = DuplicateFileType.ALL,
     val duplicateFilenamePattern: String = "",
+    val duplicateSort: List<DuplicateSortRule> = defaultDuplicateSortRules(),
     val logFilter: String = "",
     val logMinimum: LogLevel = LogLevel.D,
     val logFollow: Boolean = true,
@@ -37,7 +42,7 @@ class UiPreferences internal constructor(
     scope: CoroutineScope,
     private val save: suspend (UiChoices) -> Unit,
 ) {
-    private val mutableState = MutableStateFlow(initial.copy(browseStack = initial.browseStack.toList()))
+    private val mutableState = MutableStateFlow(initial.snapshot())
     val state: StateFlow<UiChoices> = mutableState.asStateFlow()
     private val mutableError = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = mutableError.asStateFlow()
@@ -69,7 +74,7 @@ class UiPreferences internal constructor(
         try {
             while (true) {
                 val previous = mutableState.value
-                val next = transform(previous).let { it.copy(browseStack = it.browseStack.toList()) }
+                val next = transform(previous).snapshot()
                 if (next == previous) return
                 if (mutableState.compareAndSet(previous, next)) break
             }
@@ -78,6 +83,9 @@ class UiPreferences internal constructor(
             gate.update { it.copy(editors = it.editors - 1) }
         }
     }
+
+    private fun UiChoices.snapshot(): UiChoices =
+        copy(browseStack = browseStack.toList(), duplicateSort = duplicateSort.toList())
 
     /** Close the producer only after UI disposal, and drain before cancelling the owning scope. */
     internal suspend fun shutdown() = withContext(NonCancellable) {
@@ -100,6 +108,11 @@ internal fun encodeUiChoices(choices: UiChoices): Map<String, String> = buildMap
     put("duplicateRoot", choices.duplicateRoot)
     put("duplicateFileType", choices.duplicateFileType.name)
     put("duplicateFilenamePattern", choices.duplicateFilenamePattern)
+    put("duplicateSort.order", choices.duplicateSort.joinToString(",") { it.criterion.name })
+    choices.duplicateSort.forEach { rule ->
+        put("duplicateSort.${rule.criterion.name}.enabled", rule.enabled.toString())
+        put("duplicateSort.${rule.criterion.name}.direction", rule.direction.name)
+    }
     put("logFilter", choices.logFilter)
     put("logMinimum", choices.logMinimum.name)
     put("logFollow", choices.logFollow.toString())
@@ -125,6 +138,29 @@ internal fun decodeUiChoices(
     val follow = entries["logFollow"]?.let {
         requireNotNull(it.toBooleanStrictOrNull()) { "Invalid UI preference logFollow '$it'" }
     } ?: true
+    val defaults = defaultDuplicateSortRules()
+    val order = mutableListOf<DuplicateSortCriterion>()
+    entries["duplicateSort.order"]?.split(',')?.forEach { name ->
+        val criterion = DuplicateSortCriterion.entries.firstOrNull { it.name == name }
+        when {
+            criterion == null -> warn("Unknown UI preference sort criterion '$name'; ignoring")
+            criterion in order -> warn("Repeated UI preference sort criterion '$name'; ignoring repeat")
+            else -> order.add(criterion)
+        }
+    }
+    defaults.forEach { if (it.criterion !in order) order.add(it.criterion) }
+    val sort = order.map { criterion ->
+        val default = defaults.first { it.criterion == criterion }
+        val enabledKey = "duplicateSort.${criterion.name}.enabled"
+        val enabled = entries[enabledKey]?.let {
+            requireNotNull(it.toBooleanStrictOrNull()) { "Invalid UI preference $enabledKey '$it'" }
+        } ?: default.enabled
+        DuplicateSortRule(
+            criterion,
+            enabled,
+            enumValue("duplicateSort.${criterion.name}.direction", SortDirection.entries, default.direction),
+        )
+    }
     return UiChoices(
         selectedTab = enumValue("selectedTab", UiTab.entries, UiTab.SCAN),
         scanRoot = entries["scanRoot"] ?: "",
@@ -134,6 +170,7 @@ internal fun decodeUiChoices(
         duplicateRoot = entries["duplicateRoot"] ?: "",
         duplicateFileType = enumValue("duplicateFileType", DuplicateFileType.entries, DuplicateFileType.ALL),
         duplicateFilenamePattern = entries["duplicateFilenamePattern"] ?: "",
+        duplicateSort = sort,
         logFilter = entries["logFilter"] ?: "",
         logMinimum = enumValue("logMinimum", LogLevel.entries, LogLevel.D),
         logFollow = follow,

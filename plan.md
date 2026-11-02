@@ -196,6 +196,100 @@ Filters affect only candidate searches in the stored inventory, not scanning,
 exclusions, or the exact case-sensitive name-and-size grouping rule. Searches and
 filtering run in the repository's database lane, never on the UI thread.
 
+Candidate groups can be sorted by filename (case-sensitive lexicographic order),
+individual file size, copy count, and earliest known creation date in the group.
+Each criterion has an on/off toggle and ascending/descending direction; left/right
+arrows adjust priority, with the leftmost enabled criterion taking precedence.
+Unknown creation dates sort last in either direction when that criterion is
+compared. Remaining ties use filename then size for deterministic ordering.
+Filename sorting is enabled by default; disabling all criteria preserves search
+order. Sort changes apply to loaded groups without another database query or any
+filesystem reads. Sorting is cancellable and dispatched off the UI thread, and
+priority, enabled flags, and directions are remembered across app restarts.
+
+Duplicate result text is selectable. A single **Copy results** action in the result
+header copies all loaded groups in their displayed order, including off-screen
+items, without adding controls to individual groups. The plain-text report includes
+the applied search/sort context, exact byte sizes, full paths, and UTC timestamps,
+and identifies the results as unverified candidates. Formatting runs off the UI
+thread and does not read files or query the database. Paths are quoted, with line
+breaks and other control characters escaped; review local paths before sharing.
+Desktop results have a visible draggable scrollbar; Android retains touch scrolling.
+Copying does not transmit data to an AI or any other service.
+
+#### Advisory retention scoring
+
+Each candidate copy has a persisted, explainable retention score; higher means a
+better retention candidate, not confirmed content identity or permission to delete.
+Central configuration defines the weights and matching rules:
+
+| Evidence | Points |
+|---|---:|
+| Valid `yyyy-MM-dd` directory, optionally followed by a separated descriptive label | +100 |
+| Valid `yyyy_MM_dd`, `yyyyMMdd`, or `yyyy/MM/dd` structure | +40 |
+| Valid year/month structure (`yyyy/MM`) | +30 |
+| Recognizable year-only structure | +10 |
+| Known backup/import/synchronization directory | -25 |
+| Known temporary directory | -60 |
+| Recognized filename date contradicts a recognized complete folder date | -80 |
+| Modification UTC date agrees with complete folder date | +2 |
+| Creation UTC date agrees with complete folder date | +1 |
+
+Only the strongest organization bonus and strongest location penalty apply.
+Known directory names are matched case-insensitively at component boundaries.
+Unknown/intentional collection names are neutral. Missing or disagreeing timestamps
+are neutral too: neither older folder dates nor older filesystem timestamps win by
+themselves. EXIF, content hashes, and AI assessments are not calculated.
+
+The filename evidence introduced in algorithm v2 recognizes valid WhatsApp-style `IMG-yyyyMMdd-WA<number>` and
+`VID-yyyyMMdd-WA<number>` filenames (case-insensitive). A filename alone never
+incurs a date penalty: there must also be a valid complete folder date to compare.
+A mismatching preferred chronological folder contributes +100 -80 = +20.
+Timestamp bonuses are suppressed on that mismatch, even if copied timestamps
+agree with the folder. Filename dates remain advisory, not verified capture dates.
+Invalid/unrecognized filename dates and partial year-only folders do not trigger
+the mismatch penalty. Alternative complete date organization still earns +40,
+so a recognized mismatch there contributes +40 -80 = -40 before location penalties.
+
+Algorithm v3 separates year/month organization (+30) from year-only organization
+(+10). A consistent partial structure therefore outranks a contradictory preferred
+full-date folder (+20). Full dates retain their +40/+100 bonuses. Year/month
+evidence takes precedence over a later year-only component, and valid months are
+restricted to `01` through `12`. No timestamp bonus is needed to earn the +30.
+Previous algorithm versions remain stored independently.
+
+`PhotoSync` is a known synchronization directory. A whole `WhatsApp` word in
+a directory name (including `WhatsApp Images` or `WhatsApp_backup`) is a backup/
+import/synchronization signal, matched case-insensitively. Substrings such as
+`WhatsApplication` do not match. Multiple backup/sync matches incur only one -25
+penalty; temporary locations retain the stronger -60 penalty instead.
+
+Scores within five points of the maximum are ambiguous; tied leaders are labeled
+as ties. A group with missing/outdated scores cannot receive a leading-copy
+recommendation. All files remain visible. Tap the compact score line to expand
+its contributing factors; Copy results includes scores and explanations.
+Within each group, current scores sort from highest to lowest, with full-path
+order breaking ties. Missing/outdated scores follow all current scores, including
+negative ones. This member ordering does not change the selected group-order
+criteria or ambiguity labels, and copied results use the same displayed order.
+
+Find candidates reuses current assessments and calculates only missing/stale ones
+from stored metadata on a background dispatcher. Recompute scores explicitly
+refreshes the current result set. Sorting or merely opening the tab does not score
+files. Bounded database write batches recheck the inputs before saving; metadata
+that changed during computation is rejected and the UI requests a fresh search.
+Cancellation rolls back the active batch; previously committed batches are reusable.
+The inventory view is a snapshot, not a live replacement for another search after
+a concurrent scan changes its records.
+
+Score persistence is separate from inventory and supports independent score types,
+algorithm/model identifiers, versions, and configurations. Updating the current
+retention assessment preserves other algorithms, versions, and score types.
+Database schema v4 adds score/factor tables through migration `3.sqm`; current v3
+inventories upgrade in place without rescanning. Keep earlier migration files,
+and prioritize populated current-to-next migration regression coverage while the
+schema is evolving.
+
 For each group, report:
 - Number of candidates.
 - All candidate paths.

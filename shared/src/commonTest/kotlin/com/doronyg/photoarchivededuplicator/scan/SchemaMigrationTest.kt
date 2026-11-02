@@ -35,7 +35,7 @@ class SchemaMigrationTest {
                     INSERT INTO scanFile VALUES
                     ('/archive/existing.jpg', '/archive', 'existing.jpg', 'jpg', 42, 456, 789)
                 """.trimIndent(), 0).await()
-                assertEquals(3L, FilesDatabase.Schema.version)
+                assertEquals(4L, FilesDatabase.Schema.version)
                 guarded.execute(null, "PRAGMA user_version = 1", 0).await()
             }
             // Uses the same schema constructor as production desktop. Android's driver

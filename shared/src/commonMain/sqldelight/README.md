@@ -31,6 +31,8 @@ the header comment, to see that a file lives under `build/`.
 | `db/DirectoryExclusion.kt`, `db/DirectoryExclusionQueries.kt` | `DirectoryExclusion.sq` | User-entered excluded roots and optional reasons, independent of inventory |
 | `db/ScanSession.kt`, `db/ScanSessionQueries.kt` | `ScanSession.sq` | Active elapsed time and last-selected logical scan root |
 | `db/UiPreference.kt`, `db/UiPreferenceQueries.kt` | `UiPreference.sq` | Local UI choices stored as key/value entries |
+| `db/FileScore.kt`, `db/FileScoreQueries.kt` | `FileScore.sq` | Independent, versioned algorithm/model assessments and their input metadata |
+| `db/FileScoreFactor.kt`, `db/FileScoreFactorQueries.kt` | `FileScoreFactor.sq` | Ordered numeric contributions and human-readable explanations |
 | `db/FilesDatabase.kt` | All `.sq` files + Gradle config | Database interface, `Schema`, factory |
 | `db/shared/FilesDatabaseImpl.kt` | All `.sq` files + Gradle config | Implementation, `CREATE TABLE`/`INDEX` statements |
 
@@ -107,7 +109,10 @@ generated migration. Do not delete the database to upgrade it.
 Migration 1 is not rerun on already-installed version 2 databases. Their earlier column
 order is supported by SQLDelight's explicit named-column queries. Version 3 adds only the
 `uiPreference` table through `com/doronyg/photoarchivededuplicator/db/2.sqm`, preserving
-inventory, exclusions, and scan sessions. An unreleased intermediate version 1 containing
+inventory, exclusions, and scan sessions. Version 4 adds separate score and score-factor
+tables through `com/doronyg/photoarchivededuplicator/db/3.sqm`; it does not rewrite
+inventory or reset scan queues, sessions, exclusions, or UI preferences.
+An unreleased intermediate version 1 containing
 some of the new columns/tables is not the historical migration target; do not infer its
 schema by dropping the session table from today's schema.
 
@@ -130,12 +135,48 @@ They also reopen the previously installed v2 layout and verify its inventory, ex
 creation times, and session are unchanged. Android host tests run these tests through JDBC;
 they do not emulate Android SQLiteOpenHelper.
 
+Current-to-next upgrades are the supported migration-development focus until the
+schema stabilizes. Earlier migration files remain intact, and databases are never
+deleted or recreated as an upgrade strategy. The v3-to-v4 regression uses populated
+records and verifies that existing inventory and preferences survive the upgrade.
+
+## Independent file scores
+
+Scores are identified by file path, type, algorithm/model ID, version, and
+configuration. Each row stores its relevant input metadata, numeric value,
+assessment time, and ordered factor explanations. Different identities coexist;
+recomputing one identity replaces only its value and factor breakdown.
+
+Retention scoring uses stored path/size/creation/modification metadata, not content.
+`lastScanned` is not a scoring input. Assessments are reused only when their inputs
+and identity match. Writes recheck the current file metadata within the same
+database transaction, rejecting changed/deleted files instead of publishing stale
+calculations as current. Batches are bounded to avoid an archive-wide write lock.
+
+Default retention weights/rules live in `retention/RetentionScoring.kt` as
+`RetentionConfig`. Changing weights or matching rules changes the canonical
+configuration identity. Changes to the algorithm's interpretation must also bump
+its explicit algorithm version; this is independent of the SQLDelight schema
+version. New score types or algorithm versions do not need an inventory schema
+change and do not replace older identities.
+
+Retention algorithm v3 gives valid year/month organization +30 while retaining +10
+for year-only organization. It keeps v2's conservative filename/folder-date
+disagreement evidence and WhatsApp/PhotoSync location rules.
+Find candidates or Recompute scores produces v3 assessments from the existing
+inventory; v1/v2 assessments and other score types remain available. No database
+schema version change, source-file access, or rescan is needed for this update.
+
 ## Remembered UI choices
 
 The selected tab, scan folder, browse navigation stack, duplicate-search folder and
-filters, and log text/level/follow filters are restored before the container is returned.
+filters/sort choices, and log text/level/follow filters are restored before the container is returned.
 Enum values are stored by name, not ordinal. Browse paths occupy separate indexed
 entries so filenames containing newlines or other delimiters round-trip unchanged.
+Duplicate sort priority is stored as ordered criterion names, with separate enabled
+and direction values per criterion. Existing preferences without these keys use
+the default filename sort; unknown future criteria warn and are ignored while
+known criteria retain their priority.
 
 An app-lifetime writer conflates pending edits and saves complete snapshots in a single
 database-lane transaction. UI callbacks only update in-memory state and enqueue work.

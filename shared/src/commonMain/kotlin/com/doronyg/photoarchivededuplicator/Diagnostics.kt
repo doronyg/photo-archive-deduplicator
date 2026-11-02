@@ -30,6 +30,7 @@ object LogTags {
     const val LIFECYCLE = "Lifecycle"
     const val CONTAINER = "Container"
     const val SCAN_CONTROLLER = "ScanController"
+    const val RETENTION = "Retention"
 }
 
 enum class LogLevel { D, I, W, E }

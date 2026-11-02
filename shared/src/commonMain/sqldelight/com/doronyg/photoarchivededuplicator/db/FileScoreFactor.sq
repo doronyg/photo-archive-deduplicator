@@ -1,0 +1,18 @@
+CREATE TABLE fileScoreFactor (
+    scoreId INTEGER NOT NULL REFERENCES fileScore(id),
+    ordinal INTEGER NOT NULL,
+    factorKey TEXT NOT NULL,
+    contribution REAL NOT NULL,
+    explanation TEXT NOT NULL,
+    PRIMARY KEY(scoreId, ordinal)
+);
+
+selectForScores:
+SELECT * FROM fileScoreFactor WHERE scoreId IN :scoreIds ORDER BY scoreId, ordinal;
+
+deleteForScore:
+DELETE FROM fileScoreFactor WHERE scoreId = :scoreId;
+
+insertFactor:
+INSERT INTO fileScoreFactor(scoreId, ordinal, factorKey, contribution, explanation)
+VALUES (:scoreId, :ordinal, :factorKey, :contribution, :explanation);

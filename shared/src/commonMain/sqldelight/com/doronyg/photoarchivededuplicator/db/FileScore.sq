@@ -1,0 +1,61 @@
+CREATE TABLE fileScore (
+    id INTEGER NOT NULL PRIMARY KEY,
+    filePath TEXT NOT NULL,
+    directoryPath TEXT NOT NULL,
+    inputSizeBytes INTEGER NOT NULL,
+    inputModifiedAt INTEGER,
+    inputCreatedAt INTEGER,
+    scoreType TEXT NOT NULL,
+    algorithmId TEXT NOT NULL,
+    algorithmVersion TEXT NOT NULL,
+    configurationId TEXT NOT NULL,
+    value REAL NOT NULL,
+    createdAt INTEGER NOT NULL,
+    UNIQUE(filePath, scoreType, algorithmId, algorithmVersion, configurationId)
+);
+
+selectForPaths:
+SELECT * FROM fileScore
+WHERE filePath IN :paths
+AND (:scoreType IS NULL OR scoreType = :scoreType)
+AND (:algorithmVersion IS NULL OR algorithmVersion = :algorithmVersion)
+AND (:currentOnly = 0 OR EXISTS (
+    SELECT 1 FROM scanFile f
+    WHERE f.path = fileScore.filePath AND f.directoryPath = fileScore.directoryPath
+    AND f.sizeBytes = fileScore.inputSizeBytes
+    AND f.modifiedAt IS fileScore.inputModifiedAt AND f.createdAt IS fileScore.inputCreatedAt
+))
+ORDER BY id;
+
+selectForPathsAndIdentity:
+SELECT * FROM fileScore
+WHERE filePath IN :paths AND scoreType = :scoreType AND algorithmId = :algorithmId
+AND algorithmVersion = :algorithmVersion AND configurationId = :configurationId
+AND (:currentOnly = 0 OR EXISTS (
+    SELECT 1 FROM scanFile f
+    WHERE f.path = fileScore.filePath AND f.directoryPath = fileScore.directoryPath
+    AND f.sizeBytes = fileScore.inputSizeBytes
+    AND f.modifiedAt IS fileScore.inputModifiedAt AND f.createdAt IS fileScore.inputCreatedAt
+))
+ORDER BY id;
+
+selectIdentityId:
+SELECT id FROM fileScore
+WHERE filePath = :filePath AND scoreType = :scoreType AND algorithmId = :algorithmId
+AND algorithmVersion = :algorithmVersion AND configurationId = :configurationId;
+
+insertIfAbsent:
+INSERT OR IGNORE INTO fileScore(
+    filePath, directoryPath, inputSizeBytes, inputModifiedAt, inputCreatedAt,
+    scoreType, algorithmId, algorithmVersion, configurationId, value, createdAt
+) VALUES (
+    :filePath, :directoryPath, :inputSizeBytes, :inputModifiedAt, :inputCreatedAt,
+    :scoreType, :algorithmId, :algorithmVersion, :configurationId, :value, :createdAt
+);
+
+updateScore:
+UPDATE fileScore
+SET directoryPath = :directoryPath, inputSizeBytes = :inputSizeBytes,
+inputModifiedAt = :inputModifiedAt, inputCreatedAt = :inputCreatedAt,
+value = :value, createdAt = :createdAt
+WHERE id = :id;

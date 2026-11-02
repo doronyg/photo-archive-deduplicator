@@ -3,6 +3,8 @@ package com.doronyg.photoarchivededuplicator
 import app.cash.sqldelight.db.SqlDriver
 import com.doronyg.photoarchivededuplicator.scan.ConcurrencyTestDriver
 import com.doronyg.photoarchivededuplicator.scan.DuplicateFileType
+import com.doronyg.photoarchivededuplicator.scan.SortDirection
+import com.doronyg.photoarchivededuplicator.scan.defaultDuplicateSortRules
 import com.doronyg.photoarchivededuplicator.scan.InventoryScanner
 import com.doronyg.photoarchivededuplicator.scan.IoGuardedDriver
 import com.doronyg.photoarchivededuplicator.scan.ScanEvent
@@ -40,6 +42,9 @@ internal val allUiChoices = UiChoices(
     duplicateRoot = "/duplicates\nroot",
     duplicateFileType = DuplicateFileType.VIDEOS,
     duplicateFilenamePattern = "雪*?.mp4",
+    duplicateSort = defaultDuplicateSortRules().reversed().mapIndexed { index, rule ->
+        rule.copy(enabled = index % 2 == 0, direction = SortDirection.DESCENDING)
+    },
     logFilter = "database\nfailure",
     logMinimum = LogLevel.W,
     logFollow = false,

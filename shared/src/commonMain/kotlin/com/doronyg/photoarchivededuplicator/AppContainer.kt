@@ -5,6 +5,7 @@ import com.doronyg.photoarchivededuplicator.scan.DirectoryRepository
 import com.doronyg.photoarchivededuplicator.scan.InventoryScanner
 import com.doronyg.photoarchivededuplicator.scan.ScanController
 import com.doronyg.photoarchivededuplicator.scan.createFilesDatabase
+import com.doronyg.photoarchivededuplicator.retention.RetentionScoreService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -39,6 +40,7 @@ class AppContainer internal constructor(
     private val scanner: InventoryScanner = createScanner(repository, filesystemLane)
     val scanController = ScanController(scanner, appScope, repository)
     val uiPreferences = UiPreferences(initialUiChoices, appScope, repository::saveUiChoices)
+    val retentionScores = RetentionScoreService(repository)
 
     /** Desktop awaits this after its UI exits, before the process can terminate. */
     suspend fun shutdown() = withContext(NonCancellable) {

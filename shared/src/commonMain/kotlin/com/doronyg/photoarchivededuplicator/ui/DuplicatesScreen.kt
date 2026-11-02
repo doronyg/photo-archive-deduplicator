@@ -4,10 +4,15 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.DisableSelection
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -21,24 +26,41 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import com.doronyg.photoarchivededuplicator.scan.DirectoryRepository
 import com.doronyg.photoarchivededuplicator.PathActions
 import com.doronyg.photoarchivededuplicator.UiPreferences
+import com.doronyg.photoarchivededuplicator.retention.RetentionAssessmentResult
+import com.doronyg.photoarchivededuplicator.retention.RetentionScoreService
+import com.doronyg.photoarchivededuplicator.retention.RetentionPresentation
+import com.doronyg.photoarchivededuplicator.retention.sortDuplicateFilesByRetention
 import com.doronyg.photoarchivededuplicator.scan.DuplicateCandidateGroup
 import com.doronyg.photoarchivededuplicator.scan.DuplicateCandidateFilter
 import com.doronyg.photoarchivededuplicator.scan.DuplicateFileType
+import com.doronyg.photoarchivededuplicator.scan.DuplicateSortRule
+import com.doronyg.photoarchivededuplicator.scan.sortDuplicateCandidates
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import okio.Path
 import okio.Path.Companion.toPath
 
+private data class SortedCandidates(
+    val source: List<DuplicateCandidateGroup>,
+    val rules: List<DuplicateSortRule>,
+    val retention: Map<Path, RetentionPresentation>,
+    val groups: List<DuplicateCandidateGroup>,
+)
+
 @Composable
-fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathActions: PathActions, preferences: UiPreferences, modifier: Modifier = Modifier) {
+fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathActions: PathActions, preferences: UiPreferences, retentionScores: RetentionScoreService, modifier: Modifier = Modifier) {
     val choices by preferences.state.collectAsState()
     val rootText = choices.duplicateRoot
     val fileType = choices.duplicateFileType
@@ -46,9 +68,49 @@ fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathAc
     var roots by remember { mutableStateOf(emptyList<Path>()) }
     var groups by remember { mutableStateOf<List<DuplicateCandidateGroup>?>(null) }
     var searchedRoot by remember { mutableStateOf("") }
+    var searchedFilter by remember { mutableStateOf(DuplicateCandidateFilter()) }
     var error by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
+    var scoring by remember { mutableStateOf(false) }
+    var retention by remember { mutableStateOf<RetentionAssessmentResult?>(null) }
+    var copying by remember { mutableStateOf(false) }
+    var copyStatus by remember(groups, choices.duplicateSort, retention) { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
+    val clipboard = LocalClipboardManager.current
+    val listState = rememberLazyListState()
+    val reportRetention = retention?.files.orEmpty()
+    val sorted by produceState<SortedCandidates?>(null, groups, choices.duplicateSort, reportRetention) {
+        value = null
+        val source = groups
+        val rules = choices.duplicateSort
+        val scores = reportRetention
+        if (source != null) {
+            val orderedGroups = sortDuplicateCandidates(source, rules)
+            value = SortedCandidates(source, rules, scores, sortDuplicateFilesByRetention(orderedGroups, scores))
+        }
+    }
+    val displayedSnapshot = sorted?.takeIf {
+        it.source === groups && it.rules == choices.duplicateSort && it.retention === reportRetention
+    }
+    val reportRoot = searchedRoot
+    val reportFilter = searchedFilter
+
+    suspend fun assessResults(candidates: List<DuplicateCandidateGroup>, force: Boolean = false) {
+        scoring = true
+        try {
+            val result = retentionScores.assess(candidates, force)
+            retention = result
+            if (result.invalidatedFiles > 0) {
+                error = "Inventory changed during scoring. Search again to refresh the affected files."
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            error = "Could not calculate retention scores: ${e.message}"
+        } finally {
+            scoring = false
+        }
+    }
 
     LaunchedEffect(repository) {
         try {
@@ -126,51 +188,118 @@ fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathAc
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
-        Button(enabled = !busy && rootText.isNotBlank(), onClick = {
-            val selected = rootText.trim()
-            val filter = DuplicateCandidateFilter(fileType, filenamePattern)
-            scope.launch {
+        DuplicateSortControls(choices.duplicateSort, enabled = !busy, onChange = { transform ->
+            preferences.update { it.copy(duplicateSort = transform(it.duplicateSort)) }
+        })
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(enabled = !busy && rootText.isNotBlank(), onClick = {
+                val selected = rootText.trim()
+                val filter = DuplicateCandidateFilter(fileType, filenamePattern)
+                busy = true
+                scope.launch {
+                    error = null
+                    groups = null
+                    retention = null
+                    try {
+                        val results = repository.duplicateCandidates(selected.toPath(), filter)
+                        searchedRoot = selected
+                        searchedFilter = filter
+                        groups = results
+                        assessResults(results)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        error = "Search failed: ${e.message}"
+                    } finally {
+                        busy = false
+                    }
+                }
+            }) { Text(if (scoring) "Scoring..." else if (busy) "Searching…" else "Find candidates") }
+            OutlinedButton(enabled = !busy && !groups.isNullOrEmpty(), onClick = {
+                val snapshot = groups ?: return@OutlinedButton
                 busy = true
                 error = null
-                groups = null
-                try {
-                    groups = repository.duplicateCandidates(selected.toPath(), filter)
-                    searchedRoot = selected
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    error = "Search failed: ${e.message}"
-                } finally {
-                    busy = false
-                }
-            }
-        }) { Text(if (busy) "Searching…" else "Find candidates") }
-        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-        LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (groups == null) {
-                item { Text("Previously scanned roots (select or enter any subtree):") }
-                items(roots) { root ->
-                    TextButton(enabled = !busy, onClick = {
-                        preferences.update { it.copy(duplicateRoot = root.toString()) }
-                    }) { Text(root.toString()) }
-                }
-            }
-            groups?.let { results ->
-                item { Text("${results.size} candidate groups under $searchedRoot. Search again after changing inventory or exclusions.") }
-                if (results.isEmpty()) item { Text("No candidate groups match these filters in the stored inventory.") }
-                results.forEach { group ->
-                    item {
-                        HorizontalDivider()
-                        Text("${group.name} · ${formatBytes(group.sizeBytes)} · ${group.files.size} files",
-                            style = MaterialTheme.typography.titleMedium)
+                scope.launch {
+                    try {
+                        assessResults(snapshot, force = true)
+                    } finally {
+                        busy = false
                     }
-                    items(group.files, key = { it.path.toString() }) { file ->
-                        Column {
-                            FilePathLinks(file, pathActions)
-                            Text("Created ${formatEpochMillis(file.createdAt)} · modified ${formatEpochMillis(file.modifiedAt)}",
-                                style = MaterialTheme.typography.bodySmall)
+                }
+            }) { Text("Recompute scores") }
+        }
+        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        SelectionContainer(Modifier.weight(1f)) {
+            Row(Modifier.fillMaxSize()) {
+                LazyColumn(
+                    Modifier.weight(1f).fillMaxHeight(),
+                    state = listState,
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    if (groups == null) {
+                        item { Text("Previously scanned roots (select or enter any subtree):") }
+                        items(roots) { root ->
+                            TextButton(enabled = !busy, onClick = {
+                                preferences.update { it.copy(duplicateRoot = root.toString()) }
+                            }) { Text(root.toString()) }
                         }
                     }
+                    if (groups != null && displayedSnapshot == null) {
+                        item { Text("Sorting candidates...") }
+                    }
+                    displayedSnapshot?.let { displayed ->
+                        val results = displayed.groups
+                        item {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("${results.size} candidate groups under $reportRoot.", Modifier.weight(1f))
+                                DisableSelection {
+                                    TextButton(enabled = !copying, onClick = {
+                                        copying = true
+                                        copyStatus = null
+                                        error = null
+                                        scope.launch {
+                                            try {
+                                                val text = formatDuplicateResults(reportRoot, reportFilter, displayed.rules, results,
+                                                    retention = reportRetention)
+                                                clipboard.setText(AnnotatedString(text))
+                                                copyStatus = "Copied ${results.size} groups, including full paths. Review before sharing."
+                                            } catch (e: CancellationException) {
+                                                throw e
+                                            } catch (e: Exception) {
+                                                error = "Could not copy results: ${e.message}"
+                                            } finally {
+                                                copying = false
+                                            }
+                                        }
+                                    }) { Text(if (copying) "Copying..." else "Copy results") }
+                                }
+                            }
+                            Text("Sort changes apply immediately; search again after changing inventory or exclusions.",
+                                style = MaterialTheme.typography.bodySmall)
+                            Text("Highest retention score first within each group. Scores are advisory, not content verification. Tap a score for its factors.",
+                                style = MaterialTheme.typography.bodySmall)
+                            copyStatus?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                        }
+                        if (results.isEmpty()) item { Text("No candidate groups match these filters in the stored inventory.") }
+                        results.forEach { group ->
+                            item {
+                                HorizontalDivider()
+                                Text("${group.name} · ${formatBytes(group.sizeBytes)} · ${group.files.size} files",
+                                    style = MaterialTheme.typography.titleMedium)
+                            }
+                            items(group.files, key = { it.path.toString() }) { file ->
+                                Column {
+                                    FilePathLinks(file, pathActions)
+                                    Text("Created ${formatEpochMillis(file.createdAt)} · modified ${formatEpochMillis(file.modifiedAt)}",
+                                        style = MaterialTheme.typography.bodySmall)
+                                    RetentionScoreLine(file.path, reportRetention[file.path])
+                                }
+                            }
+                        }
+                    }
+                }
+                DisableSelection {
+                    ResultsScrollbar(listState, Modifier.fillMaxHeight())
                 }
             }
         }
