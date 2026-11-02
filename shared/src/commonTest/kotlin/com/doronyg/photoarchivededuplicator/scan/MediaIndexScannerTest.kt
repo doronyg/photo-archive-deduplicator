@@ -85,7 +85,7 @@ class MediaIndexScannerTest {
     @Test
     fun reportsProgressThroughScanController() = env.test {
         items = listOf(item(root / "a" / "1.jpg"), item(root / "a" / "2.jpg"), item(root / "b" / "c" / "3.jpg"))
-        val controller = ScanController(scanner(), scope = this, clock = { testScheduler.currentTime })
+        val controller = ScanController(scanner(), scope = this, repository = env.repository, clock = { testScheduler.currentTime })
 
         controller.start(root)
         advanceUntilIdle()

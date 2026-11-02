@@ -1,12 +1,13 @@
 package com.doronyg.photoarchivededuplicator.scan
 
+import com.doronyg.photoarchivededuplicator.Diagnostics
+import com.doronyg.photoarchivededuplicator.IoLane
+import com.doronyg.photoarchivededuplicator.LogTags
 import kotlinx.coroutines.CoroutineDispatcher
-import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.IO
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.withContext
 import okio.FileSystem
 import okio.IOException
 import okio.Path
@@ -39,30 +40,37 @@ data class ScanConfig(
  * so a scan can be cancelled (paused) at any point and continued with [resume].
  * Symlinks are never followed.
  *
- * Okio file system calls are blocking, so they run on [ioDispatcher];
- * [repository] moves its own SQLite work onto its IO dispatcher.
+ * Okio file system calls are blocking, so each directory listing holds [filesystemLane];
+ * [repository] commits the complete directory on the independent database lane.
+ * Cancellation can discard this directory's uncommitted listing; resume reads it again.
  */
-class DirectoryScanner(
+internal class DirectoryScanner(
     private val fileSystem: FileSystem,
     private val repository: DirectoryRepository,
     private val config: ScanConfig = ScanConfig(),
-    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val clock: () -> Long = { Clock.System.now().toEpochMilliseconds() },
+    private val filesystemLane: IoLane = IoLane("filesystem-test", ioDispatcher),
 ) : InventoryScanner {
-    override suspend fun startScan(root: Path, onEvent: suspend (ScanEvent) -> Unit) {
+    override suspend fun startScan(root: Path, onEvent: suspend (ScanEvent) -> Unit) = repository.scanning {
         repository.seedRoot(root)
-        resume(onEvent)
+        resumeScan(root.inventoryPath(), onEvent)
     }
 
-    /** Continues any unfinished scan, including directories interrupted mid-listing. */
-    override suspend fun resume(onEvent: suspend (ScanEvent) -> Unit) {
-        repository.resetInterrupted()
-        onEvent(ScanEvent.Started(pendingDirectories = repository.countWithStatus(DirectoryStatus.PENDING)))
+    /** Continues only the selected logical scan, leaving other roots' queues intact. */
+    override suspend fun resume(onEvent: suspend (ScanEvent) -> Unit) = repository.scanning {
+        resumeScan(repository.resumableScanSession().root, onEvent)
+    }
+
+    private suspend fun resumeScan(root: Path, onEvent: suspend (ScanEvent) -> Unit) {
+        repository.resetInterrupted(root)
+        onEvent(ScanEvent.Started(pendingDirectories = repository.pendingScanCount(root)))
         while (true) {
-            val batch = repository.fetchPendingBatch(config.batchSize)
+            val batch = repository.fetchPendingBatch(config.batchSize, root)
             if (batch.isEmpty()) break
             for (dir in batch) {
                 currentCoroutineContext().ensureActive()
+                if (repository.isExcluded(dir)) continue
                 onEvent(ScanEvent.DirectoryStarted(dir))
                 scanDirectory(dir, onEvent)
             }
@@ -71,8 +79,9 @@ class DirectoryScanner(
 
     private suspend fun scanDirectory(dir: Path, onEvent: suspend (ScanEvent) -> Unit) {
         repository.markInProgress(dir)
+        val exclusions = repository.exclusions()
         val listing = try {
-            withContext(ioDispatcher) { readListing(dir) }
+            filesystemLane.run("readListing $dir") { readListing(dir, exclusions) }
         } catch (e: IOException) {
             val record = repository.recordFailure(dir, config.maxAttempts)
             val willRetry = record.status == DirectoryStatus.PENDING
@@ -84,15 +93,21 @@ class DirectoryScanner(
         onEvent(ScanEvent.DirectoryCompleted(dir, listing.subdirectories.size, listing.files.size))
     }
 
-    /** Blocking; call on [ioDispatcher]. */
-    private fun readListing(dir: Path): DirectoryListing {
+    /** Blocking; call inside the filesystem lane, once per directory. */
+    private suspend fun readListing(dir: Path, exclusions: List<DirectoryExclusion>): DirectoryListing {
         val subdirectories = mutableListOf<DirectoryListing.Entry>()
         val files = mutableListOf<DirectoryListing.Entry>()
-        for (child in fileSystem.list(dir)) {
+        for (child in Diagnostics.logger.operation(LogTags.FILE_SYSTEM, "list $dir") { fileSystem.list(dir) }) {
+            currentCoroutineContext().ensureActive()
+            if (exclusions.any { child.isInTree(it.path) }) continue
             // Entries can vanish between list() and metadata(); skip them
-            val metadata = fileSystem.metadataOrNull(child) ?: continue
+            val metadata = Diagnostics.logger.operation(LogTags.FILE_SYSTEM, "metadataOrNull $child") {
+                fileSystem.metadataOrNull(child)
+            } ?: continue
             if (metadata.symlinkTarget != null) continue
-            val entry = DirectoryListing.Entry(child, metadata.size ?: 0L, metadata.lastModifiedAtMillis)
+            val entry = DirectoryListing.Entry(
+                child, metadata.size ?: 0L, metadata.lastModifiedAtMillis, metadata.createdAtMillis,
+            )
             when {
                 metadata.isDirectory -> if (child.name !in config.excludedDirectoryNames) subdirectories += entry
                 metadata.isRegularFile -> files += entry

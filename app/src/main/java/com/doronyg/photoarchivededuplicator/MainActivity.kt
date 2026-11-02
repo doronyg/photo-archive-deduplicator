@@ -36,13 +36,14 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        val container = (application as PhotoArchiveApplication).container
+        val owner = application as PhotoArchiveApplication
         val scanTarget = ScanTarget.Fixed(
             root = ANDROID_STORAGE_ROOT,
             buttonLabel = "Scan photo library",
             requestAccess = ::withMediaAccess,
         )
-        setContent { InventoryApp(container, scanTarget) }
+        val pathActions = androidPathActions(this, owner::container)
+        setContent { InventoryApp(loadContainer = owner::container, scanTarget, pathActions) }
     }
 
     private fun withMediaAccess(onGranted: () -> Unit) {

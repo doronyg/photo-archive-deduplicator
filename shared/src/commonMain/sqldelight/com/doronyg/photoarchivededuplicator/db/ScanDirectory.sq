@@ -32,7 +32,18 @@ updateStatus:
 UPDATE scanDirectory SET status = :status WHERE path = :path;
 
 replaceStatus:
-UPDATE scanDirectory SET status = :newStatus WHERE status = :oldStatus;
+UPDATE scanDirectory SET status = :newStatus WHERE status = :oldStatus AND (:root IS NULL OR path = :root OR (
+    substr(path, 1, length(:root)) = :root
+    AND (substr(:root, -1) IN ('/', '\') OR substr(path, length(:root) + 1, 1) IN ('/', '\'))
+)) AND NOT EXISTS (
+    SELECT 1 FROM directoryExclusion e WHERE scanDirectory.path = e.path OR (
+        substr(scanDirectory.path, 1, length(e.path)) = e.path
+        AND (substr(e.path, -1) IN ('/', '\') OR substr(scanDirectory.path, length(e.path) + 1, 1) IN ('/', '\'))
+    )
+);
+
+updateFileCount:
+UPDATE scanDirectory SET fileCount = :fileCount WHERE path = :path;
 
 recordSuccess:
 UPDATE scanDirectory
@@ -43,7 +54,29 @@ recordFailure:
 UPDATE scanDirectory SET status = :status, retryCount = :retryCount WHERE path = :path;
 
 selectBatchByStatus:
-SELECT path FROM scanDirectory WHERE status = :status ORDER BY path LIMIT :limit;
+SELECT d.path FROM scanDirectory d
+WHERE d.status = :status AND (:root IS NULL OR d.path = :root OR (
+    substr(d.path, 1, length(:root)) = :root
+    AND (substr(:root, -1) IN ('/', '\') OR substr(d.path, length(:root) + 1, 1) IN ('/', '\'))
+)) AND NOT EXISTS (
+    SELECT 1 FROM directoryExclusion e WHERE d.path = e.path OR (
+        substr(d.path, 1, length(e.path)) = e.path
+        AND (substr(e.path, -1) IN ('/', '\') OR substr(d.path, length(e.path) + 1, 1) IN ('/', '\'))
+    )
+)
+ORDER BY d.path LIMIT :limit;
+
+countScannableWithStatus:
+SELECT count(*) FROM scanDirectory d
+WHERE d.status = :status AND (:root IS NULL OR d.path = :root OR (
+    substr(d.path, 1, length(:root)) = :root
+    AND (substr(:root, -1) IN ('/', '\') OR substr(d.path, length(:root) + 1, 1) IN ('/', '\'))
+)) AND NOT EXISTS (
+    SELECT 1 FROM directoryExclusion e WHERE d.path = e.path OR (
+        substr(d.path, 1, length(e.path)) = e.path
+        AND (substr(e.path, -1) IN ('/', '\') OR substr(d.path, length(e.path) + 1, 1) IN ('/', '\'))
+    )
+);
 
 selectByPath:
 SELECT * FROM scanDirectory WHERE path = :path;

@@ -19,17 +19,21 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.doronyg.photoarchivededuplicator.scan.DirectoryOverview
+import com.doronyg.photoarchivededuplicator.PathActions
 import com.doronyg.photoarchivededuplicator.scan.DirectoryRepository
 import com.doronyg.photoarchivededuplicator.scan.DirectoryStatus
 import com.doronyg.photoarchivededuplicator.scan.FileRecord
 import com.doronyg.photoarchivededuplicator.scan.InventorySummary
 import okio.Path
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
 
 private data class BrowseContent(
     val summary: InventorySummary,
@@ -39,19 +43,32 @@ private data class BrowseContent(
 
 /** Read-only view of the inventory: drill down from the scan roots. */
 @Composable
-fun BrowseScreen(repository: DirectoryRepository, modifier: Modifier = Modifier) {
+fun BrowseScreen(repository: DirectoryRepository, pathActions: PathActions, modifier: Modifier = Modifier, scanning: Boolean = false) {
     // Empty stack = list of scan roots
     var stack by remember { mutableStateOf(listOf<Path>()) }
     var refreshCount by remember { mutableIntStateOf(0) }
     var content by remember { mutableStateOf<BrowseContent?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var excluded by remember { mutableStateOf(false) }
+    var editing by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
     val current = stack.lastOrNull()
 
     LaunchedEffect(current, refreshCount) {
-        content = BrowseContent(
-            summary = repository.summary(),
-            directories = repository.childOverviews(current),
-            files = current?.let { repository.filesIn(it) }.orEmpty(),
-        )
+        content = null
+        error = null
+        try {
+            excluded = current?.let { repository.isExcluded(it) } ?: false
+            content = BrowseContent(
+                summary = repository.summary(),
+                directories = repository.childOverviews(current),
+                files = current?.let { repository.filesIn(it) }.orEmpty(),
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            error = "Could not load inventory: ${e.message}"
+        }
     }
 
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -60,6 +77,30 @@ fun BrowseScreen(repository: DirectoryRepository, modifier: Modifier = Modifier)
             OutlinedButton(onClick = { refreshCount++ }) { Text("Refresh") }
         }
         Breadcrumbs(stack, onNavigate = { depth -> stack = stack.take(depth) })
+        current?.let { folder ->
+            PathLink("Open folder in file manager: $folder", action = { pathActions.openFolder(folder) })
+            if (excluded) {
+                Text("Excluded tree: retained inventory only. Scans and candidate searches skip this path.")
+            } else {
+                OutlinedButton(enabled = !scanning && !editing, onClick = {
+                    scope.launch {
+                        editing = true
+                        error = null
+                        try {
+                            repository.addExclusion(folder)
+                            refreshCount++
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            error = "Could not exclude folder: ${e.message}"
+                        } finally {
+                            editing = false
+                        }
+                    }
+                }) { Text("Exclude this folder tree") }
+            }
+        }
+        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         HorizontalDivider()
         content?.let { browse ->
             LazyColumn(modifier = Modifier.fillMaxWidth()) {
@@ -67,9 +108,12 @@ fun BrowseScreen(repository: DirectoryRepository, modifier: Modifier = Modifier)
                     item { Text(if (current == null) "Nothing scanned yet." else "Empty folder.") }
                 }
                 items(browse.directories, key = { it.directory.path.toString() }) { overview ->
-                    DirectoryRow(overview, onOpen = { stack = stack + overview.directory.path })
+                    Column {
+                        DirectoryRow(overview, onOpen = { stack = stack + overview.directory.path })
+                        PathLink("Open in file manager", action = { pathActions.openFolder(overview.directory.path) })
+                    }
                 }
-                items(browse.files, key = { it.path.toString() }) { FileRow(it) }
+                items(browse.files, key = { it.path.toString() }) { FileRow(it, pathActions) }
             }
         }
     }
@@ -113,12 +157,12 @@ private fun DirectoryRow(overview: DirectoryOverview, onOpen: () -> Unit) {
 }
 
 @Composable
-private fun FileRow(file: FileRecord) {
-    ListRow(
-        icon = "·",
-        name = file.name,
-        details = "${formatBytes(file.sizeBytes)} · modified ${formatEpochMillis(file.modifiedAt)}",
-    )
+private fun FileRow(file: FileRecord, actions: PathActions) {
+    Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+        FilePathLinks(file, actions)
+        Text("${formatBytes(file.sizeBytes)} · created ${formatEpochMillis(file.createdAt)} · modified ${formatEpochMillis(file.modifiedAt)}",
+            style = MaterialTheme.typography.bodySmall)
+    }
 }
 
 @Composable

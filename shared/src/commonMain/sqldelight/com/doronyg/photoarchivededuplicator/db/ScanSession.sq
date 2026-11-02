@@ -1,0 +1,25 @@
+-- One logical scan per root; starting that root again resets its active time.
+CREATE TABLE scanSession (
+    root TEXT NOT NULL PRIMARY KEY,
+    activeMillis INTEGER NOT NULL DEFAULT 0,
+    selected INTEGER NOT NULL DEFAULT 0,
+    finished INTEGER NOT NULL DEFAULT 0
+);
+
+currentSession:
+SELECT * FROM scanSession WHERE selected = 1;
+
+sessionForRoot:
+SELECT * FROM scanSession WHERE root = :root;
+
+clearSelection:
+UPDATE scanSession SET selected = 0;
+
+selectSession:
+UPDATE scanSession SET selected = 1 WHERE root = :root;
+
+beginSession:
+INSERT OR REPLACE INTO scanSession(root, activeMillis, selected, finished) VALUES (:root, 0, 1, 0);
+
+checkpoint:
+UPDATE scanSession SET activeMillis = :activeMillis, finished = :finished WHERE root = :root;

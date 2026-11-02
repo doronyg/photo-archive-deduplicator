@@ -14,12 +14,15 @@ import kotlin.coroutines.CoroutineContext
  * and records whether the current code is running inside one of its tasks.
  */
 class TrackingIoDispatcher(private val delegate: CoroutineDispatcher) : CoroutineDispatcher() {
+    var dispatchCount = 0
+        private set
     var isRunningTask = false
         private set
 
     override fun isDispatchNeeded(context: CoroutineContext) = true
 
     override fun dispatch(context: CoroutineContext, block: Runnable) {
+        dispatchCount++
         delegate.dispatch(context, Runnable {
             isRunningTask = true
             try {
@@ -39,6 +42,7 @@ class TrackingIoDispatcher(private val delegate: CoroutineDispatcher) : Coroutin
 class IoGuardedDriver(
     private val delegate: SqlDriver,
     private val io: TrackingIoDispatcher,
+    private val beforeStatement: (String) -> Unit = {},
 ) : SqlDriver by delegate {
     override fun <R> executeQuery(
         identifier: Int?,
@@ -48,6 +52,7 @@ class IoGuardedDriver(
         binders: (SqlPreparedStatement.() -> Unit)?,
     ): QueryResult<R> {
         io.assertOnIo(sql)
+        beforeStatement(sql)
         return delegate.executeQuery(identifier, sql, mapper, parameters, binders)
     }
 
@@ -58,6 +63,7 @@ class IoGuardedDriver(
         binders: (SqlPreparedStatement.() -> Unit)?,
     ): QueryResult<Long> {
         io.assertOnIo(sql)
+        beforeStatement(sql)
         return delegate.execute(identifier, sql, parameters, binders)
     }
 

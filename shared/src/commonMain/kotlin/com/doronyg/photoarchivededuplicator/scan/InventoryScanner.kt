@@ -3,7 +3,7 @@ package com.doronyg.photoarchivededuplicator.scan
 import okio.Path
 
 /** Fills the inventory database. Implementations differ in where they read from. */
-interface InventoryScanner {
+internal interface InventoryScanner {
     /** Scans (or rescans) [root]; previously recorded data is reconciled, not discarded. */
     suspend fun startScan(root: Path, onEvent: suspend (ScanEvent) -> Unit = {})
 

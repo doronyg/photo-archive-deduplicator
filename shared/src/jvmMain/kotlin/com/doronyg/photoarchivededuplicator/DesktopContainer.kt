@@ -26,17 +26,25 @@ fun desktopDataDirectory(): Path {
 }
 
 /** Builds the container with the inventory in a SQLite file. Call once, at startup. */
-fun createDesktopContainer(dataDirectory: Path = desktopDataDirectory()): AppContainer {
-    FileSystem.SYSTEM.createDirectories(dataDirectory)
-    val properties = Properties().apply {
-        // WAL lets the browser read while the scanner writes
-        put("journal_mode", "WAL")
-        put("busy_timeout", BUSY_TIMEOUT_MILLIS.toString())
-    }
-    val driver = JdbcSqliteDriver(
-        url = "jdbc:sqlite:${dataDirectory / DATABASE_FILE_NAME}",
-        properties = properties,
-        schema = FilesDatabase.Schema.synchronous(),
-    )
-    return AppContainer(driver) { repository -> DirectoryScanner(FileSystem.SYSTEM, repository) }
-}
+suspend fun createDesktopContainer(dataDirectory: Path = desktopDataDirectory()): AppContainer = createAppContainer(
+    prepareFilesystem = {
+        Diagnostics.logger.blockingOperation(LogTags.FILE_SYSTEM, "createDirectories $dataDirectory") {
+            FileSystem.SYSTEM.createDirectories(dataDirectory)
+        }
+    },
+    openDriver = {
+        val properties = Properties().apply {
+            // WAL and a bounded wait also help with other processes accessing the file.
+            put("journal_mode", "WAL")
+            put("busy_timeout", BUSY_TIMEOUT_MILLIS.toString())
+        }
+        Diagnostics.logger.blockingOperation(LogTags.DATABASE, "JdbcSqliteDriver ${dataDirectory / DATABASE_FILE_NAME}") { JdbcSqliteDriver(
+            url = "jdbc:sqlite:${dataDirectory / DATABASE_FILE_NAME}",
+            properties = properties,
+            schema = FilesDatabase.Schema.synchronous(),
+        ) }
+    },
+    createScanner = { repository, filesystem ->
+        DirectoryScanner(FileSystem.SYSTEM, repository, filesystemLane = filesystem)
+    },
+)

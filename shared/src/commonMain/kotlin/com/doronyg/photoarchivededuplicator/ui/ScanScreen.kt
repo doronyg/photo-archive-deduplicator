@@ -13,6 +13,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -23,11 +24,14 @@ import com.doronyg.photoarchivededuplicator.scan.ScanProgress
 import com.doronyg.photoarchivededuplicator.scan.ScanState
 import okio.Path
 import okio.Path.Companion.toPath
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
 
 /** How the user picks what to scan. */
 sealed interface ScanTarget {
     /** Any folder: typed, or chosen with [pickDirectory] (returns null if cancelled). */
-    class ChosenFolder(val pickDirectory: () -> String?) : ScanTarget
+    class ChosenFolder(val pickDirectory: suspend () -> String?) : ScanTarget
 
     /**
      * Always [root]; e.g. Android's media library.
@@ -44,15 +48,25 @@ sealed interface ScanTarget {
 fun ScanScreen(controller: ScanController, target: ScanTarget, modifier: Modifier = Modifier) {
     val state by controller.state.collectAsState()
     val running = state is ScanState.Running
+    val scope = rememberCoroutineScope()
 
     Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
         when (target) {
             is ScanTarget.ChosenFolder -> ChosenFolderControls(controller, target, running)
             is ScanTarget.Fixed -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { target.requestAccess { controller.start(target.root) } }, enabled = !running) {
+                Button(onClick = {
+                    scope.launch(Dispatchers.Main) {
+                        target.requestAccess { scope.launch(Dispatchers.Main) { controller.start(target.root) } }
+                    }
+                }, enabled = !running) {
                     Text(target.buttonLabel)
                 }
                 OutlinedButton(onClick = controller::pause, enabled = running) { Text("Pause") }
+                OutlinedButton(onClick = {
+                    scope.launch(Dispatchers.Main) {
+                        target.requestAccess { scope.launch(Dispatchers.Main) { controller.resume() } }
+                    }
+                }, enabled = !running) { Text("Resume") }
             }
         }
         ScanStatus(state)
@@ -62,6 +76,8 @@ fun ScanScreen(controller: ScanController, target: ScanTarget, modifier: Modifie
 @Composable
 private fun ChosenFolderControls(controller: ScanController, target: ScanTarget.ChosenFolder, running: Boolean) {
     var rootText by rememberSaveable { mutableStateOf("") }
+    var pickerError by rememberSaveable { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedTextField(
@@ -72,18 +88,34 @@ private fun ChosenFolderControls(controller: ScanController, target: ScanTarget.
                 enabled = !running,
                 modifier = Modifier.weight(1f),
             )
-            OutlinedButton(onClick = { target.pickDirectory()?.let { rootText = it } }, enabled = !running) {
+            OutlinedButton(onClick = {
+                scope.launch(Dispatchers.Main) {
+                    pickerError = null
+                    try {
+                        target.pickDirectory()?.let { rootText = it }
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        pickerError = "Could not choose folder: ${e.message}"
+                    }
+                }
+            }, enabled = !running) {
                 Text("Choose…")
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = { controller.start(rootText.trim().toPath()) }, enabled = !running && rootText.isNotBlank()) {
+            Button(onClick = { scope.launch { controller.start(rootText.trim().toPath()) } }, enabled = !running && rootText.isNotBlank()) {
                 Text("Start scan")
             }
             OutlinedButton(onClick = controller::pause, enabled = running) { Text("Pause") }
             // Also continues a scan interrupted by quitting the app
-            OutlinedButton(onClick = { controller.resume() }, enabled = !running) { Text("Resume") }
+            OutlinedButton(onClick = {
+                scope.launch { controller.resume(rootText.trim().takeIf { it.isNotEmpty() }?.toPath()) }
+            }, enabled = !running) { Text("Resume") }
         }
+        pickerError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        Text("Start rescans the entered root and resets its timer. Resume continues its saved queue, or the last selected scan when the field is empty.",
+            style = MaterialTheme.typography.bodySmall)
     }
 }
 
@@ -107,7 +139,9 @@ private fun ProgressDetails(progress: ScanProgress) {
         Text("Directories pending: ${progress.pendingDirectories}")
         Text("Directories failed: ${progress.failedDirectories}")
         Text("Files found: ${progress.filesFound}")
-        Text("Elapsed: ${formatElapsed(progress.elapsedMillis)}")
+        progress.root?.let { Text("Scan root: $it") }
+        Text("This run: ${formatElapsed(progress.elapsedMillis)}")
+        Text("Total active: ${formatElapsed(progress.totalElapsedMillis)}")
         progress.currentDirectory?.let {
             Text("Current: $it", style = MaterialTheme.typography.bodySmall, maxLines = 1)
         }

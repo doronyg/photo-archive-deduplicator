@@ -19,13 +19,16 @@ class ScanTestEnvironment : AutoCloseable {
     val fakeFs = FakeFileSystem().apply { allowSymlinks = true }
     val fs = FlakyFileSystem(fakeFs).apply { onBlockingCall = io::assertOnIo }
     private val driver = createInMemoryDriver()
-    val repository = DirectoryRepository(createFilesDatabase(IoGuardedDriver(driver, io)), io)
+    var beforeStatement: (String) -> Unit = {}
+    val repository = newRepository()
+
+    fun newRepository() = DirectoryRepository(createFilesDatabase(IoGuardedDriver(driver, io) { beforeStatement(it) }), io)
 
     fun test(body: suspend TestScope.() -> Unit) = runTest(testDispatcher, testBody = body)
 
     // testScheduler.currentTime is still experimental
     @OptIn(ExperimentalCoroutinesApi::class)
-    fun TestScope.scanner(config: ScanConfig = ScanConfig()) = DirectoryScanner(
+    internal fun TestScope.scanner(config: ScanConfig = ScanConfig()) = DirectoryScanner(
         fileSystem = fs,
         repository = repository,
         config = config,

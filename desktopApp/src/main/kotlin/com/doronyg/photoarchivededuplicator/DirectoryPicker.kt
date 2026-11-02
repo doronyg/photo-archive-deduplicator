@@ -4,12 +4,21 @@ import java.awt.FileDialog
 import java.awt.Frame
 import java.io.File
 import javax.swing.JFileChooser
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 private const val MAC_DIRECTORY_DIALOG_PROPERTY = "apple.awt.fileDialogForDirectories"
 
-/** Native folder chooser; returns the absolute path, or null if cancelled. Blocks the UI thread while open (modal). */
-fun pickDirectory(parent: Frame): String? =
-    if ("mac" in System.getProperty("os.name").lowercase()) pickWithMacDialog(parent) else pickWithSwing(parent)
+/** Native modal UI belongs on Main; resolve its initial filesystem location on IO first. */
+suspend fun pickDirectory(parent: Frame, container: AppContainer): String? {
+    val initialDirectory = desktopPickerInitialDirectory(container)
+    return withContext(Dispatchers.Main) {
+        Diagnostics.logger.operation(LogTags.PICKER, "native chooser setup/show (UI toolkit on Main)") {
+            if ("mac" in System.getProperty("os.name").lowercase()) pickWithMacDialog(parent)
+            else pickWithSwing(parent, initialDirectory)
+        }
+    }
+}
 
 private fun pickWithMacDialog(parent: Frame): String? {
     // Only the native macOS dialog looks right there, and it picks folders only via this property
@@ -24,8 +33,9 @@ private fun pickWithMacDialog(parent: Frame): String? {
     }
 }
 
-private fun pickWithSwing(parent: Frame): String? {
-    val chooser = JFileChooser().apply {
+private fun pickWithSwing(parent: Frame, initialDirectory: File): String? {
+    // Swing/native chooser construction and its own browsing are UI toolkit operations.
+    val chooser = JFileChooser(initialDirectory).apply {
         fileSelectionMode = JFileChooser.DIRECTORIES_ONLY
         dialogTitle = "Choose a folder to scan"
     }

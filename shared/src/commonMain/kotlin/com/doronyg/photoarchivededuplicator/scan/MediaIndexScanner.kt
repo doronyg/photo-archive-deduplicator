@@ -1,5 +1,9 @@
 package com.doronyg.photoarchivededuplicator.scan
 
+import com.doronyg.photoarchivededuplicator.LogTags
+
+import com.doronyg.photoarchivededuplicator.Diagnostics
+
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
@@ -24,21 +28,32 @@ fun interface MediaSource {
  * A media index is local and quick to query, so every run re-reads it in full rather than
  * tracking resumable per-folder work.
  */
-class MediaIndexScanner(
+internal class MediaIndexScanner(
     private val source: MediaSource,
     private val repository: DirectoryRepository,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val clock: () -> Long = { Clock.System.now().toEpochMilliseconds() },
 ) : InventoryScanner {
-    override suspend fun startScan(root: Path, onEvent: suspend (ScanEvent) -> Unit) {
-        repository.seedRoot(root)
-        val filesByFolder = withContext(ioDispatcher) { source.items() }
-            .filter { it.path.isInside(root) }
+    override suspend fun startScan(root: Path, onEvent: suspend (ScanEvent) -> Unit) = repository.scanning {
+        scanRoot(root, onEvent)
+    }
+
+    private suspend fun scanRoot(root: Path, onEvent: suspend (ScanEvent) -> Unit) {
+        val scanRoot = root.inventoryPath()
+        val exclusions = repository.exclusions()
+        if (exclusions.any { scanRoot.isInTree(it.path) }) return
+        repository.seedRoot(scanRoot)
+        val filesByFolder = Diagnostics.logger.operation(LogTags.MEDIA_INDEX, "source.items dispatch-to=$ioDispatcher") {
+            withContext(ioDispatcher) { source.items() }
+        }
+            .map { it.copy(path = it.path.normalized()) }
+            .filter { it.path != scanRoot && it.path.isInTree(scanRoot) &&
+                exclusions.none { excluded -> it.path.isInTree(excluded.path) } }
             .groupBy { it.path.parent!! }
-        val subfoldersByFolder = subfolderTree(root, filesByFolder.keys)
+        val subfoldersByFolder = subfolderTree(scanRoot, filesByFolder.keys)
 
         onEvent(ScanEvent.Started(pendingDirectories = 1))
-        val queue = ArrayDeque(listOf(root))
+        val queue = ArrayDeque(listOf(scanRoot))
         while (queue.isNotEmpty()) {
             currentCoroutineContext().ensureActive()
             val folder = queue.removeFirst()
@@ -56,11 +71,9 @@ class MediaIndexScanner(
         }
     }
 
-    /** Rescans every root scanned before. */
-    override suspend fun resume(onEvent: suspend (ScanEvent) -> Unit) {
-        for (root in repository.childOverviews(parent = null)) {
-            startScan(root.directory.path, onEvent)
-        }
+    /** The platform index is re-read, but only the selected logical root is reconciled. */
+    override suspend fun resume(onEvent: suspend (ScanEvent) -> Unit) = repository.scanning {
+        scanRoot(repository.resumableScanSession().root, onEvent)
     }
 
     /** Maps each folder to its direct subfolders, for every folder between [root] and [folders]. */
@@ -77,6 +90,4 @@ class MediaIndexScanner(
         }
         return tree
     }
-
-    private fun Path.isInside(root: Path): Boolean = generateSequence(parent) { it.parent }.any { it == root }
 }

@@ -1,0 +1,14 @@
+CREATE TABLE directoryExclusion (
+    path TEXT NOT NULL PRIMARY KEY,
+    reason TEXT
+);
+
+ALTER TABLE scanFile ADD COLUMN createdAt INTEGER;
+CREATE INDEX scanFileNameSizeIndex ON scanFile(name COLLATE BINARY, sizeBytes);
+
+CREATE TABLE scanSession (
+    root TEXT NOT NULL PRIMARY KEY,
+    activeMillis INTEGER NOT NULL DEFAULT 0,
+    selected INTEGER NOT NULL DEFAULT 0,
+    finished INTEGER NOT NULL DEFAULT 0
+);

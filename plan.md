@@ -22,6 +22,7 @@ This is also a genuine portfolio project demonstrating Kotlin Multiplatform, sof
 8. **Resumable processing.** Long scans must survive interruptions without unnecessarily reprocessing the entire archive.
 9. **Multiplatform from the beginning, platform-specific only where necessary.** Put portable domain logic in shared Kotlin code. Isolate filesystem, database, UI, and platform integrations behind appropriate interfaces.
 10. **Useful early deliverables.** Every phase should produce something useful, even if later phases are never implemented.
+11. **Never block the UI with application I/O.** Public database/filesystem operations (including container initialization and shutdown) must be suspend APIs that dispatch blocking work internally to IO. UI event handlers launch coroutines; UI callbacks and native UI operations run explicitly on Main. Do not use `runBlocking` on UI or `CoroutineStart.UNDISPATCHED` to start scans. Cancel and join scan work before closing its driver on IO, without holding UI/progress locks across I/O. Keep raw drivers, generated database access, and blocking filesystem implementations private/internal; do not edit generated sources. The compiler enforces suspend call boundaries, not arbitrary effect safety. Modal folder chooser construction/browsing is a native UI operation and stays on Main; application-owned filesystem preparation runs on IO.
 
 ## 3. Technology and project structure
 
@@ -84,6 +85,16 @@ Do not force all code into `commonMain`. Use platform abstractions only where th
 Use SQLite for the inventory when its multiplatform integration has been evaluated. SQLDelight is a candidate because it supports Kotlin Multiplatform.
 
 Keep the initial persistence API narrow so the domain and duplicate-detection tests do not depend on a particular database implementation.
+
+### Local diagnostics
+
+Desktop diagnostics are automatically written under `desktopDataDirectory()/logs`, including before inventory startup completes. On macOS this is `~/Library/Application Support/PhotoArchiveDeduplicator/logs`. Windows uses `%APPDATA%/PhotoArchiveDeduplicator/logs` (home fallback); Linux uses `$XDG_DATA_HOME/PhotoArchiveDeduplicator/logs` or `~/.local/share/PhotoArchiveDeduplicator/logs`.
+
+The background single writer appends `diagnostics.log` across restarts and rotates to `diagnostics.1.log` through `diagnostics.4.log`: at most five files of 5 MiB each. Every entry is UTF-8 encoded and flushed. File and console workers receive events independently: a stalled or failing sink cannot block the other. No filesystem operations run in producers or while displaying the folder path.
+
+The Logs screen exposes the folder link even if inventory startup fails, as well as file errors and separate queue-drop/failure counters. Queues are bounded and discard oldest pending events under overload to retain the latest tail; operation beginnings can still be lost under sustained overload or rotation. Publication is batched every 200 ms. Flush empties Java buffers, not OS caches (`fsync` is not used); force-kill can lose queued/in-flight entries, and power failure can also lose OS-cached data. Normal desktop exit attempts a bounded two-second drain. Clear only clears the in-memory view, never saved files.
+
+Logs are local only and can contain filenames and paths; review before sharing. Android continues to use Logcat without duplicate private log files. Persistent logging helps diagnose freezes; it does not establish or fix their cause.
 
 ### UI
 
@@ -312,4 +323,3 @@ The first milestone is complete when:
 - Reports can be exported without modifying any source files.
 
 Everything else follows from the evidence collected in this phase.
-

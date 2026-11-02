@@ -1,20 +1,25 @@
 package com.doronyg.photoarchivededuplicator.scan
 
+import com.doronyg.photoarchivededuplicator.LogTags
+
 import app.cash.sqldelight.EnumColumnAdapter
 import app.cash.sqldelight.async.coroutines.awaitAsList
 import app.cash.sqldelight.async.coroutines.awaitAsOne
 import app.cash.sqldelight.async.coroutines.awaitAsOneOrNull
 import app.cash.sqldelight.db.SqlDriver
+import com.doronyg.photoarchivededuplicator.Diagnostics
+import com.doronyg.photoarchivededuplicator.IoLane
 import com.doronyg.photoarchivededuplicator.db.FilesDatabase
 import com.doronyg.photoarchivededuplicator.db.ScanDirectory
 import com.doronyg.photoarchivededuplicator.db.ScanFile
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import okio.Path
 import okio.Path.Companion.toPath
 
-fun createFilesDatabase(driver: SqlDriver): FilesDatabase =
+internal fun createFilesDatabase(driver: SqlDriver): FilesDatabase =
     FilesDatabase(
         driver = driver,
         scanDirectoryAdapter = ScanDirectory.Adapter(statusAdapter = EnumColumnAdapter()),
@@ -38,7 +43,19 @@ data class FileRecord(
     val sizeBytes: Long,
     val modifiedAt: Long?,
     val lastScanned: Long,
+    val createdAt: Long? = null,
 )
+
+data class DirectoryExclusion(val path: Path, val reason: String?)
+data class DuplicateCandidateGroup(val name: String, val sizeBytes: Long, val files: List<FileRecord>)
+data class ScanSessionRecord(val root: Path, val activeMillis: Long, val finished: Boolean = false)
+
+internal fun Path.inventoryPath(): Path = normalized().also {
+    require(it.isAbsolute) { "Enter an absolute path." }
+}
+
+internal fun Path.isInTree(root: Path): Boolean =
+    generateSequence(normalized()) { it.parent }.any { it == root.normalized() }
 
 /** A directory plus the total size of the files directly inside it (not recursive). */
 data class DirectoryOverview(val directory: DirectoryRecord, val fileBytes: Long)
@@ -56,38 +73,153 @@ data class DirectoryListing(
     val subdirectories: List<Entry>,
     val files: List<Entry>,
 ) {
-    data class Entry(val path: Path, val sizeBytes: Long, val modifiedAt: Long?)
+    data class Entry(val path: Path, val sizeBytes: Long, val modifiedAt: Long?, val createdAt: Long? = null)
 }
 
 /**
  * Persists scan progress. Paths are stored as Okio path strings.
  *
- * Every operation is a suspend function that moves itself onto [ioDispatcher],
- * so callers never block their own thread on SQLite, whatever dispatcher they use.
- * Inject a test dispatcher in tests only.
+ * Every operation holds the database lane across suspension and transactions, so callers
+ * suspend without blocking their own thread. The container owns the single JDBC thread.
+ * Test dispatchers are injected only for virtual-time tests; nested calls use private
+ * in-lane helpers rather than reacquiring the non-reentrant lane.
  */
-class DirectoryRepository(
+class DirectoryRepository internal constructor(
     private val database: FilesDatabase,
-    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    private val databaseLane: IoLane = IoLane("database-test", ioDispatcher),
 ) {
     private val directories = database.scanDirectoryQueries
     private val files = database.scanFileQueries
+    private val excluded = database.directoryExclusionQueries
+    private val scanSession = Mutex()
+
+    internal suspend fun <T> scanning(block: suspend () -> T): T =
+        Diagnostics.logger.operation(LogTags.DATABASE, "scan mutex wait/hold") { scanSession.withLock { block() } }
+
+    suspend fun currentScanSession(): ScanSessionRecord? = io("currentScanSession") { currentScanSessionInLane() }
+
+    private suspend fun currentScanSessionInLane(): ScanSessionRecord? =
+        database.scanSessionQueries.currentSession().awaitAsOneOrNull()?.let {
+            ScanSessionRecord(it.root.toPath(), it.activeMillis, it.finished != 0L)
+        }
+
+    /** Selecting a new scan and queuing its root commit together, even if Pause wins initialization. */
+    suspend fun beginScanSession(root: Path): ScanSessionRecord = io("beginScanSession transaction $root") {
+        beginScanSessionInLane(root, newScan = true)
+    }
+
+    private suspend fun beginScanSessionInLane(root: Path, newScan: Boolean = false): ScanSessionRecord {
+        val normalized = root.inventoryPath()
+        Diagnostics.logger.operation(LogTags.DATABASE, "transaction beginScanSession $normalized") {
+            database.transaction {
+                database.scanSessionQueries.clearSelection()
+                database.scanSessionQueries.beginSession(normalized.toString())
+                // Legacy resume creates only the session; completed roots must not be requeued.
+                if (newScan && exclusionsInLane().none { normalized.isInTree(it.path) }) {
+                    enqueue(normalized, parent = null, modifiedAt = null)
+                }
+            }
+        }
+        return ScanSessionRecord(normalized, 0)
+    }
+
+    /** A legacy inventory can resume automatically only when its root is unambiguous. */
+    suspend fun resumableScanSession(root: Path? = null): ScanSessionRecord = io("resumableScanSession transaction $root") {
+        if (root != null) {
+            val normalized = root.inventoryPath()
+            check(directoryInLane(normalized) != null) { "This folder has not been scanned. Start a scan first." }
+            val saved = database.scanSessionQueries.sessionForRoot(normalized.toString()).awaitAsOneOrNull()
+            if (saved == null) return@io beginScanSessionInLane(normalized)
+            Diagnostics.logger.operation(LogTags.DATABASE, "transaction selectSession $normalized") {
+                database.transaction {
+                    database.scanSessionQueries.clearSelection()
+                    database.scanSessionQueries.selectSession(normalized.toString())
+                }
+            }
+            return@io ScanSessionRecord(normalized, saved.activeMillis, saved.finished != 0L)
+        }
+        currentScanSessionInLane() ?: run {
+            val records = allDirectoriesInLane()
+            val storedRoots = records.filter { it.parentPath == null }.map { it.path }
+            // A separately seeded nested root can remain parentless (e.g. an excluded
+            // tree). It must not make its containing scan look like two unrelated roots.
+            val roots = storedRoots.filter { root -> storedRoots.none { it != root && root.isInTree(it) } }
+            val unfinished = records.filter {
+                it.status == DirectoryStatus.PENDING || it.status == DirectoryStatus.IN_PROGRESS
+            }
+            val candidates = roots.filter { root -> unfinished.any { it.path.isInTree(root) } }
+                .ifEmpty { roots }
+            check(candidates.size == 1) {
+                "No unambiguous scan to resume. Enter a specific scanned root and Resume; other inventory is preserved."
+            }
+            beginScanSessionInLane(candidates.single())
+        }
+    }
+
+    suspend fun checkpointScanSession(session: ScanSessionRecord) = io("checkpointScanSession ${session.root}") {
+        check(currentScanSessionInLane()?.root == session.root) { "The active scan root changed." }
+        database.scanSessionQueries.checkpoint(session.activeMillis, if (session.finished) 1 else 0, session.root.toString())
+    }
+
+    private suspend fun editExclusions(name: String, block: suspend () -> Unit) {
+        Diagnostics.logger.d(LogTags.DATABASE, "BEGIN exclusions mutex tryLock $name")
+        check(scanSession.tryLock()) { "Pause the scan before changing exclusions." }
+        try {
+            io(name) { block() }
+        } finally {
+            scanSession.unlock()
+        }
+    }
+
+    suspend fun exclusions(): List<DirectoryExclusion> = io("exclusions") { exclusionsInLane() }
+
+    private suspend fun exclusionsInLane(): List<DirectoryExclusion> =
+        excluded.selectAll().awaitAsList().map { DirectoryExclusion(it.path.toPath(), it.reason) }
+
+    suspend fun addExclusion(path: Path, reason: String? = null) = editExclusions("addExclusion $path") {
+        excluded.put(path.inventoryPath().toString(), reason?.trim()?.takeIf { it.isNotEmpty() })
+    }
+
+    suspend fun removeExclusion(path: Path) = editExclusions("removeExclusion $path") {
+        excluded.remove(path.inventoryPath().toString())
+    }
+
+    suspend fun isExcluded(path: Path): Boolean = exclusions().any { path.isInTree(it.path) }
+
+    suspend fun duplicateCandidates(root: Path): List<DuplicateCandidateGroup> = io("duplicateCandidates $root") {
+        files.selectDuplicateCandidates(root.inventoryPath().toString()).awaitAsList()
+            .map { FileRecord(it.path.toPath(), it.directoryPath.toPath(), it.name, it.extension,
+                it.sizeBytes, it.modifiedAt, it.lastScanned, it.createdAt) }
+            .groupBy { it.name to it.sizeBytes }
+            .map { (key, members) -> DuplicateCandidateGroup(key.first, key.second, members) }
+    }
 
     /** Queues [root] for scanning, re-queuing it if a previous scan already processed it. */
-    suspend fun seedRoot(root: Path) = io {
-        database.transaction { enqueue(root, parent = null, modifiedAt = null) }
+    suspend fun seedRoot(root: Path) = io("seedRoot transaction $root") {
+        val normalized = root.inventoryPath()
+        if (exclusionsInLane().none { normalized.isInTree(it.path) }) {
+            Diagnostics.logger.operation(LogTags.DATABASE, "transaction seedRoot $normalized") {
+                database.transaction { enqueue(normalized, parent = null, modifiedAt = null) }
+            }
+        }
     }
 
     /** Returns directories left IN_PROGRESS by an interrupted run to the queue. */
-    suspend fun resetInterrupted() = io {
-        directories.replaceStatus(newStatus = DirectoryStatus.PENDING, oldStatus = DirectoryStatus.IN_PROGRESS)
+    suspend fun resetInterrupted(root: Path? = null) = io("resetInterrupted $root") {
+        directories.replaceStatus(newStatus = DirectoryStatus.PENDING, oldStatus = DirectoryStatus.IN_PROGRESS,
+            root = root?.toString())
     }
 
-    suspend fun fetchPendingBatch(limit: Int): List<Path> = io {
-        directories.selectBatchByStatus(DirectoryStatus.PENDING, limit.toLong()).awaitAsList().map { it.toPath() }
+    suspend fun fetchPendingBatch(limit: Int, root: Path? = null): List<Path> = io("fetchPendingBatch $root limit=$limit") {
+        directories.selectBatchByStatus(DirectoryStatus.PENDING, root?.toString(), limit.toLong()).awaitAsList().map { it.toPath() }
     }
 
-    suspend fun markInProgress(path: Path) = io {
+    suspend fun pendingScanCount(root: Path? = null): Long = io("pendingScanCount $root") {
+        directories.countScannableWithStatus(DirectoryStatus.PENDING, root?.toString()).awaitAsOne()
+    }
+
+    suspend fun markInProgress(path: Path) = io("markInProgress $path") {
         directories.updateStatus(DirectoryStatus.IN_PROGRESS, path.toString())
     }
 
@@ -95,24 +227,27 @@ class DirectoryRepository(
      * Atomically reconciles stored children of [dir] with a fresh [listing]
      * and marks [dir] COMPLETED.
      */
-    suspend fun recordListing(dir: Path, listing: DirectoryListing, scannedAt: Long) = io {
-        database.transaction {
+    suspend fun recordListing(dir: Path, listing: DirectoryListing, scannedAt: Long) = io("recordListing transaction $dir") {
+        val exclusions = exclusionsInLane()
+        fun protected(path: Path) = exclusions.any { path.isInTree(it.path) }
+        if (protected(dir)) return@io
+        Diagnostics.logger.operation(LogTags.DATABASE, "transaction recordListing $dir") { database.transaction {
             val dirKey = dir.toString()
 
-            val listedDirs = listing.subdirectories.associateBy { it.path.toString() }
+            val listedDirs = listing.subdirectories.filterNot { protected(it.path) }.associateBy { it.path.toString() }
             for (stale in directories.selectChildPaths(dirKey).awaitAsList() - listedDirs.keys) {
-                deleteSubtree(stale)
+                deleteSubtree(stale, exclusions)
             }
-            for (sub in listing.subdirectories) {
+            for (sub in listedDirs.values) {
                 enqueue(sub.path, parent = dir, modifiedAt = sub.modifiedAt)
             }
 
-            val listedFiles = listing.files.associateBy { it.path.toString() }
+            val listedFiles = listing.files.filterNot { protected(it.path) }.associateBy { it.path.toString() }
             for (stale in files.selectPathsInDirectory(dirKey).awaitAsList() - listedFiles.keys) {
-                files.deleteByPath(stale)
+                if (!protected(stale.toPath())) files.deleteByPath(stale)
             }
             for ((key, file) in listedFiles) {
-                files.updateFile(file.sizeBytes, file.modifiedAt, scannedAt, key)
+                files.updateFile(file.sizeBytes, file.modifiedAt, file.createdAt, scannedAt, key)
                 files.insertFileIfAbsent(
                     path = key,
                     directoryPath = dirKey,
@@ -120,34 +255,36 @@ class DirectoryRepository(
                     extension = extensionOf(file.path.name),
                     sizeBytes = file.sizeBytes,
                     modifiedAt = file.modifiedAt,
+                    createdAt = file.createdAt,
                     lastScanned = scannedAt,
                 )
             }
 
-            directories.recordSuccess(DirectoryStatus.COMPLETED, listing.files.size.toLong(), scannedAt, dirKey)
-        }
+            directories.recordSuccess(DirectoryStatus.COMPLETED,
+                files.selectPathsInDirectory(dirKey).awaitAsList().size.toLong(), scannedAt, dirKey)
+        } }
     }
 
     /**
      * Records a failed listing attempt and returns the updated record: PENDING while
      * attempts remain, FAILED once [maxAttempts] is reached. Stored children are kept.
      */
-    suspend fun recordFailure(path: Path, maxAttempts: Int): DirectoryRecord = io {
-        database.transactionWithResult {
+    suspend fun recordFailure(path: Path, maxAttempts: Int): DirectoryRecord = io("recordFailure transaction $path") {
+        Diagnostics.logger.operation(LogTags.DATABASE, "transaction recordFailure $path") { database.transactionWithResult {
             val key = path.toString()
             val attempts = (directories.selectByPath(key).awaitAsOneOrNull()?.retryCount ?: 0) + 1
             val status = if (attempts >= maxAttempts) DirectoryStatus.FAILED else DirectoryStatus.PENDING
             directories.recordFailure(status, attempts, key)
             directories.selectByPath(key).awaitAsOneOrNull()!!.toRecord()
-        }
+        } }
     }
 
-    suspend fun countWithStatus(status: DirectoryStatus): Long = io {
+    suspend fun countWithStatus(status: DirectoryStatus): Long = io("countWithStatus $status") {
         directories.countWithStatus(status).awaitAsOne()
     }
 
     /** Subdirectories of [parent], or the scan roots when [parent] is null. */
-    suspend fun childOverviews(parent: Path?): List<DirectoryOverview> = io {
+    suspend fun childOverviews(parent: Path?): List<DirectoryOverview> = io("childOverviews $parent") {
         directories.selectChildOverviews(parent?.toString()).awaitAsList().map {
             DirectoryOverview(
                 directory = ScanDirectory(
@@ -158,15 +295,15 @@ class DirectoryRepository(
         }
     }
 
-    suspend fun filesIn(directory: Path): List<FileRecord> = io {
+    suspend fun filesIn(directory: Path): List<FileRecord> = io("filesIn $directory") {
         files.selectInDirectory(directory.toString()).awaitAsList().map { it.toRecord() }
     }
 
-    suspend fun directoriesWithStatus(status: DirectoryStatus): List<DirectoryRecord> = io {
+    suspend fun directoriesWithStatus(status: DirectoryStatus): List<DirectoryRecord> = io("directoriesWithStatus $status") {
         directories.selectWithStatus(status).awaitAsList().map { it.toRecord() }
     }
 
-    suspend fun summary(): InventorySummary = io {
+    suspend fun summary(): InventorySummary = io("summary") {
         val totals = files.selectTotals().awaitAsOne()
         InventorySummary(
             directoriesByStatus = directories.countByStatus().awaitAsList().associate { it.status to it.directoryCount },
@@ -175,23 +312,26 @@ class DirectoryRepository(
         )
     }
 
-    suspend fun directory(path: Path): DirectoryRecord? = io {
+    suspend fun directory(path: Path): DirectoryRecord? = io("directory $path") { directoryInLane(path) }
+
+    private suspend fun directoryInLane(path: Path): DirectoryRecord? =
         directories.selectByPath(path.toString()).awaitAsOneOrNull()?.toRecord()
-    }
 
-    suspend fun allDirectories(): List<DirectoryRecord> = io {
+    suspend fun allDirectories(): List<DirectoryRecord> = io("allDirectories") { allDirectoriesInLane() }
+
+    private suspend fun allDirectoriesInLane(): List<DirectoryRecord> =
         directories.selectAll().awaitAsList().map { it.toRecord() }
-    }
 
-    suspend fun file(path: Path): FileRecord? = io {
+    suspend fun file(path: Path): FileRecord? = io("file $path") {
         files.selectByPath(path.toString()).awaitAsOneOrNull()?.toRecord()
     }
 
-    suspend fun allFiles(): List<FileRecord> = io {
+    suspend fun allFiles(): List<FileRecord> = io("allFiles") {
         files.selectAll().awaitAsList().map { it.toRecord() }
     }
 
-    private suspend fun <T> io(block: suspend () -> T): T = withContext(ioDispatcher) { block() }
+    private suspend fun <T> io(name: String, block: suspend () -> T): T =
+        databaseLane.run(name, block)
 
     // Private helpers run inside an io { } transaction; they must not switch context themselves.
     private suspend fun enqueue(path: Path, parent: Path?, modifiedAt: Long?) {
@@ -201,10 +341,19 @@ class DirectoryRepository(
         directories.requeue(DirectoryStatus.PENDING, parentKey, modifiedAt, key)
     }
 
-    private suspend fun deleteSubtree(rootKey: String) {
+    private suspend fun deleteSubtree(rootKey: String, exclusions: List<DirectoryExclusion>) {
         for (key in directories.selectSubtree(rootKey).awaitAsList()) {
-            files.deleteInDirectory(key)
-            directories.deleteByPath(key)
+            val path = key.toPath()
+            if (exclusions.any { path.isInTree(it.path) }) continue
+            for (file in files.selectPathsInDirectory(key).awaitAsList()) {
+                if (exclusions.none { file.toPath().isInTree(it.path) }) files.deleteByPath(file)
+            }
+            // Keep ancestors so retained protected inventory stays reachable in Browse.
+            if (exclusions.none { it.path.isInTree(path) }) {
+                directories.deleteByPath(key)
+            } else {
+                directories.updateFileCount(files.selectPathsInDirectory(key).awaitAsList().size.toLong(), key)
+            }
         }
     }
 
@@ -226,6 +375,7 @@ class DirectoryRepository(
         sizeBytes = sizeBytes,
         modifiedAt = modifiedAt,
         lastScanned = lastScanned,
+        createdAt = createdAt,
     )
 }
 

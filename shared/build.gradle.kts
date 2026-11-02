@@ -58,6 +58,8 @@ sqldelight {
             packageName.set("com.doronyg.photoarchivededuplicator.db")
             // Queries return awaitable results; repository API is suspend-only
             generateAsync.set(true)
+            verifyMigrations.set(true)
+            schemaOutputDirectory.set(file("src/commonMain/sqldelight/databases"))
         }
     }
 }
@@ -74,6 +76,7 @@ tasks.withType<app.cash.sqldelight.gradle.SqlDelightTask>().configureEach {
     doLast {
         val marker = "GENERATED FILE - DO NOT EDIT"
         val sqFiles = sqlDelightSourceDir.walkTopDown().filter { it.extension == "sq" }.sortedBy { it.name }.toList()
+        val migrationFiles = sqlDelightSourceDir.walkTopDown().filter { it.extension == "sqm" }.sortedBy { it.name }.toList()
         fun rel(file: File) = file.relativeTo(projectDir.parentFile).invariantSeparatorsPath
 
         fun sourcesOf(generated: File): List<String> {
@@ -84,7 +87,7 @@ tasks.withType<app.cash.sqldelight.gradle.SqlDelightTask>().configureEach {
             }
             return (byName + byTable).distinct().map(::rel).ifEmpty {
                 // Database-level classes are built from every .sq file plus the Gradle config
-                sqFiles.map(::rel) + "${rel(sqlDelightConfigFile)} (sqldelight { databases { ... } } block)"
+                (sqFiles + migrationFiles).map(::rel) + "${rel(sqlDelightConfigFile)} (sqldelight { databases { ... } } block)"
             }
         }
 

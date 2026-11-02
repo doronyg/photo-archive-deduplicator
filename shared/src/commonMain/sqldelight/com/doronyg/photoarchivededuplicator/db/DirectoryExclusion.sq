@@ -1,0 +1,13 @@
+CREATE TABLE directoryExclusion (
+    path TEXT NOT NULL PRIMARY KEY,
+    reason TEXT
+);
+
+put:
+INSERT OR REPLACE INTO directoryExclusion(path, reason) VALUES (:path, :reason);
+
+remove:
+DELETE FROM directoryExclusion WHERE path = :path;
+
+selectAll:
+SELECT * FROM directoryExclusion ORDER BY path;
