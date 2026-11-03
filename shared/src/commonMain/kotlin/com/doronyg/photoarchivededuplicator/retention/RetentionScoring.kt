@@ -4,6 +4,7 @@ import com.doronyg.photoarchivededuplicator.scan.FileRecord
 import com.doronyg.photoarchivededuplicator.exif.ExifInput
 import com.doronyg.photoarchivededuplicator.exif.ExifRecord
 import com.doronyg.photoarchivededuplicator.exif.ExifStatus
+import com.doronyg.photoarchivededuplicator.exif.validatedExifTimestamp
 import okio.Path
 import kotlin.math.floor
 import kotlin.time.Instant
@@ -51,6 +52,8 @@ data class RetentionConfig(
     val filenameDateMismatchPenalty: Double = -40.0,
     val exifConfirmedDateScore: Double = 90.0,
     val exifDateMismatchPenalty: Double = -40.0,
+    val backupFilenamePenalty: Double = -20.0,
+    val numberedFilenamePenalty: Double = -10.0,
     val ambiguityMargin: Double = 10.0,
     val backupDirectoryNames: Set<String> = setOf(
         "MobileBackup", "Google Photos", "Picasa", "Backup", "Backups", "Import", "Imports", "Sync", "PhotoSync",
@@ -62,7 +65,8 @@ data class RetentionConfig(
     init {
         val bonuses = listOf(isoDateBonus, alternativeDateBonus, yearMonthDateBonus, partialDateBonus,
             modifiedDateBonus, createdDateBonus, exifConfirmedDateScore)
-        val penalties = listOf(backupPenalty, temporaryPenalty, filenameDateMismatchPenalty, exifDateMismatchPenalty)
+        val penalties = listOf(backupPenalty, temporaryPenalty, filenameDateMismatchPenalty, exifDateMismatchPenalty,
+            backupFilenamePenalty, numberedFilenamePenalty)
         require((bonuses + penalties).all { it.isFinite() && it == floor(it) && it in -1_000_000.0..1_000_000.0 }) {
             "Scoring weights must be finite whole numbers within +/- 1,000,000."
         }
@@ -101,7 +105,7 @@ class RetentionScorer(config: RetentionConfig = RetentionConfig()) {
     val identity: ScoreIdentity = ScoreIdentity(
         type = "retention",
         algorithmId = "directory-retention",
-        algorithmVersion = "4",
+        algorithmVersion = "5",
         configurationId = configurationId(this.config),
     )
     val ambiguityMargin: Double = config.ambiguityMargin
@@ -110,12 +114,13 @@ class RetentionScorer(config: RetentionConfig = RetentionConfig()) {
         val components = file.directoryPath.segments
         val date = strongestDate(components)
         val fullDate = date?.isoDate
-        val filenameDate = if (fullDate != null) filenameDate(file.path.name) else null
+        val filename = filenameHints(file.path.name)
+        val filenameDate = if (fullDate != null) filenameDate(filename.dateName) else null
         val filenameMismatch = fullDate != null && filenameDate != null && fullDate != filenameDate
         val exifDate = if (fullDate != null) usableExifDate(file, exif) else null
         val exifMatches = fullDate != null && exifDate == fullDate
         val exifMismatch = exifDate != null && exifDate != fullDate
-        val filenameProtectsFolder = exifMismatch && filenameDate(file.path.name, includeCameraDates = true) == fullDate
+        val filenameProtectsFolder = exifMismatch && filenameDate(filename.dateName, includeCameraDates = true) == fullDate
         val penalizeFilename = filenameMismatch && !exifMatches
         val penalizeExif = exifMismatch && !filenameProtectsFolder
         val factors = buildList {
@@ -168,6 +173,14 @@ class RetentionScorer(config: RetentionConfig = RetentionConfig()) {
             }) {
                 add(ScoreFactor("backup-location", config.backupPenalty, "Backup, import, or sync directory location (counted once)."))
             }
+            if (filename.backupSuffix) {
+                add(ScoreFactor("backup-filename", config.backupFilenamePenalty,
+                    "Backup-style UTC timestamp suffix in filename (counted once); not capture-date evidence."))
+            }
+            filename.numberedSuffix?.let {
+                add(ScoreFactor("numbered-filename", config.numberedFilenamePenalty,
+                    "Numbered filename suffix $it (counted once); possible copy naming, not proof of duplication."))
+            }
             // Copied timestamps agreeing with an already contradicted folder must not restore its bonus.
             if (fullDate != null && !penalizeFilename && !penalizeExif) {
                 if (utcDate(file.modifiedAt) == fullDate) {
@@ -196,14 +209,37 @@ class RetentionScorer(config: RetentionConfig = RetentionConfig()) {
 
     private fun usableExifDate(file: FileRecord, record: ExifRecord?): String? {
         if (record == null || record.input != ExifInput.from(file) || record.result.status != ExifStatus.EXTRACTED) return null
-        val match = EXIF_DATETIME.matchEntire(record.result.metadata.capturedAt?.trim() ?: return null) ?: return null
-        if (match.groupValues[1].toInt() !in MIN_EXIF_YEAR..MAX_EXIF_YEAR ||
-            match.groupValues[4].toInt() !in 0..23 || match.groupValues[5].toInt() !in 0..59 ||
-            match.groupValues[6].toInt() !in 0..59) return null
-        return completeDate(match.groupValues[1], match.groupValues[2], match.groupValues[3], 0)?.isoDate
+        return validatedExifTimestamp(record.result.metadata.capturedAt)
+            ?.substringBefore(' ')?.replace(':', '-')
     }
 
     private data class DirectoryDate(val strength: Int, val isoDate: String?, val description: String)
+
+    private data class FilenameHints(val dateName: String, val backupSuffix: Boolean, val numberedSuffix: String?)
+
+    private fun filenameHints(name: String): FilenameHints {
+        val extensionIndex = name.lastIndexOf('.').takeIf { it > 0 }
+        val extension = extensionIndex?.let { name.substring(it) }.orEmpty()
+        var stem = extensionIndex?.let { name.substring(0, it) } ?: name
+        var backup = false
+        var numbered: String? = null
+        while (true) {
+            val backupMatch = BACKUP_COPY_SUFFIX.matchEntire(stem)
+            if (backupMatch != null) {
+                val parts = backupMatch.groupValues
+                val timestamp = "${parts[2]}:${parts[3]}:${parts[4]} ${parts[5]}:${parts[6]}:${parts[7]}"
+                if (validatedExifTimestamp(timestamp) == null) break
+                backup = true
+                stem = parts[1]
+                continue
+            }
+            val match = NUMBERED_COPY_SUFFIX.matchEntire(stem) ?: break
+            if (match.groupValues[2].toInt() == 0) break
+            if (numbered == null) numbered = "-${match.groupValues[2]}"
+            stem = match.groupValues[1]
+        }
+        return FilenameHints(stem + extension, backup, numbered)
+    }
 
     private fun strongestDate(components: List<String>): DirectoryDate? {
         var strongest: DirectoryDate? = null
@@ -279,10 +315,11 @@ class RetentionScorer(config: RetentionConfig = RetentionConfig()) {
         const val YEAR_MONTH = 2
         const val YEAR = 1
         const val EXIF_EVIDENCE = "exif-date-evidence"
-        // Exclude epoch-default dates and implausible centuries without consulting the current clock.
-        const val MIN_EXIF_YEAR = 1971
-        const val MAX_EXIF_YEAR = 2099
-        val EXIF_DATETIME = Regex("([0-9]{4}):([0-9]{2}):([0-9]{2}) ([0-9]{2}):([0-9]{2}):([0-9]{2})")
+        val BACKUP_COPY_SUFFIX = Regex(
+            "(.*\\S) \\(([0-9]{4})_([0-9]{2})_([0-9]{2}) ([0-9]{2})_([0-9]{2})_([0-9]{2}) UTC\\)",
+            RegexOption.IGNORE_CASE,
+        )
+        val NUMBERED_COPY_SUFFIX = Regex("(.+)-([0-9]{3})")
         val ISO_DATE = Regex("[0-9]{4}-[0-9]{2}-[0-9]{2}")
         val LABELED_ISO_DATE = Regex("[0-9]{4}-[0-9]{2}-[0-9]{2}[-_ ]+[^\\s_-].*")
         val WHATSAPP_FILENAME = Regex("(?:IMG|VID)-([0-9]{4})([0-9]{2})([0-9]{2})-WA[0-9]+(?:\\.[A-Z0-9]+)?",
@@ -309,6 +346,8 @@ class RetentionScorer(config: RetentionConfig = RetentionConfig()) {
                 "filenameDateMismatchPenalty" to config.filenameDateMismatchPenalty,
                 "exifConfirmedDateScore" to config.exifConfirmedDateScore,
                 "exifDateMismatchPenalty" to config.exifDateMismatchPenalty,
+                "backupFilenamePenalty" to config.backupFilenamePenalty,
+                "numberedFilenamePenalty" to config.numberedFilenamePenalty,
                 "ambiguityMargin" to config.ambiguityMargin,
             ).forEach { (key, value) ->
                 append(key).append('=').append(if (value == 0.0) 0.0 else value).append(';')

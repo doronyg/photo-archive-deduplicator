@@ -9,7 +9,7 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
-import androidx.compose.material3.PrimaryTabRow
+import androidx.compose.material3.PrimaryScrollableTabRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -77,7 +77,7 @@ fun InventoryApp(container: AppContainer, scanTarget: ScanTarget, pathActions: P
                 preferencesError?.let {
                     Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(8.dp))
                 }
-                PrimaryTabRow(selectedTabIndex = selectedTab.ordinal) {
+                PrimaryScrollableTabRow(selectedTabIndex = selectedTab.ordinal) {
                     UiTab.entries.forEach { tab ->
                         Tab(
                             selected = selectedTab == tab,
@@ -91,6 +91,8 @@ fun InventoryApp(container: AppContainer, scanTarget: ScanTarget, pathActions: P
                     UiTab.SCAN -> ScanScreen(container.scanController, scanTarget, container.uiPreferences, content)
                     UiTab.BROWSE -> BrowseScreen(container.repository, pathActions, container.uiPreferences, content, scanState is ScanState.Running)
                     UiTab.DUPLICATES -> DuplicatesScreen(container.repository, scanTarget, pathActions, container.uiPreferences, container.retentionScores, container.exif, container.exifQueue, scanState is ScanState.Running, content)
+                    UiTab.SUSPECTED_DUPLICATES -> SuspectedDuplicatesScreen(container.repository, container.retentionScores,
+                        container.exifQueue, pathActions, scanState is ScanState.Running, content)
                     UiTab.EXCLUSIONS -> ExclusionsScreen(container.repository, scanState is ScanState.Running, content)
                     UiTab.LOGS -> LogsScreen(pathActions, content, container.uiPreferences)
                 }

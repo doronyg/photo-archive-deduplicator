@@ -5,6 +5,7 @@ import com.doronyg.photoarchivededuplicator.LogTags
 import com.doronyg.photoarchivededuplicator.retention.RetentionScoreService
 import com.doronyg.photoarchivededuplicator.scan.DirectoryRepository
 import com.doronyg.photoarchivededuplicator.scan.DuplicateCandidateGroup
+import com.doronyg.photoarchivededuplicator.scan.FileRecord
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -26,6 +27,7 @@ import kotlinx.coroutines.withContext
 import okio.Path
 
 enum class ExifQueuePhase { IDLE, SCORING, EXTRACTING, REASSESSING, COMPLETED, CANCELLED, FAILED }
+enum class ExifQueuePurpose { RETENTION, SUSPECTED_DUPLICATES }
 
 data class ExifQueueState(
     val phase: ExifQueuePhase = ExifQueuePhase.IDLE,
@@ -35,6 +37,7 @@ data class ExifQueueState(
     val filesCompleted: Int = 0,
     val error: String? = null,
     val revision: Long = 0,
+    val purpose: ExifQueuePurpose = ExifQueuePurpose.RETENTION,
 ) {
     val isRunning: Boolean get() = phase == ExifQueuePhase.SCORING ||
         phase == ExifQueuePhase.EXTRACTING || phase == ExifQueuePhase.REASSESSING
@@ -55,10 +58,14 @@ class ExifQueueController internal constructor(
     private val mutableState = MutableStateFlow(ExifQueueState())
     val state: StateFlow<ExifQueueState> = mutableState.asStateFlow()
 
-    fun start(root: Path): Boolean = startQueue { repository.duplicateCandidates(root) }
+    fun start(root: Path): Boolean = startQueue { retentionGroups(repository.duplicateCandidates(root)) }
 
     fun start(groups: List<DuplicateCandidateGroup>): Boolean = startQueue {
-        groups.map { it.copy(files = it.files.toList()) }
+        retentionGroups(groups.map { it.copy(files = it.files.toList()) })
+    }
+
+    fun startSuspected(root: Path? = null): Boolean = startQueue(ExifQueuePurpose.SUSPECTED_DUPLICATES) {
+        repository.suspectedExifCandidates(root).map { it.files }
     }
 
     suspend fun cancel() {
@@ -81,7 +88,7 @@ class ExifQueueController internal constructor(
 
     suspend fun scanCompleted(root: Path): Boolean = control.withLock {
         scanActive.value = false
-        startQueueLocked { repository.duplicateCandidates(root) }
+        startQueueLocked { retentionGroups(repository.duplicateCandidates(root)) }
     }
 
     suspend fun shutdown() {
@@ -92,19 +99,27 @@ class ExifQueueController internal constructor(
         job?.cancelAndJoin()
     }
 
-    private fun startQueue(load: suspend () -> List<DuplicateCandidateGroup>): Boolean {
+    private fun startQueue(
+        purpose: ExifQueuePurpose = ExifQueuePurpose.RETENTION,
+        load: suspend () -> List<List<FileRecord>>,
+    ): Boolean {
         if (!control.tryLock()) return false
         try {
-            return startQueueLocked(load)
+            return startQueueLocked(purpose, load)
         } finally {
             control.unlock()
         }
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    private fun startQueueLocked(load: suspend () -> List<DuplicateCandidateGroup>): Boolean {
+    private fun startQueueLocked(
+        purpose: ExifQueuePurpose = ExifQueuePurpose.RETENTION,
+        load: suspend () -> List<List<FileRecord>>,
+    ): Boolean {
         if (activeJob != null || scanActive.value || closed || scope.coroutineContext[Job]?.isActive == false) return false
-        mutableState.value = ExifQueueState(phase = ExifQueuePhase.SCORING, revision = mutableState.value.revision)
+        mutableState.value = ExifQueueState(
+            phase = ExifQueuePhase.SCORING, revision = mutableState.value.revision, purpose = purpose,
+        )
         // ATOMIC guarantees cleanup even if the owning scope cancels before the dispatcher runs.
         activeJob = scope.launch(dispatcher, start = CoroutineStart.ATOMIC) { runQueue(load) }
         return true
@@ -117,34 +132,38 @@ class ExifQueueController internal constructor(
         }
     }
 
-    private suspend fun runQueue(load: suspend () -> List<DuplicateCandidateGroup>) {
+    private suspend fun retentionGroups(groups: List<DuplicateCandidateGroup>): List<List<FileRecord>> {
+        val initial = retentionScores.assess(groups)
+        val identity = initial.files.values.firstNotNullOfOrNull { it.score?.identity } ?: return emptyList()
+        return groups.filter { isExifQueueEligible(it, initial.files, currentIdentity = identity) }.map { it.files }
+    }
+
+    private suspend fun runQueue(load: suspend () -> List<List<FileRecord>>) {
         var terminal = ExifQueuePhase.CANCELLED
         var failure: String? = null
         try {
             currentCoroutineContext().ensureActive()
-            val snapshot = load()
-            val initial = retentionScores.assess(snapshot)
-            // Assessment is the authority for the configured scorer identity, including custom weights.
-            val identity = initial.files.values.firstNotNullOfOrNull { it.score?.identity }
-            val queue = if (identity == null) emptyList() else snapshot.filter {
-                isExifQueueEligible(it, initial.files, currentIdentity = identity)
-            }
-            publish { it.copy(groupsTotal = queue.size, filesTotal = queue.sumOf { group -> group.files.size }) }
+            val queue = load()
+            publish { it.copy(groupsTotal = queue.size, filesTotal = queue.sumOf { files -> files.size }) }
             if (queue.isNotEmpty()) {
                 publish { it.copy(phase = ExifQueuePhase.EXTRACTING) }
                 retentionScores.withoutAssessments {
                     var completedFiles = 0
-                    for ((index, group) in queue.withIndex()) {
+                    for ((index, files) in queue.withIndex()) {
                         currentCoroutineContext().ensureActive()
-                        exif.extract(group) { completed, _ ->
+                        exif.extract(files) { completed, _ ->
                             publish { it.copy(filesCompleted = completedFiles + completed) }
                         }
-                        completedFiles += group.files.size
+                        completedFiles += files.size
                         publish { it.copy(groupsCompleted = index + 1) }
                     }
                     publish { it.copy(phase = ExifQueuePhase.REASSESSING) }
                 }
-                retentionScores.assess(queue)
+                // Extraction may group different filenames by size; score using actual filename identities.
+                val scoreGroups = queue.flatten().groupBy { it.name to it.sizeBytes }.map { (key, files) ->
+                    DuplicateCandidateGroup(key.first, key.second, files)
+                }
+                retentionScores.assess(scoreGroups)
             }
             currentCoroutineContext().ensureActive()
             terminal = ExifQueuePhase.COMPLETED

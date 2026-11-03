@@ -171,7 +171,7 @@ class RetentionScoringTest {
         val first = scorer.score(file, 123)
         assertEquals(first.copy(createdAt = 456), scorer.score(file, 456))
         assertEquals(FileScoreInput.from(file), first.input)
-        assertEquals(ScoreIdentity("retention", "directory-retention", "4", scorer.identity.configurationId),
+        assertEquals(ScoreIdentity("retention", "directory-retention", "5", scorer.identity.configurationId),
             first.identity)
         assertEquals(10.0, scorer.ambiguityMargin)
     }
@@ -196,6 +196,8 @@ class RetentionScoringTest {
             base.copy(yearMonthDateBonus = 31.0),
             base.copy(exifConfirmedDateScore = 89.0),
             base.copy(exifDateMismatchPenalty = -79.0),
+            base.copy(backupFilenamePenalty = -21.0),
+            base.copy(numberedFilenamePenalty = -11.0),
         )
         variants.forEach { assertNotEquals(scorer.identity, RetentionScorer(it).identity) }
         val reordered = base.copy(

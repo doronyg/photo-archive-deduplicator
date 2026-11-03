@@ -53,6 +53,16 @@ internal val allUiChoices = UiChoices(
 @OptIn(ExperimentalCoroutinesApi::class)
 class UiPreferencesTest {
     @Test
+    fun suspectedDuplicatesTabIsAdjacentAndPersistsByNameWithoutChangingExistingSelections() {
+        assertEquals(UiTab.SUSPECTED_DUPLICATES, UiTab.entries[UiTab.DUPLICATES.ordinal + 1])
+        for (tab in UiTab.entries) {
+            val choices = UiChoices(selectedTab = tab)
+            assertEquals(choices, decodeUiChoices(encodeUiChoices(choices)))
+            assertEquals(tab.name, encodeUiChoices(choices)["selectedTab"])
+        }
+    }
+
+    @Test
     fun unchangedInstanceAndEquivalentCopyDoNotWriteSettings() = runTest(timeout = 10.seconds) {
         val worker = StandardTestDispatcher(testScheduler)
         val io = TrackingIoDispatcher(worker)

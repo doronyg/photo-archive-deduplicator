@@ -241,6 +241,8 @@ Central configuration defines the weights and matching rules:
 | Recognized filename date contradicts a recognized complete folder date | -40 |
 | Usable stored EXIF date confirms an alternative complete folder date | Organization raised from +40 to +90 |
 | Usable stored EXIF date contradicts a complete folder date, without a matching filename date | -40 |
+| Strict, valid backup-style UTC timestamp suffix in filename | -20 |
+| Trailing three-digit copy suffix such as `-001` through `-999` | -10 |
 | Modification UTC date agrees with complete folder date | +2 |
 | Creation UTC date agrees with complete folder date | +1 |
 
@@ -294,6 +296,21 @@ cached assessments to detect relevant metadata changes without another schema
 migration. Re-extraction with the same usable date need not recalculate a score.
 Earlier score versions remain available.
 
+Algorithm v5 extends the shared per-file scorer for both duplicate screens.
+Recognize valid terminal ` (yyyy_MM_dd HH_mm_ss UTC)` decorations before the
+extension and three-digit numbered suffixes such as `-001`. Each filename cue
+counts at most once; both cues can combine for -30. These are conservative copy
+indicators, not proof: ordinary camera counters such as `IMG_0001` and malformed
+backup timestamps are neutral. Strip recognized copy decorations only when
+interpreting the underlying filename date; backup timestamps never become capture
+date evidence. Original filename/folder-date protection still applies.
+
+Scores are independent of peers, so the same persisted score is reused in regular
+and suspected groups. The suspected screen ranks and labels all members of its
+size/capture-time group together, across filenames, rather than choosing a leader
+separately for every filename. Plain copies in undated collection folders may tie;
+do not infer which collection name is more correct.
+
 Failed or limit-exceeded EXIF is treated exactly like absent EXIF, not as negative
 evidence. The reported `20191210_104020-ANIMATION.gif` therefore scores +20 in
 `MobileBackup/.../Google Photos/2019/12` and -60 in `.Picasa3Temp_1`, regardless of
@@ -314,7 +331,7 @@ order breaking ties. Missing/outdated scores follow all current scores, includin
 negative ones. This member ordering does not change the selected group-order
 criteria or ambiguity labels, and copied results use the same displayed order.
 
-Find candidates reuses current assessments and calculates only missing/stale ones
+In the Duplicates tab, Find candidates reuses current assessments and calculates only missing/stale ones
 from stored metadata on a background dispatcher. Recompute scores explicitly
 refreshes the current result set. Sorting or merely opening the tab does not score
 files. Bounded database write batches recheck the inputs before saving; metadata
@@ -402,6 +419,45 @@ already completed attempts without recording an interrupted file as a failure.
 Shutdown stops accepting queue requests, cancels and drains its work, and then
 closes the filesystem/database lanes. No EXIF process runs concurrently with the
 regular filesystem scan.
+
+#### Suspected duplicates across different filenames
+
+The **Suspected duplicates** tab sits immediately after **Duplicates** and is an
+explicit, manual analysis across the stored inventory, respecting exclusions.
+Opening the tab or refreshing stored matches never starts filesystem reads.
+
+Select images strictly larger than 100,000 bytes using the existing image-extension
+classification. SQL groups them by exact byte size and requires at least two
+different case-sensitive filenames per bucket. Skip same-name-only buckets; for a
+qualifying bucket, visit every member, including its regular duplicate copies.
+
+Use the existing app-owned sequential EXIF queue and all-status cache. This manual
+mode does not require close retention scores or dated directories. It shares scan,
+overlap, cancellation, and shutdown gates with ordinary EXIF analysis. After all
+selected files finish, update their retention scores; never rescore a partial
+cancelled queue. Changing tabs does not cancel the analysis.
+
+Read matches from successful current `fileExif` rows whose input fingerprint and
+KIM reader identity/version match. Require a valid original capture timestamp to
+the second and equal byte sizes, with at least two different filenames in each
+displayed result. Same-day-only, missing, invalid, stale, or failed EXIF is not a
+match. Matching original offsets are required: unknown offsets form a separate
+group, malformed offsets are rejected, and no timezone is inferred. Subseconds,
+camera details, and dimensions are not equality requirements in this first pass.
+
+Group results rather than generating every possible file pair. Show capture
+timestamps, exact sizes, filenames, and full directory paths. These remain
+suspected duplicates, not content-verified matches, and no file is modified.
+Load/reuse retention scores from stored metadata, show expandable factors, and
+order members by descending score with path tie-breaking. Recompute scores is
+available without any EXIF rereads. While scanning or processing EXIF, and on
+terminal queue refreshes, read stored scores only. Cancellation/failure must not
+cause an automatic partial-queue reassessment; explicit recomputation can consume
+the persisted data later. A changed capture timestamp, offset, status, reader, or
+input fingerprint invalidates the old group's recommendation even when its
+calendar-date retention contribution would remain unchanged.
+Schema v6 adds a size-leading index through additive migration `5.sqm`, preserving
+the existing inventory, EXIF cache, scores, and settings.
 
 ### Phase 3: Exact duplicate verification
 

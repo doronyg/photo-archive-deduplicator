@@ -11,6 +11,7 @@ CREATE TABLE scanFile (
 
 CREATE INDEX scanFileDirectoryIndex ON scanFile(directoryPath);
 CREATE INDEX scanFileNameSizeIndex ON scanFile(name COLLATE BINARY, sizeBytes);
+CREATE INDEX scanFileSizeIndex ON scanFile(sizeBytes);
 
 -- Reconcile metadata without replacing the existing inventory row.
 updateFile:
@@ -72,3 +73,27 @@ WHERE (name COLLATE BINARY, sizeBytes) IN (
     SELECT name COLLATE BINARY, sizeBytes FROM eligible GROUP BY name COLLATE BINARY, sizeBytes HAVING count(*) >= 2
 )
 ORDER BY name COLLATE BINARY, sizeBytes, path;
+
+selectSuspectedExifCandidates:
+WITH eligible AS (
+    SELECT f.* FROM scanFile f
+    WHERE f.sizeBytes > :minSizeBytes
+    AND lower(CASE WHEN f.extension IS NULL AND substr(f.name, 1, 1) = '.'
+        THEN substr(f.name, 2) ELSE f.extension END) IN :imageExtensions
+    AND (:root IS NULL OR f.path = :root OR (
+        substr(f.path, 1, length(:root)) = :root
+        AND (substr(:root, -1) IN ('/', '\') OR substr(f.path, length(:root) + 1, 1) IN ('/', '\'))
+    ))
+    AND NOT EXISTS (
+        SELECT 1 FROM directoryExclusion e
+        WHERE f.path = e.path OR (
+            substr(f.path, 1, length(e.path)) = e.path
+            AND (substr(e.path, -1) IN ('/', '\') OR substr(f.path, length(e.path) + 1, 1) IN ('/', '\'))
+        )
+    )
+)
+SELECT * FROM eligible
+WHERE sizeBytes IN (
+    SELECT sizeBytes FROM eligible GROUP BY sizeBytes HAVING count(DISTINCT name COLLATE BINARY) >= 2
+)
+ORDER BY sizeBytes, path COLLATE BINARY;

@@ -30,6 +30,43 @@ AND (:currentOnly = 0 OR EXISTS (
 ))
 ORDER BY filePath;
 
+selectSuspectedMatches:
+WITH eligible AS (
+    SELECT f.* FROM scanFile f
+    WHERE f.sizeBytes > :minSizeBytes
+    AND lower(CASE WHEN f.extension IS NULL AND substr(f.name, 1, 1) = '.'
+        THEN substr(f.name, 2) ELSE f.extension END) IN :imageExtensions
+    AND (:root IS NULL OR f.path = :root OR (
+        substr(f.path, 1, length(:root)) = :root
+        AND (substr(:root, -1) IN ('/', '\') OR substr(f.path, length(:root) + 1, 1) IN ('/', '\'))
+    ))
+    AND NOT EXISTS (
+        SELECT 1 FROM directoryExclusion e
+        WHERE f.path = e.path OR (
+            substr(f.path, 1, length(e.path)) = e.path
+            AND (substr(e.path, -1) IN ('/', '\') OR substr(f.path, length(e.path) + 1, 1) IN ('/', '\'))
+        )
+    )
+), matched AS (
+    SELECT f.*, trim(e.capturedAt, :whitespace) AS captureTime,
+        nullif(trim(e.offsetOriginal, :whitespace), '') AS captureOffset
+    FROM eligible f JOIN fileExif e ON e.filePath = f.path
+    WHERE f.sizeBytes IN (
+        SELECT sizeBytes FROM eligible GROUP BY sizeBytes HAVING count(DISTINCT name COLLATE BINARY) >= 2
+    )
+    AND e.directoryPath = f.directoryPath AND e.inputSizeBytes = f.sizeBytes
+    AND e.inputModifiedAt IS f.modifiedAt AND e.inputCreatedAt IS f.createdAt
+    AND e.status = :status AND e.readerId = :readerId AND e.readerVersion = :readerVersion
+    AND e.capturedAt IS NOT NULL
+), repeated AS (
+    SELECT sizeBytes, captureTime, captureOffset FROM matched
+    GROUP BY sizeBytes, captureTime COLLATE BINARY, captureOffset COLLATE BINARY
+    HAVING count(DISTINCT name COLLATE BINARY) >= 2
+)
+SELECT m.* FROM matched m JOIN repeated r
+ON m.sizeBytes = r.sizeBytes AND m.captureTime = r.captureTime AND m.captureOffset IS r.captureOffset
+ORDER BY m.sizeBytes, m.captureTime COLLATE BINARY, m.captureOffset COLLATE BINARY, m.path COLLATE BINARY;
+
 upsert:
 INSERT OR REPLACE INTO fileExif(
     filePath, directoryPath, inputSizeBytes, inputModifiedAt, inputCreatedAt,

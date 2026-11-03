@@ -4,6 +4,7 @@ import com.doronyg.photoarchivededuplicator.Diagnostics
 import com.doronyg.photoarchivededuplicator.LogTags
 import com.doronyg.photoarchivededuplicator.scan.DirectoryRepository
 import com.doronyg.photoarchivededuplicator.scan.DuplicateCandidateGroup
+import com.doronyg.photoarchivededuplicator.scan.FileRecord
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
@@ -35,14 +36,19 @@ class ExifExtractionService internal constructor(
     suspend fun extract(
         group: DuplicateCandidateGroup,
         onProgress: suspend (completed: Int, total: Int) -> Unit = { _, _ -> },
+    ): Map<Path, ExifRecord> = extract(group.files, onProgress)
+
+    suspend fun extract(
+        files: List<FileRecord>,
+        onProgress: suspend (completed: Int, total: Int) -> Unit = { _, _ -> },
     ): Map<Path, ExifRecord> = withContext(dispatcher) {
         extraction.withLock {
-            Diagnostics.logger.operation(LogTags.EXIF, "extract group files=${group.files.size}") {
+            Diagnostics.logger.operation(LogTags.EXIF, "extract group files=${files.size}") {
                 val context = currentCoroutineContext()
                 val results = linkedMapOf<Path, ExifRecord>()
-                val cached = repository.fileExif(group.files.map { it.path }, currentOnly = true).associateBy { it.input.path }
-                onProgress(0, group.files.size)
-                group.files.forEachIndexed { index, file ->
+                val cached = repository.fileExif(files.map { it.path }, currentOnly = true).associateBy { it.input.path }
+                onProgress(0, files.size)
+                files.forEachIndexed { index, file ->
                     context.ensureActive()
                     val input = ExifInput.from(file)
                     val current = repository.file(file.path)
@@ -51,7 +57,7 @@ class ExifExtractionService internal constructor(
                     if (matchesInventory && saved?.input == input &&
                         saved.readerId == readerId && saved.readerVersion == readerVersion) {
                         results[file.path] = saved
-                        onProgress(index + 1, group.files.size)
+                        onProgress(index + 1, files.size)
                         return@forEachIndexed
                     }
                     val result = if (!matchesInventory) {
@@ -64,7 +70,7 @@ class ExifExtractionService internal constructor(
                     if (record.result.status in setOf(ExifStatus.ERROR, ExifStatus.STALE, ExifStatus.LIMIT_EXCEEDED)) {
                         Diagnostics.logger.w(LogTags.EXIF, "${record.result.status}: ${file.path}: ${record.result.error}")
                     }
-                    onProgress(index + 1, group.files.size)
+                    onProgress(index + 1, files.size)
                 }
                 results
             }

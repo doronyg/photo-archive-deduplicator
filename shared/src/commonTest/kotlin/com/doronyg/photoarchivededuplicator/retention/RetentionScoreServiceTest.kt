@@ -70,7 +70,7 @@ class RetentionScoreServiceTest {
         }
         val groups = fixture.repository.duplicateCandidates(fixture.root)
         val scorer = RetentionScorer()
-        val legacyIdentities = listOf("1", "2", "3").map {
+        val legacyIdentities = listOf("1", "2", "3", "4").map {
             scorer.identity.copy(algorithmVersion = it, configurationId = "historical-v$it")
         } + scorer.identity.copy(type = "ai-quality", algorithmId = "historical-model")
         val oldScores = legacyIdentities.flatMap { identity ->
@@ -81,7 +81,7 @@ class RetentionScoreServiceTest {
         val service = RetentionScoreService(fixture.repository, dispatcher = fixture.dispatcher, clock = { (++computations).toLong() })
         val current = service.assess(groups)
         assertEquals(listOf(-25.0, 60.0, 60.0), current.files.values.map { it.score!!.value }.sorted())
-        assertTrue(current.files.values.all { it.score!!.identity.algorithmVersion == "4" })
+        assertTrue(current.files.values.all { it.score!!.identity.algorithmVersion == "5" })
         assertEquals(2, current.files.values.count { it.rank == RetentionRank.TIED })
         for (identity in legacyIdentities) {
             assertEquals(oldScores.filter { it.identity == identity }.toSet(),

@@ -2,6 +2,7 @@ package com.doronyg.photoarchivededuplicator.ui
 
 import com.doronyg.photoarchivededuplicator.exif.ExifQueuePhase
 import com.doronyg.photoarchivededuplicator.exif.ExifQueueState
+import com.doronyg.photoarchivededuplicator.exif.ExifQueuePurpose
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -10,6 +11,17 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class ExifQueueStatusTest {
+    @Test
+    fun suspectedAnalysisHasDifferentEligibilityAndDoesNotClaimAmbiguityFiltering() {
+        val state = ExifQueueState(purpose = ExifQueuePurpose.SUSPECTED_DUPLICATES)
+        val preparing = presentExifQueue(state.copy(phase = ExifQueuePhase.SCORING)).orEmpty()
+        assertTrue("same-size images" in preparing)
+        val empty = presentExifQueue(state.copy(phase = ExifQueuePhase.COMPLETED)).orEmpty()
+        assertTrue("different filenames" in empty)
+        assertFalse("ambiguous" in empty)
+        assertFalse("folder date" in empty)
+    }
+
     private fun status(phase: ExifQueuePhase, groups: Int = 2, error: String? = null) =
         presentExifQueue(ExifQueueState(
             phase = phase, groupsTotal = groups, groupsCompleted = 1,

@@ -14,6 +14,7 @@ import com.doronyg.photoarchivededuplicator.exif.ExifMetadata
 import com.doronyg.photoarchivededuplicator.exif.ExifReadResult
 import com.doronyg.photoarchivededuplicator.exif.ExifStatus
 import com.doronyg.photoarchivededuplicator.exif.ExifQueuePhase
+import com.doronyg.photoarchivededuplicator.exif.ExifQueuePurpose
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -39,6 +40,47 @@ import kotlin.time.Duration.Companion.seconds
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class AppContainerTest {
+    @Test
+    fun renamedImageAnalysisOnlyStartsOnExplicitRequestAndUsesAppOwnedQueue() = runTest(timeout = 10.seconds) {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val root = "/archive".toPath()
+        var reads = 0
+        val container = createAppContainer(dispatcher, dispatcher, openDriver = { createInMemoryDriver() },
+            createScanner = { repository, _ ->
+                object : InventoryScanner {
+                    override suspend fun startScan(root: Path, onEvent: suspend (ScanEvent) -> Unit) {
+                        repository.recordListing(root, DirectoryListing(emptyList(), listOf(
+                            DirectoryListing.Entry(root / "original.jpg", 100_001, null),
+                            DirectoryListing.Entry(root / "renamed.jpg", 100_001, null),
+                        )), 1)
+                    }
+                    override suspend fun resume(onEvent: suspend (ScanEvent) -> Unit) = Unit
+                }
+            }, createExifSource = {
+                ExifSource {
+                    reads++
+                    ExifReadResult(ExifStatus.EXTRACTED, ExifMetadata(capturedAt = "2024:01:02 12:34:56"))
+                }
+            })
+        try {
+            runCurrent()
+            assertTrue(container.scanController.start(root))
+            container.exifQueue.state.first { it.phase == ExifQueuePhase.COMPLETED }
+            assertEquals(ExifQueuePurpose.RETENTION, container.exifQueue.state.value.purpose)
+            assertEquals(0, reads, "Completed scans must not automatically run the new analysis")
+            assertTrue(container.repository.suspectedDuplicates().isEmpty())
+            assertEquals(0, reads, "Reading stored matches must never trigger extraction")
+            assertTrue(container.exifQueue.startSuspected())
+            container.exifQueue.state.first {
+                it.phase == ExifQueuePhase.COMPLETED && it.purpose == ExifQueuePurpose.SUSPECTED_DUPLICATES
+            }
+            assertEquals(2, reads)
+            assertEquals(2, container.repository.suspectedDuplicates().single().files.size)
+        } finally {
+            container.shutdown()
+        }
+    }
+
     private suspend fun seedAmbiguousDatedGroup(repository: DirectoryRepository, root: Path) {
         for (copy in listOf("a", "b")) {
             val directory = root / copy / "2013_06_25"

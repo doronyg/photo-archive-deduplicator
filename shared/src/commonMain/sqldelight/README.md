@@ -117,6 +117,9 @@ inventory or reset scan queues, sessions, exclusions, or UI preferences.
 Version 5 adds only the sparse `fileExif` table through
 `com/doronyg/photoarchivededuplicator/db/4.sqm`. Existing inventory, scores and factors,
 queues, sessions, exclusions, and preferences are unchanged.
+Version 6 adds `scanFileSizeIndex` through
+`com/doronyg/photoarchivededuplicator/db/5.sqm` for size-first suspected-image searches.
+It only creates an index; existing inventory, EXIF, scores, queues, and settings remain intact.
 An unreleased intermediate version 1 containing
 some of the new columns/tables is not the historical migration target; do not infer its
 schema by dropping the session table from today's schema.
@@ -144,8 +147,31 @@ Current-to-next upgrades are the supported migration-development focus until the
 schema stabilizes. Earlier migration files remain intact, and databases are never
 deleted or recreated as an upgrade strategy. The v3-to-v4 regression uses populated
 records and verifies that existing inventory and preferences survive the upgrade.
-The v4-to-v5 regression automatically upgrades a populated on-disk JDBC database,
+The v4-to-current regression automatically upgrades a populated on-disk JDBC database,
 compares every pre-existing table, then stores EXIF and closes/reopens it again.
+The populated v5-to-v6 regression also preserves existing EXIF rows and verifies
+the size-leading index before and after reopening.
+
+## Suspected duplicates
+
+The adjacent **Suspected duplicates** tab uses SQL size buckets rather than exact
+filename-and-size groups. Reuse the image extension classification and select only
+files strictly larger than 100,000 bytes, respecting root boundaries and exclusions.
+Buckets must contain multiple case-sensitive filenames before any EXIF is attempted.
+All members of a qualifying bucket are visited, including same-name copies.
+
+Analysis starts only on an explicit request and shares the existing app-owned queue,
+cache, scan gates, and final-only score reassessment. It bypasses retention ambiguity
+and dated-directory eligibility; those rules still apply to regular EXIF analysis.
+Opening or refreshing the tab queries stored results only.
+
+Matches require successful, current EXIF from the current KIM reader, a valid original
+capture date/time to the second, and identical sizes. Match original offsets exactly;
+unknown offsets form a separate group and malformed offsets are rejected. Do not infer
+timezones or use filesystem creation times. Subseconds, camera, and dimensions are not
+equality requirements. Only resulting groups containing different filenames are shown.
+Missing or failed EXIF never establishes a match, and these groups are not proof of
+identical contents. Retention and prior candidate-search behavior remain unchanged.
 
 ## Independent EXIF results
 
@@ -213,7 +239,7 @@ its explicit algorithm version; this is independent of the SQLDelight schema
 version. New score types or algorithm versions do not need an inventory schema
 change and do not replace older identities.
 
-Retention algorithm v4 currently awards year/month organization +45 and year-only +10,
+Retention algorithm v5 retains v4's year/month organization +45 and year-only +10,
 plus filename/folder-date disagreement evidence and WhatsApp/PhotoSync location rules.
 Matching stored EXIF raises alternative full-date folder organization from +40 to +90;
 preferred organization remains +100. Reliable disagreement contributes -40 once across
@@ -223,7 +249,7 @@ penalties; they do not introduce standalone filename mismatch penalties.
 Missing, failed, limit-exceeded, invalid, or stale EXIF is neutral. Year/month backup
 copies score +45 -25 = +20 even when extraction fails; temporary-only copies remain -60.
 Dates use the original calendar date,
-not timezone conversion. Find candidates or Recompute scores produces v4 assessments
+not timezone conversion. Find candidates or Recompute scores produces v5 assessments
 from stored metadata when the queue is inactive. During queue processing the browser uses
 `RetentionScoreService.stored`, a database-only read that hides obsolete evidence without
 computing or saving scores. The extraction barrier also downgrades overlapping assessment
@@ -231,8 +257,26 @@ requests to stored reads, so a previously queued browser request cannot rescore 
 EXIF after cancellation. A fresh explicit assessment remains available afterward.
 After the whole queue finishes, final reassessment refreshes
 visible scores and member ranking. The ambiguity label also uses a 10-point margin.
-v1/v2/v3 assessments and other score types remain available. Queue scheduling and caching
+v1/v2/v3/v4 assessments and other score types remain available. Queue scheduling and caching
 need no database schema change or inventory reset.
+
+Algorithm v5 adds configurable filename cues: a valid trailing
+` (yyyy_MM_dd HH_mm_ss UTC)` contributes -20 and a trailing `-001` through `-999`
+contributes -10. Count each cue once, allow both to combine, and do not treat backup
+timestamps as capture dates. Interpret underlying filename dates after removing
+recognized copy decorations so existing filename/folder-date protection survives.
+Rules apply consistently to both screens and each per-file score is reusable
+regardless of group composition. This needs no schema migration.
+
+`assessSuspected` and `storedSuspected` reuse the same score persistence and extraction
+barrier, but present rankings across each whole suspected group. Recheck the full
+capture timestamp, original offset, successful status, reader identity/version,
+and file input before recommending a leader; a same-day time change can invalidate
+membership without changing the numeric retention score. Missing/outdated evidence
+suppresses group recommendations. Opening/refreshing suspected matches computes
+missing/current-profile scores from stored data only when inactive; queue terminal
+refreshes and aborted-queue browsing use stored reads. Explicit Recompute scores
+remains available after cancellation. No scoring operation reopens image files.
 
 ## Remembered UI choices
 

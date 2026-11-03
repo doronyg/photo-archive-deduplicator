@@ -16,13 +16,21 @@ import kotlin.test.*
 
 class FileExifRestartTest {
     @Test
-    fun populatedVersionFourAutomaticallyUpgradesAndExifSurvivesReopenWithoutChangingExistingRows() = runTest {
+    fun populatedVersionFourAutomaticallyUpgradesAndExifSurvivesReopenWithoutChangingExistingRows() =
+        verifyUpgrade(fromVersion = 4)
+
+    @Test
+    fun populatedVersionFiveAddsSizeIndexAndPreservesExifInventoryScoresPreferencesAndSessions() =
+        verifyUpgrade(fromVersion = 5)
+
+    private fun verifyUpgrade(fromVersion: Long) = runTest {
         val directory = File("build/test-file-exif-migration/${UUID.randomUUID()}").absoluteFile
         check(directory.mkdirs())
         val io = TrackingIoDispatcher(StandardTestDispatcher(testScheduler))
         val url = "jdbc:sqlite:${File(directory, "historical.db")}"
         val tables = mapOf("scanDirectory" to 7, "scanFile" to 8, "directoryExclusion" to 2,
-            "scanSession" to 4, "uiPreference" to 2, "fileScore" to 12, "fileScoreFactor" to 5)
+            "scanSession" to 4, "uiPreference" to 2, "fileScore" to 12, "fileScoreFactor" to 5) +
+            (if (fromVersion == 5L) mapOf("fileExif" to 18) else emptyMap())
         suspend fun snapshot(driver: SqlDriver): Map<String, List<List<String?>>> = withContext(io) {
             tables.mapValues { (table, columns) ->
                 driver.executeQuery(null, "SELECT * FROM $table ORDER BY 1, 2", { cursor ->
@@ -40,6 +48,14 @@ class FileExifRestartTest {
             val before = try {
                 withContext(io) {
                     for (statement in historicalVersionFourSchema) old.execute(null, statement, 0).await()
+                    if (fromVersion == 5L) {
+                        FilesDatabase.Schema.migrate(old, 4, 5).await()
+                        old.execute(null, "PRAGMA user_version = 5", 0).await()
+                    }
+                }
+                if (fromVersion == 5L) {
+                    val repository = DirectoryRepository(createFilesDatabase(IoGuardedDriver(old, io)), io)
+                    assertTrue(repository.saveFileExif(record))
                 }
                 snapshot(old)
             } finally {
@@ -47,10 +63,19 @@ class FileExifRestartTest {
             }
             val upgraded = withContext(io) { JdbcSqliteDriver(url, schema = FilesDatabase.Schema.synchronous()) }
             try {
-                assertEquals(5L, FilesDatabase.Schema.version)
+                assertEquals(6L, FilesDatabase.Schema.version)
                 assertEquals(before, snapshot(upgraded))
+                withContext(io) {
+                    val columns = upgraded.executeQuery(null, "PRAGMA index_info(scanFileSizeIndex)", { cursor ->
+                        val names = mutableListOf<String?>()
+                        while (cursor.next().value) names += cursor.getString(2)
+                        QueryResult.Value(names.toList())
+                    }, 0).await()
+                    assertEquals(listOf("sizeBytes"), columns)
+                }
                 val repository = DirectoryRepository(createFilesDatabase(IoGuardedDriver(upgraded, io)), io)
-                assertTrue(repository.fileExif(listOf(record.input.path)).isEmpty())
+                assertEquals(if (fromVersion == 5L) listOf(record) else emptyList(),
+                    repository.fileExif(listOf(record.input.path)))
                 assertTrue(repository.saveFileExif(record))
                 assertEquals(before, snapshot(upgraded))
             } finally {

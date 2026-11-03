@@ -1,6 +1,6 @@
 package com.doronyg.photoarchivededuplicator.scan
 
-enum class DuplicateFileType(private val extensions: Set<String>) {
+enum class DuplicateFileType(internal val extensions: Set<String>) {
     ALL(emptySet()),
     IMAGES(setOf(
         "jpg", "jpeg", "jpe", "png", "gif", "webp", "bmp", "tif", "tiff", "heic", "heif", "avif",

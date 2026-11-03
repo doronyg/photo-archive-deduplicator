@@ -20,6 +20,10 @@ import com.doronyg.photoarchivededuplicator.exif.ExifMetadata
 import com.doronyg.photoarchivededuplicator.exif.ExifReadResult
 import com.doronyg.photoarchivededuplicator.exif.ExifRecord
 import com.doronyg.photoarchivededuplicator.exif.ExifStatus
+import com.doronyg.photoarchivededuplicator.exif.EXIF_SURROUNDING_WHITESPACE
+import com.doronyg.photoarchivededuplicator.exif.KIM_VERSION
+import com.doronyg.photoarchivededuplicator.exif.isValidExifOffset
+import com.doronyg.photoarchivededuplicator.exif.validatedExifTimestamp
 import com.doronyg.photoarchivededuplicator.retention.FileScore
 import com.doronyg.photoarchivededuplicator.retention.FileScoreInput
 import com.doronyg.photoarchivededuplicator.retention.ScoreFactor
@@ -221,6 +225,43 @@ class DirectoryRepository internal constructor(
             .groupBy { it.name to it.sizeBytes }
             .map { (key, members) -> DuplicateCandidateGroup(key.first, key.second, members) }
     }
+
+    suspend fun suspectedExifCandidates(root: Path? = null): List<ImageSizeGroup> =
+        io("suspectedExifCandidates $root") {
+            files.selectSuspectedExifCandidates(
+                minSizeBytes = SUSPECTED_IMAGE_MIN_SIZE_BYTES,
+                imageExtensions = DuplicateFileType.IMAGES.extensions,
+                root = root?.inventoryPath()?.toString(),
+            ).awaitAsList().map { it.toRecord() }
+                .groupBy { it.sizeBytes }
+                .map { (size, members) -> ImageSizeGroup(size, members) }
+        }
+
+    /** Persisted evidence only; never opens source files or starts extraction. */
+    suspend fun suspectedDuplicates(root: Path? = null): List<SuspectedDuplicateGroup> =
+        io("suspectedDuplicates $root") {
+            database.fileExifQueries.selectSuspectedMatches(
+                minSizeBytes = SUSPECTED_IMAGE_MIN_SIZE_BYTES,
+                imageExtensions = DuplicateFileType.IMAGES.extensions,
+                root = root?.inventoryPath()?.toString(),
+                whitespace = EXIF_SURROUNDING_WHITESPACE,
+                status = ExifStatus.EXTRACTED.name,
+                readerId = "kim",
+                readerVersion = KIM_VERSION,
+            ).awaitAsList().mapNotNull { row ->
+                val timestamp = validatedExifTimestamp(row.captureTime) ?: return@mapNotNull null
+                val offset = row.captureOffset
+                if (offset != null && !isValidExifOffset(offset)) return@mapNotNull null
+                Triple(row.sizeBytes, timestamp, offset) to FileRecord(
+                    row.path.toPath(), row.directoryPath.toPath(), row.name, row.extension,
+                    row.sizeBytes, row.modifiedAt, row.lastScanned, row.createdAt,
+                )
+            }.groupBy({ it.first }, { it.second })
+                .mapNotNull { (key, members) ->
+                    if (members.map { it.name }.distinct().size < 2) null
+                    else SuspectedDuplicateGroup(key.first, key.second, key.third, members)
+                }
+        }
 
     /** Queues [root] for scanning, re-queuing it if a previous scan already processed it. */
     suspend fun seedRoot(root: Path) = io("seedRoot transaction $root") {

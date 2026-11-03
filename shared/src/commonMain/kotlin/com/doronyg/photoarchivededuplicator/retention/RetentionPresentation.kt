@@ -1,6 +1,7 @@
 package com.doronyg.photoarchivededuplicator.retention
 
 import com.doronyg.photoarchivededuplicator.scan.DuplicateCandidateGroup
+import com.doronyg.photoarchivededuplicator.scan.FileRecord
 import okio.Path
 import kotlin.math.abs
 
@@ -31,13 +32,20 @@ internal fun presentRetentionGroup(
     scores: Map<Path, FileScore>,
     identity: ScoreIdentity,
     ambiguityMargin: Double,
+): Map<Path, RetentionPresentation> = presentRetentionFiles(group.files, scores, identity, ambiguityMargin)
+
+internal fun presentRetentionFiles(
+    files: List<FileRecord>,
+    scores: Map<Path, FileScore>,
+    identity: ScoreIdentity,
+    ambiguityMargin: Double,
 ): Map<Path, RetentionPresentation> {
     require(ambiguityMargin.isFinite() && ambiguityMargin >= 0) { "Invalid ambiguity margin" }
-    val current = group.files.associate { file ->
+    val current = files.associate { file ->
         file.path to scores[file.path]?.takeIf { it.identity == identity && it.input == FileScoreInput.from(file) }
     }
     if (current.values.any { it == null }) {
-        return group.files.associate { file ->
+        return files.associate { file ->
             val saved = scores[file.path]
             val rank = when {
                 current[file.path] != null -> RetentionRank.INCOMPLETE
