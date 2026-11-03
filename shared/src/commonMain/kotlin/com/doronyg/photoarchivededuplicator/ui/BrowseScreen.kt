@@ -24,6 +24,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.doronyg.photoarchivededuplicator.scan.DirectoryOverview
@@ -57,6 +59,9 @@ fun BrowseScreen(repository: DirectoryRepository, pathActions: PathActions, pref
     var editing by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val current = stack.lastOrNull()
+    val clipboard = LocalClipboardManager.current
+    var copying by remember { mutableStateOf(false) }
+    var copyStatus by remember(current) { mutableStateOf<String?>(null) }
 
     LaunchedEffect(current, refreshCount) {
         content = null
@@ -81,6 +86,29 @@ fun BrowseScreen(repository: DirectoryRepository, pathActions: PathActions, pref
             OutlinedButton(onClick = { refreshCount++ }) { Text("Refresh") }
         }
         Breadcrumbs(stack, onNavigate = { depth -> preferences.update { it.copy(browseStack = it.browseStack.take(depth)) } })
+        OutlinedButton(enabled = !copying && content != null, onClick = {
+            val selected = current
+            copying = true
+            copyStatus = null
+            error = null
+            scope.launch {
+                try {
+                    val paths = repository.filePathsUnder(selected)
+                    val text = formatInventoryFilePaths(paths)
+                    clipboard.setText(AnnotatedString(text))
+                    copyStatus = "Copied ${paths.size} file paths from ${selected ?: "all roots"}, including subfolders."
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    error = "Could not copy file paths from ${selected ?: "all roots"}: ${e.message}"
+                } finally {
+                    copying = false
+                }
+            }
+        }) { Text(if (copying) "Copying..." else "Copy file paths") }
+        Text("Copy file paths includes all stored files in this folder and its subfolders, one full path per line. All roots copies the entire inventory.",
+            style = MaterialTheme.typography.bodySmall)
+        copyStatus?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
         current?.let { folder ->
             PathLink("Open folder in file manager: $folder", action = { pathActions.openFolder(folder) })
             if (excluded) {

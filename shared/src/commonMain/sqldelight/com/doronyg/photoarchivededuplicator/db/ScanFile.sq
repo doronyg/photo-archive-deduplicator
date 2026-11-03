@@ -40,6 +40,14 @@ DELETE FROM scanFile WHERE directoryPath = :directoryPath;
 selectInDirectory:
 SELECT * FROM scanFile WHERE directoryPath = :directoryPath ORDER BY name;
 
+selectPathsInTree:
+SELECT path FROM scanFile
+WHERE :root IS NULL OR directoryPath = :root OR (
+    substr(directoryPath, 1, length(:root)) = :root
+    AND (substr(:root, -1) IN ('/', '\') OR substr(directoryPath, length(:root) + 1, 1) IN ('/', '\'))
+)
+ORDER BY path COLLATE BINARY;
+
 selectTotals:
 SELECT count(*) AS fileCount, coalesce(sum(sizeBytes), 0) AS totalBytes FROM scanFile;
 

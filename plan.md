@@ -217,6 +217,13 @@ breaks and other control characters escaped; review local paths before sharing.
 Desktop results have a visible draggable scrollbar; Android retains touch scrolling.
 Copying does not transmit data to an AI or any other service.
 
+Browse provides **Copy file paths** for the current directory and all subdirectories;
+at **All roots**, it copies every stored file. The text contains one unquoted full
+path per line, sorted by path, with no headers or metadata. It includes retained
+inventory in excluded trees and never inspects source files. Database retrieval
+and text formatting run off the UI thread. Paths containing line breaks produce
+an explicit error rather than ambiguous or silently omitted entries.
+
 #### Advisory retention scoring
 
 Each candidate copy has a persisted, explainable retention score; higher means a

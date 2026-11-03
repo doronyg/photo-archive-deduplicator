@@ -326,6 +326,11 @@ class DirectoryRepository internal constructor(
         files.selectInDirectory(directory.toString()).awaitAsList().map { it.toRecord() }
     }
 
+    /** Stored paths in the whole directory tree, or every inventory path when null. */
+    suspend fun filePathsUnder(directory: Path? = null): List<String> = io("filePathsUnder $directory") {
+        files.selectPathsInTree(directory?.inventoryPath()?.toString()).awaitAsList()
+    }
+
     suspend fun directoriesWithStatus(status: DirectoryStatus): List<DirectoryRecord> = io("directoriesWithStatus $status") {
         directories.selectWithStatus(status).awaitAsList().map { it.toRecord() }
     }
