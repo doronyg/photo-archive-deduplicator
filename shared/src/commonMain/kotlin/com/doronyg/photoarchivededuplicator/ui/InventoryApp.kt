@@ -90,7 +90,7 @@ fun InventoryApp(container: AppContainer, scanTarget: ScanTarget, pathActions: P
                 when (selectedTab) {
                     UiTab.SCAN -> ScanScreen(container.scanController, scanTarget, container.uiPreferences, content)
                     UiTab.BROWSE -> BrowseScreen(container.repository, pathActions, container.uiPreferences, content, scanState is ScanState.Running)
-                    UiTab.DUPLICATES -> DuplicatesScreen(container.repository, scanTarget, pathActions, container.uiPreferences, container.retentionScores, content)
+                    UiTab.DUPLICATES -> DuplicatesScreen(container.repository, scanTarget, pathActions, container.uiPreferences, container.retentionScores, container.exif, container.exifQueue, scanState is ScanState.Running, content)
                     UiTab.EXCLUSIONS -> ExclusionsScreen(container.repository, scanState is ScanState.Running, content)
                     UiTab.LOGS -> LogsScreen(pathActions, content, container.uiPreferences)
                 }

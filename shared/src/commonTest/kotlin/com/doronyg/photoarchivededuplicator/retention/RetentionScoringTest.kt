@@ -64,7 +64,7 @@ class RetentionScoringTest {
         }
         assertEquals(10.0, value("/archive/2007"))
         listOf("/archive/2007/06", "/archive/2007/12/event").forEach {
-            assertEquals(30.0, value(it), it)
+            assertEquals(45.0, value(it), it)
         }
         assertEquals(100.0, value("/2007/06/06/2008_07_07/2009-08-08"))
         assertEquals(100.0, value("/2007-06-06/event/2008-07-07"))
@@ -80,7 +80,7 @@ class RetentionScoringTest {
         assertEquals(100.0, value("/archive/2000-02-29"))
         assertEquals(100.0, value("/archive/2024-02-29"))
         assertEquals(40.0, value("/archive/2024/02/29"))
-        assertEquals(30.0, value("/archive/2023/02/29"), "The valid year/month remains partial evidence, not a valid complete date")
+        assertEquals(45.0, value("/archive/2023/02/29"), "The valid year/month remains partial evidence, not a valid complete date")
     }
 
     @Test
@@ -171,9 +171,9 @@ class RetentionScoringTest {
         val first = scorer.score(file, 123)
         assertEquals(first.copy(createdAt = 456), scorer.score(file, 456))
         assertEquals(FileScoreInput.from(file), first.input)
-        assertEquals(ScoreIdentity("retention", "directory-retention", "3", scorer.identity.configurationId),
+        assertEquals(ScoreIdentity("retention", "directory-retention", "4", scorer.identity.configurationId),
             first.identity)
-        assertEquals(5.0, scorer.ambiguityMargin)
+        assertEquals(10.0, scorer.ambiguityMargin)
     }
 
     @Test
@@ -194,6 +194,8 @@ class RetentionScoringTest {
             base.copy(filenameDateMismatchPenalty = -70.0),
             base.copy(backupDirectoryWords = base.backupDirectoryWords + "Messenger"),
             base.copy(yearMonthDateBonus = 31.0),
+            base.copy(exifConfirmedDateScore = 89.0),
+            base.copy(exifDateMismatchPenalty = -79.0),
         )
         variants.forEach { assertNotEquals(scorer.identity, RetentionScorer(it).identity) }
         val reordered = base.copy(
@@ -222,8 +224,12 @@ class RetentionScoringTest {
             { RetentionConfig(filenameDateMismatchPenalty = 80.0) },
             { RetentionConfig(filenameDateMismatchPenalty = Double.NaN) },
             { RetentionConfig(backupDirectoryWords = setOf("")) },
-            { RetentionConfig(yearMonthDateBonus = 41.0) },
+            { RetentionConfig(yearMonthDateBonus = 101.0) },
             { RetentionConfig(yearMonthDateBonus = 1.0) },
+            { RetentionConfig(exifConfirmedDateScore = -1.0) },
+            { RetentionConfig(exifConfirmedDateScore = Double.NaN) },
+            { RetentionConfig(exifDateMismatchPenalty = 1.0) },
+            { RetentionConfig(exifDateMismatchPenalty = Double.NaN) },
         ).forEach { invalid -> assertFailsWith<IllegalArgumentException> { invalid() } }
     }
 

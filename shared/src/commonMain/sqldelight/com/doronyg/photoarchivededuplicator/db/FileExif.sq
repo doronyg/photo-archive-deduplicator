@@ -1,0 +1,42 @@
+CREATE TABLE fileExif (
+    filePath TEXT NOT NULL PRIMARY KEY,
+    directoryPath TEXT NOT NULL,
+    inputSizeBytes INTEGER NOT NULL,
+    inputModifiedAt INTEGER,
+    inputCreatedAt INTEGER,
+    status TEXT NOT NULL,
+    capturedAt TEXT,
+    offsetOriginal TEXT,
+    subsecondOriginal TEXT,
+    make TEXT,
+    model TEXT,
+    orientation INTEGER,
+    width INTEGER,
+    height INTEGER,
+    error TEXT,
+    extractedAt INTEGER NOT NULL,
+    readerId TEXT NOT NULL,
+    readerVersion TEXT NOT NULL
+);
+
+selectForPaths:
+SELECT * FROM fileExif
+WHERE filePath IN :paths
+AND (:currentOnly = 0 OR EXISTS (
+    SELECT 1 FROM scanFile f
+    WHERE f.path = fileExif.filePath AND f.directoryPath = fileExif.directoryPath
+    AND f.sizeBytes = fileExif.inputSizeBytes
+    AND f.modifiedAt IS fileExif.inputModifiedAt AND f.createdAt IS fileExif.inputCreatedAt
+))
+ORDER BY filePath;
+
+upsert:
+INSERT OR REPLACE INTO fileExif(
+    filePath, directoryPath, inputSizeBytes, inputModifiedAt, inputCreatedAt,
+    status, capturedAt, offsetOriginal, subsecondOriginal, make, model, orientation,
+    width, height, error, extractedAt, readerId, readerVersion
+) VALUES (
+    :filePath, :directoryPath, :inputSizeBytes, :inputModifiedAt, :inputCreatedAt,
+    :status, :capturedAt, :offsetOriginal, :subsecondOriginal, :make, :model, :orientation,
+    :width, :height, :error, :extractedAt, :readerId, :readerVersion
+);

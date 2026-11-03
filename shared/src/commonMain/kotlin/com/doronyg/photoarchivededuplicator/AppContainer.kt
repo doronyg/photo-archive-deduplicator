@@ -6,6 +6,10 @@ import com.doronyg.photoarchivededuplicator.scan.InventoryScanner
 import com.doronyg.photoarchivededuplicator.scan.ScanController
 import com.doronyg.photoarchivededuplicator.scan.createFilesDatabase
 import com.doronyg.photoarchivededuplicator.retention.RetentionScoreService
+import com.doronyg.photoarchivededuplicator.exif.ExifExtractionService
+import com.doronyg.photoarchivededuplicator.exif.ExifQueueController
+import com.doronyg.photoarchivededuplicator.exif.ExifSource
+import com.doronyg.photoarchivededuplicator.exif.FileSystemExifSource
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -15,6 +19,7 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import okio.FileSystem
 
 /**
  * Owns the app's long-lived objects. Create exactly one per process (in the platform
@@ -29,6 +34,7 @@ class AppContainer internal constructor(
     workerDispatcher: CoroutineDispatcher = Dispatchers.Default,
     createScanner: (DirectoryRepository, IoLane) -> InventoryScanner,
     initialUiChoices: UiChoices = UiChoices(),
+    createExifSource: (IoLane) -> ExifSource = { FileSystemExifSource(FileSystem.SYSTEM, it) },
 ) {
     /** Lives as long as the app; scans run here, not in a composition scope. */
     private val appJob = SupervisorJob()
@@ -37,15 +43,24 @@ class AppContainer internal constructor(
     private var closed = false
 
     val repository = DirectoryRepository(createFilesDatabase(driver), databaseLane = databaseLane)
-    private val scanner: InventoryScanner = createScanner(repository, filesystemLane)
-    val scanController = ScanController(scanner, appScope, repository)
-    val uiPreferences = UiPreferences(initialUiChoices, appScope, repository::saveUiChoices)
+    val exif = ExifExtractionService(repository, createExifSource(filesystemLane))
     val retentionScores = RetentionScoreService(repository)
+    val exifQueue = ExifQueueController(repository, retentionScores, exif, appScope, dispatcher = workerDispatcher)
+    private val scanner: InventoryScanner = createScanner(repository, filesystemLane)
+    val scanController = ScanController(scanner, appScope, repository,
+        onScanAccepted = { exifQueue.scanAccepted() },
+        beforeScan = { exifQueue.scanStarting() },
+        afterScan = { root, completed ->
+            if (completed && root != null) exifQueue.scanCompleted(root)
+            else exifQueue.scanStopped()
+        })
+    val uiPreferences = UiPreferences(initialUiChoices, appScope, repository::saveUiChoices)
 
     /** Desktop awaits this after its UI exits, before the process can terminate. */
     suspend fun shutdown() = withContext(NonCancellable) {
         shutdownLock.withLock {
             if (closed) return@withLock
+            exifQueue.shutdown()
             scanController.pause()
             uiPreferences.shutdown()
             appJob.cancelAndJoin()
@@ -71,6 +86,7 @@ internal suspend fun createAppContainer(
     openDriver: () -> SqlDriver,
     prepareFilesystem: () -> Unit = {},
     createScanner: (DirectoryRepository, IoLane) -> InventoryScanner,
+    createExifSource: (IoLane) -> ExifSource = { FileSystemExifSource(FileSystem.SYSTEM, it) },
 ): AppContainer {
     val databaseLane = ioDispatcher?.let { IoLane("database-test", it) } ?: IoLane.dedicated("inventory-db")
     val filesystemLane = ioDispatcher?.let { IoLane("filesystem-test", it) } ?: IoLane.dedicated("inventory-filesystem")
@@ -81,7 +97,7 @@ internal suspend fun createAppContainer(
             val driver = Diagnostics.logger.blockingOperation(LogTags.DATABASE, "open driver/schema/migrations") { openDriver() }
             try {
                 val choices = loadUiChoicesInLane(createFilesDatabase(driver))
-                AppContainer(driver, databaseLane, filesystemLane, workerDispatcher, createScanner, choices)
+                AppContainer(driver, databaseLane, filesystemLane, workerDispatcher, createScanner, choices, createExifSource)
                     .also { created = it }
             } catch (e: Throwable) {
                 Diagnostics.logger.blockingOperation(LogTags.DATABASE, "failed initialization driver.close") { driver.close() }

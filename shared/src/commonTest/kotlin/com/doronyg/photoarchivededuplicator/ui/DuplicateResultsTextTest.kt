@@ -1,5 +1,10 @@
 package com.doronyg.photoarchivededuplicator.ui
 
+import com.doronyg.photoarchivededuplicator.exif.ExifInput
+import com.doronyg.photoarchivededuplicator.exif.ExifMetadata
+import com.doronyg.photoarchivededuplicator.exif.ExifReadResult
+import com.doronyg.photoarchivededuplicator.exif.ExifRecord
+import com.doronyg.photoarchivededuplicator.exif.ExifStatus
 import com.doronyg.photoarchivededuplicator.retention.RetentionPresentation
 import com.doronyg.photoarchivededuplicator.retention.RetentionRank
 import com.doronyg.photoarchivededuplicator.retention.RetentionScorer
@@ -29,6 +34,41 @@ import kotlin.time.Duration.Companion.seconds
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class DuplicateResultsTextTest {
+    @Test
+    fun exifReportQuotesRawFieldsAndDoesNotChangeRetentionOrOrder() = runTest(timeout = 10.seconds) {
+        val group = group("IMG.jpg")
+        val file = group.files.first()
+        val scores = mapOf(file.path to RetentionPresentation(RetentionScorer().score(file, 1000), RetentionRank.HIGHEST))
+        val worker = StandardTestDispatcher(testScheduler)
+        val plain = formatDuplicateResults("/archive", DuplicateCandidateFilter(), defaultDuplicateSortRules(),
+            listOf(group), worker, retention = scores)
+        val record = ExifRecord(ExifInput.from(file), ExifReadResult(ExifStatus.EXTRACTED,
+            ExifMetadata(capturedAt = "2024:07:08 09:10:11", make = "A\n\"B\"")), 1000)
+        val report = formatDuplicateResults("/archive", DuplicateCandidateFilter(), defaultDuplicateSortRules(),
+            listOf(group), worker, retention = scores, exif = mapOf(file.path to record))
+        assertTrue("Original capture datetime: \"2024:07:08 09:10:11\"" in report)
+        assertTrue("Original offset: \"unknown (timezone unknown)\"" in report)
+        assertTrue("Camera make: \"A\\n\\\"B\\\"\"" in report)
+        assertTrue("EXIF: Not extracted" in report)
+        assertEquals(plain.lineSequence().filter { "Retention" in it || "Path:" in it }.toList(),
+            report.lineSequence().filter { "Retention" in it || "Path:" in it }.toList())
+    }
+
+    @Test
+    fun exifReportIncludesNoExifErrorsAndAllOtherStatuses() = runTest(timeout = 10.seconds) {
+        val worker = StandardTestDispatcher(testScheduler)
+        ExifStatus.entries.forEach { status ->
+            val group = group("IMG.jpg")
+            val file = group.files.first()
+            val record = ExifRecord(ExifInput.from(file), ExifReadResult(status, error = "bad\n\"input\""), 1000)
+            val report = formatDuplicateResults("/archive", DuplicateCandidateFilter(), defaultDuplicateSortRules(),
+                listOf(group), worker, exif = mapOf(file.path to record))
+            assertTrue(presentExif(record).summary.let(::quoteResultText) in report)
+            assertTrue("Error: \"bad\\n\\\"input\\\"\"" in report)
+            assertTrue("Reader: \"kim 0.48.0\"" in report)
+        }
+    }
+
     private fun group(name: String, folders: List<String> = listOf("b", "a")) =
         DuplicateCandidateGroup(name, 1537, folders.mapIndexed { index, folder ->
             val directory = "/archive/$folder".toPath()
@@ -145,7 +185,7 @@ class DuplicateResultsTextTest {
         assertTrue("Retention: 100 - Tied - ambiguous" in report)
         assertTrue("+100: \"Preferred chronological folder\"" in report)
         assertTrue("Retention: Not scored" in report)
-        assertTrue("directory-retention v3" in report)
+        assertTrue("directory-retention v4" in report)
         assertTrue("Assessed: 1970-01-01 00:00:01 UTC" in report)
         assertTrue("not probabilities or deletion instructions" in report)
         val stale = formatDuplicateResults("/archive", DuplicateCandidateFilter(), defaultDuplicateSortRules(),

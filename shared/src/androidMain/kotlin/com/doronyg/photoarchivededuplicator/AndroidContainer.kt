@@ -6,6 +6,7 @@ import android.provider.MediaStore
 import app.cash.sqldelight.async.coroutines.synchronous
 import app.cash.sqldelight.driver.android.AndroidSqliteDriver
 import com.doronyg.photoarchivededuplicator.db.FilesDatabase
+import com.doronyg.photoarchivededuplicator.exif.AndroidExifSource
 import com.doronyg.photoarchivededuplicator.scan.MediaIndexScanner
 import com.doronyg.photoarchivededuplicator.scan.MediaItem
 import com.doronyg.photoarchivededuplicator.scan.MediaSource
@@ -30,6 +31,7 @@ suspend fun createAndroidContainer(context: Context): AppContainer = createAppCo
     createScanner = { repository, filesystem ->
         MediaIndexScanner(MediaStoreSource(context.contentResolver, filesystem), repository)
     },
+    createExifSource = { filesystem -> AndroidExifSource(context.contentResolver, filesystem) },
 )
 
 /**

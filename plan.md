@@ -227,11 +227,13 @@ Central configuration defines the weights and matching rules:
 |---|---:|
 | Valid `yyyy-MM-dd` directory, optionally followed by a separated descriptive label | +100 |
 | Valid `yyyy_MM_dd`, `yyyyMMdd`, or `yyyy/MM/dd` structure | +40 |
-| Valid year/month structure (`yyyy/MM`) | +30 |
+| Valid year/month structure (`yyyy/MM`) | +45 |
 | Recognizable year-only structure | +10 |
 | Known backup/import/synchronization directory | -25 |
 | Known temporary directory | -60 |
-| Recognized filename date contradicts a recognized complete folder date | -80 |
+| Recognized filename date contradicts a recognized complete folder date | -40 |
+| Usable stored EXIF date confirms an alternative complete folder date | Organization raised from +40 to +90 |
+| Usable stored EXIF date contradicts a complete folder date, without a matching filename date | -40 |
 | Modification UTC date agrees with complete folder date | +2 |
 | Creation UTC date agrees with complete folder date | +1 |
 
@@ -239,24 +241,56 @@ Only the strongest organization bonus and strongest location penalty apply.
 Known directory names are matched case-insensitively at component boundaries.
 Unknown/intentional collection names are neutral. Missing or disagreeing timestamps
 are neutral too: neither older folder dates nor older filesystem timestamps win by
-themselves. EXIF, content hashes, and AI assessments are not calculated.
+themselves. Retention scoring consumes stored EXIF when available, but never opens
+source files, calculates content hashes, or invokes AI assessments.
 
 The filename evidence introduced in algorithm v2 recognizes valid WhatsApp-style `IMG-yyyyMMdd-WA<number>` and
 `VID-yyyyMMdd-WA<number>` filenames (case-insensitive). A filename alone never
 incurs a date penalty: there must also be a valid complete folder date to compare.
-A mismatching preferred chronological folder contributes +100 -80 = +20.
+A mismatching preferred chronological folder contributes +100 -40 = +60.
 Timestamp bonuses are suppressed on that mismatch, even if copied timestamps
 agree with the folder. Filename dates remain advisory, not verified capture dates.
 Invalid/unrecognized filename dates and partial year-only folders do not trigger
 the mismatch penalty. Alternative complete date organization still earns +40,
-so a recognized mismatch there contributes +40 -80 = -40 before location penalties.
+so a recognized mismatch there contributes +40 -40 = 0 before location penalties.
 
-Algorithm v3 separates year/month organization (+30) from year-only organization
-(+10). A consistent partial structure therefore outranks a contradictory preferred
-full-date folder (+20). Full dates retain their +40/+100 bonuses. Year/month
-evidence takes precedence over a later year-only component, and valid months are
-restricted to `01` through `12`. No timestamp bonus is needed to earn the +30.
-Previous algorithm versions remain stored independently.
+Algorithm v3 introduced separate year/month evidence. Current weights award +45
+for year/month organization and +10 for year-only organization. Year/month evidence
+takes precedence over a later year-only component, and valid months are restricted
+to `01` through `12`. The +45 intentionally exceeds unconfirmed alternative full-date
+organization (+40); preferred organization stays +100, and a contradicted preferred
+folder now earns +60 before location adjustments. A year/month backup copy earns
++45 -25 = +20. No timestamp or EXIF bonus is needed for these year/month points.
+Earlier algorithm versions and weight configurations remain stored independently.
+
+Algorithm v4 adds stored EXIF capture-date evidence. Compare the original
+camera-local calendar date directly with a complete folder date; do not infer a
+timezone or convert to UTC. Only successful, inventory-matched extractions with a
+valid full `DateTimeOriginal` in 1971 through 2099 supply evidence. Missing, invalid,
+epoch-default, failed, and stale metadata are neutral. Partial folders are not
+treated as complete dates.
+
+An EXIF-confirmed alternative full-date folder earns 90 organization points;
+preferred `yyyy-MM-dd` organization remains 100. Existing location penalties and
+weak timestamp bonuses still apply. A reliable EXIF/folder mismatch incurs
+-40 and suppresses timestamp support, but a recognized filename date matching the
+folder protects all its existing points. This protection recognizes WhatsApp names
+and conventional `yyyyMMdd`, `yyyy-MM-dd`, `yyyy_MM_dd`, `IMG_`, `VID_`, and `PXL_`
+date/timestamp names.
+It does not introduce new filename-only penalties for camera names.
+
+Matching EXIF also protects a folder from a conflicting advisory WhatsApp filename
+date. When both EXIF and filename dates disagree with the folder, apply only the
+stronger date penalty once. Factors explain both contradictions and protections.
+Persist the usable EXIF date as a zero-contribution evidence factor, allowing
+cached assessments to detect relevant metadata changes without another schema
+migration. Re-extraction with the same usable date need not recalculate a score.
+Earlier score versions remain available.
+
+Failed or limit-exceeded EXIF is treated exactly like absent EXIF, not as negative
+evidence. The reported `20191210_104020-ANIMATION.gif` therefore scores +20 in
+`MobileBackup/.../Google Photos/2019/12` and -60 in `.Picasa3Temp_1`, regardless of
+whether extraction was attempted unsuccessfully.
 
 `PhotoSync` is a known synchronization directory. A whole `WhatsApp` word in
 a directory name (including `WhatsApp Images` or `WhatsApp_backup`) is a backup/
@@ -264,7 +298,7 @@ import/synchronization signal, matched case-insensitively. Substrings such as
 `WhatsApplication` do not match. Multiple backup/sync matches incur only one -25
 penalty; temporary locations retain the stronger -60 penalty instead.
 
-Scores within five points of the maximum are ambiguous; tied leaders are labeled
+Scores within ten points of the maximum are ambiguous; tied leaders are labeled
 as ties. A group with missing/outdated scores cannot receive a leading-copy
 recommendation. All files remain visible. Tap the compact score line to expand
 its contributing factors; Copy results includes scores and explanations.
@@ -301,6 +335,66 @@ Do not classify these candidates as exact duplicates yet.
 Measure how many files and groups survive the initial filter.
 
 **Deliverable:** a candidate report showing the potential scope of deduplication.
+
+#### Cached and queued EXIF inspection
+
+After a genuine file scan completes, including a resumed scan, calculate regular
+retention scores for duplicate candidates under that scan's root. Only then build
+an EXIF queue. Startup restoration of an already-completed scan, failed scans, and
+explicitly paused scans do not automatically start EXIF. A new scan cancels and
+drains an existing EXIF queue before beginning filesystem scanning.
+
+A group is eligible only when its two highest current scores differ by at most
+10 points and at least one member has a valid complete directory date. Year-only
+and year/month folders alone cannot benefit from the current EXIF scoring model.
+A low-scoring outlier does not prevent an otherwise ambiguous group from qualifying.
+Freeze the selected groups before processing; visit every file in every selected
+group, rather than stopping when one file's metadata could resolve the ambiguity.
+
+The app-owned queue processes files sequentially using KIM, without modifying
+source files. Reuse all current extraction results, including errors, unsupported
+formats, missing EXIF, and read-limit failures. A file is opened only when its
+stored inventory input or library identity/version differs. `lastScanned` alone
+does not invalidate the cache. The library version is generated from the Gradle
+version catalog, so upgrading KIM invalidates prior attempts automatically.
+
+The duplicates screen also allows explicitly starting this pipeline for displayed
+candidates while scanning is inactive, including after a paused scan. Progress
+counts visited files, including cache hits. Navigating away, sorting, or changing
+filters does not cancel the app-owned queue or start another one. Merely opening
+or searching the browser never extracts EXIF.
+
+Reassess scores only after the entire EXIF queue finishes, then refresh visible
+scores and within-group ordering from persisted data. Recompute controls are
+disabled while the pipeline is active; browsing during extraction reads stored
+scores without calculating new ones. Cancellation preserves completed extraction
+attempts but does not reassess a partial queue. A subsequent pipeline or explicit
+score recomputation can consume those stored results.
+
+Persist only the whitelisted original capture date/time, corresponding timezone
+offset and subseconds, camera make/model, orientation, and available pixel
+dimensions. Keep capture components raw: a missing offset is unknown, not UTC or
+the current computer's timezone. GPS, full metadata dumps, previews, and image
+content are not stored.
+
+Schema v5 adds a separate sparse `fileExif` table through additive migration
+`4.sqm`, preserving the existing inventory, scores, and settings. Store the latest
+attempt's outcome, extraction time, reader identity/version, and inventory input
+snapshot. Previously extracted results can be displayed and copied without
+reopening source files. They describe the last extraction, not a live-file
+guarantee; changed inventory inputs invalidate them.
+
+Read streams on the serialized filesystem lane, using MediaStore content URIs
+on Android. Parsing has a 16 MiB read budget rather than loading complete files.
+Unsupported formats, missing EXIF, unreadable metadata, changed sources, and
+budget-exceeded results are explicit outcomes, not successful partial extractions.
+Compare source metadata before and after each read, and validate inventory inputs
+transactionally before saving on the database lane. Cancellation preserves
+already completed attempts without recording an interrupted file as a failure.
+
+Shutdown stops accepting queue requests, cancels and drains its work, and then
+closes the filesystem/database lanes. No EXIF process runs concurrently with the
+regular filesystem scan.
 
 ### Phase 3: Exact duplicate verification
 

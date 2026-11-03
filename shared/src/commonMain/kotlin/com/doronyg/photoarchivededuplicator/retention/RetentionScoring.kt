@@ -1,6 +1,9 @@
 package com.doronyg.photoarchivededuplicator.retention
 
 import com.doronyg.photoarchivededuplicator.scan.FileRecord
+import com.doronyg.photoarchivededuplicator.exif.ExifInput
+import com.doronyg.photoarchivededuplicator.exif.ExifRecord
+import com.doronyg.photoarchivededuplicator.exif.ExifStatus
 import okio.Path
 import kotlin.math.floor
 import kotlin.time.Instant
@@ -39,14 +42,16 @@ data class FileScore(
 data class RetentionConfig(
     val isoDateBonus: Double = 100.0,
     val alternativeDateBonus: Double = 40.0,
-    val yearMonthDateBonus: Double = 30.0,
+    val yearMonthDateBonus: Double = 45.0,
     val partialDateBonus: Double = 10.0,
     val backupPenalty: Double = -25.0,
     val temporaryPenalty: Double = -60.0,
     val modifiedDateBonus: Double = 2.0,
     val createdDateBonus: Double = 1.0,
-    val filenameDateMismatchPenalty: Double = -80.0,
-    val ambiguityMargin: Double = 5.0,
+    val filenameDateMismatchPenalty: Double = -40.0,
+    val exifConfirmedDateScore: Double = 90.0,
+    val exifDateMismatchPenalty: Double = -40.0,
+    val ambiguityMargin: Double = 10.0,
     val backupDirectoryNames: Set<String> = setOf(
         "MobileBackup", "Google Photos", "Picasa", "Backup", "Backups", "Import", "Imports", "Sync", "PhotoSync",
     ),
@@ -55,17 +60,18 @@ data class RetentionConfig(
     val temporaryDirectoryPrefixes: Set<String> = setOf(".Picasa3Temp_"),
 ) {
     init {
-        val bonuses = listOf(isoDateBonus, alternativeDateBonus, yearMonthDateBonus, partialDateBonus, modifiedDateBonus, createdDateBonus)
-        val penalties = listOf(backupPenalty, temporaryPenalty, filenameDateMismatchPenalty)
+        val bonuses = listOf(isoDateBonus, alternativeDateBonus, yearMonthDateBonus, partialDateBonus,
+            modifiedDateBonus, createdDateBonus, exifConfirmedDateScore)
+        val penalties = listOf(backupPenalty, temporaryPenalty, filenameDateMismatchPenalty, exifDateMismatchPenalty)
         require((bonuses + penalties).all { it.isFinite() && it == floor(it) && it in -1_000_000.0..1_000_000.0 }) {
             "Scoring weights must be finite whole numbers within +/- 1,000,000."
         }
         require(bonuses.all { it >= 0.0 } && penalties.all { it <= 0.0 }) {
             "Bonuses must be nonnegative and penalties nonpositive."
         }
-        require(isoDateBonus >= alternativeDateBonus && alternativeDateBonus >= yearMonthDateBonus &&
-            yearMonthDateBonus >= partialDateBonus) {
-            "Stronger date organization must not earn a smaller bonus."
+        require(isoDateBonus >= maxOf(alternativeDateBonus, yearMonthDateBonus) &&
+            minOf(alternativeDateBonus, yearMonthDateBonus) >= partialDateBonus) {
+            "Preferred date organization must score at least as highly as other formats; year-only evidence must remain weakest."
         }
         require(temporaryPenalty <= backupPenalty) { "Temporary locations must have at least the backup penalty." }
         require(modifiedDateBonus + createdDateBonus <= partialDateBonus) {
@@ -95,17 +101,23 @@ class RetentionScorer(config: RetentionConfig = RetentionConfig()) {
     val identity: ScoreIdentity = ScoreIdentity(
         type = "retention",
         algorithmId = "directory-retention",
-        algorithmVersion = "3",
+        algorithmVersion = "4",
         configurationId = configurationId(this.config),
     )
     val ambiguityMargin: Double = config.ambiguityMargin
 
-    fun score(file: FileRecord, assessedAt: Long): FileScore {
+    fun score(file: FileRecord, assessedAt: Long, exif: ExifRecord? = null): FileScore {
         val components = file.directoryPath.segments
         val date = strongestDate(components)
         val fullDate = date?.isoDate
         val filenameDate = if (fullDate != null) filenameDate(file.path.name) else null
-        val dateMismatch = fullDate != null && filenameDate != null && fullDate != filenameDate
+        val filenameMismatch = fullDate != null && filenameDate != null && fullDate != filenameDate
+        val exifDate = if (fullDate != null) usableExifDate(file, exif) else null
+        val exifMatches = fullDate != null && exifDate == fullDate
+        val exifMismatch = exifDate != null && exifDate != fullDate
+        val filenameProtectsFolder = exifMismatch && filenameDate(file.path.name, includeCameraDates = true) == fullDate
+        val penalizeFilename = filenameMismatch && !exifMatches
+        val penalizeExif = exifMismatch && !filenameProtectsFolder
         val factors = buildList {
             if (date != null) {
                 val bonus = when (date.strength) {
@@ -121,9 +133,28 @@ class RetentionScorer(config: RetentionConfig = RetentionConfig()) {
                 }
                 add(ScoreFactor("directory-date", bonus, explanation))
             }
-            if (dateMismatch) {
-                add(ScoreFactor("filename-date-mismatch", config.filenameDateMismatchPenalty,
-                    "Filename date $filenameDate disagrees with folder date $fullDate; filename dates are advisory, not verified capture dates."))
+            if (filenameMismatch) {
+                add(ScoreFactor("filename-date-mismatch", if (penalizeFilename) config.filenameDateMismatchPenalty else 0.0,
+                    if (exifMatches) "Filename date $filenameDate disagrees with folder date $fullDate, but stored EXIF agrees with the folder; no filename penalty."
+                    else "Filename date $filenameDate disagrees with folder date $fullDate; filename dates are advisory, not verified capture dates."))
+            }
+            exifEvidence(file, exif)?.let(::add)
+            if (exifMatches && date != null) {
+                val base = if (date.strength == PREFERRED_DATE) config.isoDateBonus else config.alternativeDateBonus
+                val bonus = maxOf(0.0, minOf(config.isoDateBonus, config.exifConfirmedDateScore) - base)
+                add(ScoreFactor("exif-date-match", bonus,
+                    "Stored EXIF capture date $exifDate matches folder date $fullDate; confirmed complete-date organization."))
+            } else if (exifMismatch) {
+                val alreadyApplied = if (penalizeFilename) config.filenameDateMismatchPenalty else 0.0
+                val penalty = if (filenameProtectsFolder) 0.0 else minOf(config.exifDateMismatchPenalty, alreadyApplied) - alreadyApplied
+                val explanation = when {
+                    filenameProtectsFolder ->
+                        "Stored EXIF capture date $exifDate disagrees with folder date $fullDate, but the filename matches the folder; no penalty."
+                    penalizeFilename ->
+                        "Stored EXIF capture date $exifDate disagrees with folder date $fullDate; overlapping filename/EXIF date penalties count only the strongest once."
+                    else -> "Stored EXIF capture date $exifDate disagrees with folder date $fullDate."
+                }
+                add(ScoreFactor("exif-date-mismatch", penalty, explanation))
             }
             val lowercase = components.map { it.lowercase() }
             val temporary = lowercase.any { component ->
@@ -138,7 +169,7 @@ class RetentionScorer(config: RetentionConfig = RetentionConfig()) {
                 add(ScoreFactor("backup-location", config.backupPenalty, "Backup, import, or sync directory location (counted once)."))
             }
             // Copied timestamps agreeing with an already contradicted folder must not restore its bonus.
-            if (fullDate != null && !dateMismatch) {
+            if (fullDate != null && !penalizeFilename && !penalizeExif) {
                 if (utcDate(file.modifiedAt) == fullDate) {
                     add(ScoreFactor("modified-date-support", config.modifiedDateBonus, "Stored UTC modified date agrees with folder date $fullDate."))
                 }
@@ -148,6 +179,28 @@ class RetentionScorer(config: RetentionConfig = RetentionConfig()) {
             }
         }
         return FileScore(FileScoreInput.from(file), identity, factors.sumOf { it.contribution }, factors, assessedAt)
+    }
+
+    internal fun hasCurrentExifEvidence(score: FileScore, file: FileRecord, exif: ExifRecord?): Boolean =
+        score.factors.filter { it.key == EXIF_EVIDENCE } == listOfNotNull(exifEvidence(file, exif))
+
+    internal fun hasCompleteDirectoryDate(file: FileRecord): Boolean =
+        strongestDate(file.directoryPath.segments)?.isoDate != null
+
+    private fun exifEvidence(file: FileRecord, exif: ExifRecord?): ScoreFactor? {
+        val date = usableExifDate(file, exif) ?: return null
+        if (strongestDate(file.directoryPath.segments)?.isoDate == null) return null
+        return ScoreFactor(EXIF_EVIDENCE, 0.0,
+            "Usable stored EXIF capture date $date; compared as a camera-local calendar date, without timezone conversion.")
+    }
+
+    private fun usableExifDate(file: FileRecord, record: ExifRecord?): String? {
+        if (record == null || record.input != ExifInput.from(file) || record.result.status != ExifStatus.EXTRACTED) return null
+        val match = EXIF_DATETIME.matchEntire(record.result.metadata.capturedAt?.trim() ?: return null) ?: return null
+        if (match.groupValues[1].toInt() !in MIN_EXIF_YEAR..MAX_EXIF_YEAR ||
+            match.groupValues[4].toInt() !in 0..23 || match.groupValues[5].toInt() !in 0..59 ||
+            match.groupValues[6].toInt() !in 0..59) return null
+        return completeDate(match.groupValues[1], match.groupValues[2], match.groupValues[3], 0)?.isoDate
     }
 
     private data class DirectoryDate(val strength: Int, val isoDate: String?, val description: String)
@@ -178,8 +231,9 @@ class RetentionScorer(config: RetentionConfig = RetentionConfig()) {
         return strongest
     }
 
-    private fun filenameDate(name: String): String? {
-        val match = WHATSAPP_FILENAME.matchEntire(name) ?: return null
+    private fun filenameDate(name: String, includeCameraDates: Boolean = false): String? {
+        val match = WHATSAPP_FILENAME.matchEntire(name)
+            ?: (if (includeCameraDates) CAMERA_DATE_FILENAME.matchEntire(name) else null) ?: return null
         return completeDate(match.groupValues[1], match.groupValues[2], match.groupValues[3], 0)?.isoDate
     }
 
@@ -224,10 +278,19 @@ class RetentionScorer(config: RetentionConfig = RetentionConfig()) {
         const val ALTERNATIVE_DATE = 3
         const val YEAR_MONTH = 2
         const val YEAR = 1
+        const val EXIF_EVIDENCE = "exif-date-evidence"
+        // Exclude epoch-default dates and implausible centuries without consulting the current clock.
+        const val MIN_EXIF_YEAR = 1971
+        const val MAX_EXIF_YEAR = 2099
+        val EXIF_DATETIME = Regex("([0-9]{4}):([0-9]{2}):([0-9]{2}) ([0-9]{2}):([0-9]{2}):([0-9]{2})")
         val ISO_DATE = Regex("[0-9]{4}-[0-9]{2}-[0-9]{2}")
         val LABELED_ISO_DATE = Regex("[0-9]{4}-[0-9]{2}-[0-9]{2}[-_ ]+[^\\s_-].*")
         val WHATSAPP_FILENAME = Regex("(?:IMG|VID)-([0-9]{4})([0-9]{2})([0-9]{2})-WA[0-9]+(?:\\.[A-Z0-9]+)?",
             RegexOption.IGNORE_CASE)
+        val CAMERA_DATE_FILENAME = Regex(
+            "(?:IMG[_-]|VID[_-]|PXL[_-])?([0-9]{4})[-_]?([0-9]{2})[-_]?([0-9]{2})(?:[_-][0-9]{6}(?:[0-9]{3})?(?:[_.-][A-Z0-9]+)*)?(?:\\.[A-Z0-9]+)?",
+            RegexOption.IGNORE_CASE,
+        )
         val UNDERSCORE_DATE = Regex("[0-9]{4}_[0-9]{2}_[0-9]{2}")
         val COMPACT_DATE = Regex("[0-9]{8}")
         val YEAR_PATTERN = Regex("[0-9]{4}")
@@ -244,6 +307,8 @@ class RetentionScorer(config: RetentionConfig = RetentionConfig()) {
                 "modifiedDateBonus" to config.modifiedDateBonus,
                 "createdDateBonus" to config.createdDateBonus,
                 "filenameDateMismatchPenalty" to config.filenameDateMismatchPenalty,
+                "exifConfirmedDateScore" to config.exifConfirmedDateScore,
+                "exifDateMismatchPenalty" to config.exifDateMismatchPenalty,
                 "ambiguityMargin" to config.ambiguityMargin,
             ).forEach { (key, value) ->
                 append(key).append('=').append(if (value == 0.0) 0.0 else value).append(';')

@@ -40,13 +40,13 @@ class RetentionPresentationTest {
     }
 
     @Test
-    fun weakTimestampLeadIsStillAmbiguousAndFivePointMarginIsInclusive() {
+    fun weakTimestampLeadIsStillAmbiguousAndTenPointMarginIsInclusive() {
         val files = listOf(file("1970-01-01", createdAt = 0), file("2024-08-16"))
         val scores = files.map { scorer.score(it, 1) }
         assertEquals(setOf(RetentionRank.CLOSE), present(files, scores).values.map { it.rank }.toSet())
-        val boundary = listOf(scores[0].copy(value = 105.0), scores[1].copy(value = 100.0))
+        val boundary = listOf(scores[0].copy(value = 110.0), scores[1].copy(value = 100.0))
         assertEquals(setOf(RetentionRank.CLOSE), present(files, boundary).values.map { it.rank }.toSet())
-        val outside = listOf(scores[0].copy(value = 106.0), scores[1].copy(value = 100.0))
+        val outside = listOf(scores[0].copy(value = 111.0), scores[1].copy(value = 100.0))
         assertEquals(RetentionRank.HIGHEST, present(files, outside).getValue(files[0].path).rank)
     }
 

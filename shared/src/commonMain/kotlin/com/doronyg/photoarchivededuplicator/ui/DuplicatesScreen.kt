@@ -22,6 +22,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -29,6 +30,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
@@ -38,6 +40,10 @@ import androidx.compose.ui.unit.dp
 import com.doronyg.photoarchivededuplicator.scan.DirectoryRepository
 import com.doronyg.photoarchivededuplicator.PathActions
 import com.doronyg.photoarchivededuplicator.UiPreferences
+import com.doronyg.photoarchivededuplicator.exif.ExifExtractionService
+import com.doronyg.photoarchivededuplicator.exif.ExifQueueController
+import com.doronyg.photoarchivededuplicator.exif.ExifQueuePhase
+import com.doronyg.photoarchivededuplicator.exif.ExifRecord
 import com.doronyg.photoarchivededuplicator.retention.RetentionAssessmentResult
 import com.doronyg.photoarchivededuplicator.retention.RetentionScoreService
 import com.doronyg.photoarchivededuplicator.retention.RetentionPresentation
@@ -60,8 +66,10 @@ private data class SortedCandidates(
 )
 
 @Composable
-fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathActions: PathActions, preferences: UiPreferences, retentionScores: RetentionScoreService, modifier: Modifier = Modifier) {
+fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathActions: PathActions, preferences: UiPreferences, retentionScores: RetentionScoreService, exifService: ExifExtractionService, queue: ExifQueueController, scanRunning: Boolean, modifier: Modifier = Modifier) {
     val choices by preferences.state.collectAsState()
+    val queueState by queue.state.collectAsState()
+    val queueRefreshKey = exifQueueRefreshKey(queueState)
     val rootText = choices.duplicateRoot
     val fileType = choices.duplicateFileType
     val filenamePattern = choices.duplicateFilenamePattern
@@ -72,9 +80,15 @@ fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathAc
     var error by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
     var scoring by remember { mutableStateOf(false) }
+    var assessmentGeneration by remember { mutableStateOf(0L) }
     var retention by remember { mutableStateOf<RetentionAssessmentResult?>(null) }
     var copying by remember { mutableStateOf(false) }
-    var copyStatus by remember(groups, choices.duplicateSort, retention) { mutableStateOf<String?>(null) }
+    var exif by remember { mutableStateOf<Map<Path, ExifRecord>>(emptyMap()) }
+    var exifLoading by remember { mutableStateOf(false) }
+    var cancellingQueue by remember { mutableStateOf(false) }
+    var observedQueueRefreshKey by remember(queue) { mutableStateOf(queueRefreshKey) }
+    var exifGeneration by remember { mutableStateOf(0L) }
+    var copyStatus by remember(groups, choices.duplicateSort, retention, exif) { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboardManager.current
     val listState = rememberLazyListState()
@@ -94,21 +108,80 @@ fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathAc
     }
     val reportRoot = searchedRoot
     val reportFilter = searchedFilter
+    // A new source/filter gets a fresh token; changing only sort order deliberately does not.
+    val exifToken = remember(groups, rootText, fileType, filenamePattern, repository, exifService, queue, exifGeneration) { ExifSnapshotToken() }
+    val latestExifToken by rememberUpdatedState(exifToken)
+    fun isCurrent(token: ExifSnapshotToken) = token.isCurrent(latestExifToken)
+    fun invalidateExif() {
+        assessmentGeneration++
+        scoring = false
+        retention = null
+        exifToken.invalidate()
+        exifGeneration++
+        exif = emptyMap()
+    }
 
-    suspend fun assessResults(candidates: List<DuplicateCandidateGroup>, force: Boolean = false) {
-        scoring = true
+    DisposableEffect(repository, retentionScores) {
+        onDispose { assessmentGeneration++ }
+    }
+
+    DisposableEffect(exifToken) {
+        onDispose {
+            exifToken.invalidate()
+        }
+    }
+    LaunchedEffect(exifToken, queueRefreshKey) {
+        val refreshKey = queueRefreshKey
+        val queueChanged = observedQueueRefreshKey.revision != refreshKey.revision ||
+            (refreshKey.terminalPhase != null && observedQueueRefreshKey != refreshKey)
+        observedQueueRefreshKey = refreshKey
+        if (queueChanged) {
+            assessmentGeneration++
+            scoring = false
+        }
+        val generation = assessmentGeneration
+        fun current() = isCurrent(exifToken) && refreshKey == exifQueueRefreshKey(queue.state.value)
+        val loadScores = queueChanged || (!scoring && queueState.phase != ExifQueuePhase.IDLE)
+        exif = emptyMap()
+        exifLoading = true
+        val source = groups
         try {
-            val result = retentionScores.assess(candidates, force)
-            retention = result
-            if (result.invalidatedFiles > 0) {
-                error = "Inventory changed during scoring. Search again to refresh the affected files."
+            if (source != null) {
+                val stored = exifService.stored(source)
+                val scores = if (loadScores) retentionScores.stored(source) else null
+                if (current()) {
+                    exif = stored
+                    if (scores != null && generation == assessmentGeneration) retention = scores
+                }
             }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            error = "Could not calculate retention scores: ${e.message}"
+            if (current()) error = "Could not load stored EXIF or scores: ${e.message}"
         } finally {
-            scoring = false
+            if (current()) exifLoading = false
+        }
+    }
+
+    suspend fun assessResults(candidates: List<DuplicateCandidateGroup>, force: Boolean = false) {
+        val generation = ++assessmentGeneration
+        fun current() = generation == assessmentGeneration && groups === candidates
+        scoring = true
+        try {
+            val result = if (queue.state.value.isRunning) retentionScores.stored(candidates)
+                else retentionScores.assess(candidates, force)
+            if (current()) {
+                retention = result
+                if (result.invalidatedFiles > 0) {
+                    error = "Inventory or stored EXIF changed during scoring. Search again to refresh the affected files."
+                }
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            if (current()) error = "Could not calculate retention scores: ${e.message}"
+        } finally {
+            if (current()) scoring = false
         }
     }
 
@@ -132,7 +205,7 @@ fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathAc
         Text("Duplicate candidates", style = MaterialTheme.typography.titleLarge)
         OutlinedTextField(
             value = rootText,
-            onValueChange = { value -> preferences.update { it.copy(duplicateRoot = value) }; groups = null },
+            onValueChange = { value -> invalidateExif(); preferences.update { it.copy(duplicateRoot = value) }; groups = null },
             label = { Text("Search under absolute folder path") },
             enabled = !busy,
             singleLine = true,
@@ -143,6 +216,7 @@ fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathAc
                 scope.launch {
                     try {
                         target.pickDirectory()?.let { path ->
+                            invalidateExif()
                             preferences.update { it.copy(duplicateRoot = path) }
                             groups = null
                         }
@@ -161,7 +235,7 @@ fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathAc
             DuplicateFileType.entries.forEach { type ->
                 FilterChip(
                     selected = fileType == type,
-                    onClick = { preferences.update { it.copy(duplicateFileType = type) }; groups = null },
+                    onClick = { invalidateExif(); preferences.update { it.copy(duplicateFileType = type) }; groups = null },
                     enabled = !busy,
                     label = {
                         Text(when (type) {
@@ -176,7 +250,7 @@ fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathAc
         }
         OutlinedTextField(
             value = filenamePattern,
-            onValueChange = { value -> preferences.update { it.copy(duplicateFilenamePattern = value) }; groups = null },
+            onValueChange = { value -> invalidateExif(); preferences.update { it.copy(duplicateFilenamePattern = value) }; groups = null },
             label = { Text("Filename wildcard (optional)") },
             supportingText = {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -193,6 +267,7 @@ fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathAc
         })
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(enabled = !busy && rootText.isNotBlank(), onClick = {
+                invalidateExif()
                 val selected = rootText.trim()
                 val filter = DuplicateCandidateFilter(fileType, filenamePattern)
                 busy = true
@@ -215,7 +290,7 @@ fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathAc
                     }
                 }
             }) { Text(if (scoring) "Scoring..." else if (busy) "Searching…" else "Find candidates") }
-            OutlinedButton(enabled = !busy && !groups.isNullOrEmpty(), onClick = {
+            OutlinedButton(enabled = !busy && !queueState.isRunning && !groups.isNullOrEmpty(), onClick = {
                 val snapshot = groups ?: return@OutlinedButton
                 busy = true
                 error = null
@@ -228,6 +303,34 @@ fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathAc
                 }
             }) { Text("Recompute scores") }
         }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            OutlinedButton(
+                enabled = !scanRunning && !busy && !queueState.isRunning && !displayedSnapshot?.groups.isNullOrEmpty(),
+                onClick = {
+                    val snapshot = displayedSnapshot?.groups?.toList() ?: return@OutlinedButton
+                    if (!queue.start(snapshot)) error = "EXIF analysis could not start: a scan or queue is already running."
+                },
+            ) { Text("Analyze ambiguous EXIF") }
+            if (queueState.isRunning) {
+                TextButton(enabled = !cancellingQueue, onClick = {
+                    cancellingQueue = true
+                    scope.launch {
+                        try {
+                            queue.cancel()
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            error = "Could not cancel EXIF queue: ${e.message}"
+                        } finally {
+                            cancellingQueue = false
+                        }
+                    }
+                }) { Text(if (cancellingQueue) "Cancelling…" else "Cancel EXIF queue") }
+            }
+        }
+        presentExifQueue(queueState)?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+        Text("Automatic EXIF checks gaps of 10 or less between the top two scores after a completed scan and initial scoring. Only groups with a valid complete folder date qualify (not year/month alone); all files in an eligible group are visited. Unchanged cached inputs and reader versions avoid file reads.",
+            style = MaterialTheme.typography.bodySmall)
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         SelectionContainer(Modifier.weight(1f)) {
             Row(Modifier.fillMaxSize()) {
@@ -240,7 +343,9 @@ fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathAc
                         item { Text("Previously scanned roots (select or enter any subtree):") }
                         items(roots) { root ->
                             TextButton(enabled = !busy, onClick = {
+                                invalidateExif()
                                 preferences.update { it.copy(duplicateRoot = root.toString()) }
+                                groups = null
                             }) { Text(root.toString()) }
                         }
                     }
@@ -254,13 +359,14 @@ fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathAc
                                 Text("${results.size} candidate groups under $reportRoot.", Modifier.weight(1f))
                                 DisableSelection {
                                     TextButton(enabled = !copying, onClick = {
+                                        val reportExif = exif
                                         copying = true
                                         copyStatus = null
                                         error = null
                                         scope.launch {
                                             try {
                                                 val text = formatDuplicateResults(reportRoot, reportFilter, displayed.rules, results,
-                                                    retention = reportRetention)
+                                                    retention = reportRetention, exif = reportExif)
                                                 clipboard.setText(AnnotatedString(text))
                                                 copyStatus = "Copied ${results.size} groups, including full paths. Review before sharing."
                                             } catch (e: CancellationException) {
@@ -278,14 +384,24 @@ fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathAc
                                 style = MaterialTheme.typography.bodySmall)
                             Text("Highest retention score first within each group. Scores are advisory, not content verification. Tap a score for its factors.",
                                 style = MaterialTheme.typography.bodySmall)
+                            Text("Stored EXIF capture dates influence advisory scores. Manual analysis uses the displayed groups and the same eligibility/cache rules as automatic analysis. Missing EXIF adds no bonus or penalty. No GPS.",
+                                style = MaterialTheme.typography.bodySmall)
+                            if (exifLoading) Text("Loading stored EXIF…", style = MaterialTheme.typography.bodySmall)
                             copyStatus?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                         }
                         if (results.isEmpty()) item { Text("No candidate groups match these filters in the stored inventory.") }
                         results.forEach { group ->
                             item {
                                 HorizontalDivider()
-                                Text("${group.name} · ${formatBytes(group.sizeBytes)} · ${group.files.size} files",
-                                    style = MaterialTheme.typography.titleMedium)
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text("${group.name} · ${formatBytes(group.sizeBytes)} · ${group.files.size} files",
+                                        modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                                    DisableSelection {
+                                        TextButton(enabled = !scanRunning && !busy && !queueState.isRunning, onClick = {
+                                            if (!queue.start(listOf(group))) error = "EXIF analysis could not start: a scan or queue is already running."
+                                        }) { Text("Analyze EXIF") }
+                                    }
+                                }
                             }
                             items(group.files, key = { it.path.toString() }) { file ->
                                 Column {
@@ -293,6 +409,7 @@ fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathAc
                                     Text("Created ${formatEpochMillis(file.createdAt)} · modified ${formatEpochMillis(file.modifiedAt)}",
                                         style = MaterialTheme.typography.bodySmall)
                                     RetentionScoreLine(file.path, reportRetention[file.path])
+                                    ExifMetadataLine(file.path, exif[file.path])
                                 }
                             }
                         }

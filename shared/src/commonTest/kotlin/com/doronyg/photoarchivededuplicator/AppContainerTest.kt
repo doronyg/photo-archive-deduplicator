@@ -7,6 +7,13 @@ import com.doronyg.photoarchivededuplicator.scan.TrackingIoDispatcher
 import com.doronyg.photoarchivededuplicator.scan.createInMemoryDriver
 import com.doronyg.photoarchivededuplicator.scan.DirectoryListing
 import com.doronyg.photoarchivededuplicator.scan.SuspendingQueryDriver
+import com.doronyg.photoarchivededuplicator.scan.DirectoryRepository
+import com.doronyg.photoarchivededuplicator.scan.ScanState
+import com.doronyg.photoarchivededuplicator.exif.ExifSource
+import com.doronyg.photoarchivededuplicator.exif.ExifMetadata
+import com.doronyg.photoarchivededuplicator.exif.ExifReadResult
+import com.doronyg.photoarchivededuplicator.exif.ExifStatus
+import com.doronyg.photoarchivededuplicator.exif.ExifQueuePhase
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -15,6 +22,7 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
@@ -31,6 +39,253 @@ import kotlin.time.Duration.Companion.seconds
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class AppContainerTest {
+    private suspend fun seedAmbiguousDatedGroup(repository: DirectoryRepository, root: Path) {
+        for (copy in listOf("a", "b")) {
+            val directory = root / copy / "2013_06_25"
+            repository.seedRoot(directory)
+            repository.recordListing(directory, DirectoryListing(emptyList(), listOf(
+                DirectoryListing.Entry(directory / "DSC00413.ARW", 42, null),
+            )), 1)
+        }
+    }
+
+    @Test
+    fun completedScanAutomaticallyScoresExtractsAndRescoresWithoutUiOrStartupReads() = runTest(timeout = 10.seconds) {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val root = "/archive".toPath()
+        val reads = mutableListOf<Path>()
+        lateinit var repository: DirectoryRepository
+        val container = createAppContainer(dispatcher, dispatcher, openDriver = { createInMemoryDriver() },
+            createScanner = { repo, _ ->
+                repository = repo
+                object : InventoryScanner {
+                    override suspend fun startScan(root: Path, onEvent: suspend (ScanEvent) -> Unit) {
+                        seedAmbiguousDatedGroup(repo, root)
+                    }
+                    override suspend fun resume(onEvent: suspend (ScanEvent) -> Unit) = Unit
+                }
+            }, createExifSource = {
+                ExifSource { file ->
+                    assertTrue(repository.currentScanSession()!!.finished, "EXIF must follow the final scan checkpoint")
+                    assertEquals(2, repository.fileScores(repository.allFiles().map { it.path }).size,
+                        "Normal scoring must finish before the first source read")
+                    reads += file.path
+                    ExifReadResult(ExifStatus.EXTRACTED, ExifMetadata(capturedAt = "2013:06:25 12:00:00"))
+                }
+            })
+        try {
+            runCurrent()
+            assertTrue(reads.isEmpty())
+            assertTrue(container.scanController.start(root))
+            container.exifQueue.state.first { it.phase == ExifQueuePhase.COMPLETED }
+            assertTrue(container.scanController.state.value is ScanState.Completed)
+            assertEquals(2, reads.size)
+            val files = container.repository.allFiles()
+            assertEquals(2, container.repository.fileExif(files.map { it.path }).size)
+            val scores = container.repository.fileScores(files.map { it.path })
+            assertEquals(2, scores.size)
+            assertTrue(scores.all { score -> score.factors.any { it.key == "exif-date-match" } })
+        } finally {
+            container.shutdown()
+        }
+    }
+
+    @Test
+    fun acceptingScanImmediatelyRejectsManualQueueBeforeScanDispatcherRuns() = runTest(timeout = 10.seconds) {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val root = "/archive".toPath()
+        val container = createAppContainer(dispatcher, dispatcher, openDriver = { createInMemoryDriver() },
+            createScanner = { _, _ ->
+                object : InventoryScanner {
+                    override suspend fun startScan(root: Path, onEvent: suspend (ScanEvent) -> Unit) = awaitCancellation()
+                    override suspend fun resume(onEvent: suspend (ScanEvent) -> Unit) = awaitCancellation()
+                }
+            })
+        try {
+            runCurrent()
+            assertTrue(container.scanController.start(root))
+            assertFalse(container.exifQueue.start(root))
+            assertFalse(container.exifQueue.start(emptyList()))
+            container.scanController.pause()
+            container.scanController.state.first { it is ScanState.Paused }
+            assertTrue(container.exifQueue.start(emptyList()), "Cancelled startup must release its scan gate")
+        } finally {
+            container.shutdown()
+        }
+    }
+
+    @Test
+    fun newScanWaitsForExifCancellationAndRejectsManualQueueWhileScanning() = runTest(timeout = 10.seconds) {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val root = "/archive".toPath()
+        val reading = CompletableDeferred<Unit>()
+        val cleaning = CompletableDeferred<Unit>()
+        val releaseCleanup = CompletableDeferred<Unit>()
+        val scanEntered = CompletableDeferred<Unit>()
+        var sourceStopped = false
+        val container = createAppContainer(dispatcher, dispatcher, openDriver = { createInMemoryDriver() },
+            createScanner = { _, _ ->
+                object : InventoryScanner {
+                    override suspend fun startScan(root: Path, onEvent: suspend (ScanEvent) -> Unit) {
+                        assertTrue(sourceStopped)
+                        scanEntered.complete(Unit)
+                        awaitCancellation()
+                    }
+                    override suspend fun resume(onEvent: suspend (ScanEvent) -> Unit) = startScan(root, onEvent)
+                }
+            }, createExifSource = {
+                ExifSource {
+                    try {
+                        reading.complete(Unit)
+                        awaitCancellation()
+                    } finally {
+                        withContext(NonCancellable) {
+                            cleaning.complete(Unit)
+                            releaseCleanup.await()
+                            sourceStopped = true
+                        }
+                    }
+                }
+            })
+        try {
+            seedAmbiguousDatedGroup(container.repository, root)
+            assertTrue(container.exifQueue.start(root))
+            reading.await()
+            assertTrue(container.scanController.start(root))
+            cleaning.await()
+            assertFalse(scanEntered.isCompleted)
+            assertFalse(container.exifQueue.start(root))
+            releaseCleanup.complete(Unit)
+            scanEntered.await()
+            assertFalse(container.exifQueue.start(root))
+            assertFalse(container.exifQueue.start(container.repository.duplicateCandidates(root)))
+            container.scanController.pause()
+            container.scanController.state.first { it is ScanState.Paused }
+        } finally {
+            releaseCleanup.complete(Unit)
+            container.shutdown()
+        }
+    }
+
+    @Test
+    fun shutdownDrainsCancelledExifSourceBeforeClosingDatabase() = runTest(timeout = 10.seconds) {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val root = "/archive".toPath()
+        val reading = CompletableDeferred<Unit>()
+        val cleaning = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        var sourceStopped = false
+        var closed = false
+        val container = createAppContainer(dispatcher, dispatcher, openDriver = {
+            val driver = createInMemoryDriver()
+            object : SqlDriver by driver {
+                override fun close() {
+                    assertTrue(sourceStopped)
+                    closed = true
+                    driver.close()
+                }
+            }
+        }, createScanner = { _, _ ->
+            object : InventoryScanner {
+                override suspend fun startScan(root: Path, onEvent: suspend (ScanEvent) -> Unit) = Unit
+                override suspend fun resume(onEvent: suspend (ScanEvent) -> Unit) = Unit
+            }
+        }, createExifSource = {
+            ExifSource {
+                try {
+                    reading.complete(Unit)
+                    awaitCancellation()
+                } finally {
+                    withContext(NonCancellable) {
+                        cleaning.complete(Unit)
+                        release.await()
+                        sourceStopped = true
+                    }
+                }
+            }
+        })
+        try {
+            seedAmbiguousDatedGroup(container.repository, root)
+            assertTrue(container.exifQueue.start(root))
+            reading.await()
+            val stopping = async { container.shutdown() }
+            cleaning.await()
+            assertFalse(closed)
+            assertFalse(container.exifQueue.start(root))
+            release.complete(Unit)
+            stopping.await()
+            assertTrue(closed)
+        } finally {
+            release.complete(Unit)
+            container.shutdown()
+        }
+    }
+
+    @Test
+    fun shutdownPermanentlyBlocksQueueBeforeScanCleanupCanUnblockIt() = runTest(timeout = 10.seconds) {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val root = "/archive".toPath()
+        val entered = CompletableDeferred<Unit>()
+        val cleaning = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        var reads = 0
+        val container = createAppContainer(dispatcher, dispatcher, openDriver = { createInMemoryDriver() },
+            createScanner = { _, _ ->
+                object : InventoryScanner {
+                    override suspend fun startScan(root: Path, onEvent: suspend (ScanEvent) -> Unit) {
+                        try {
+                            entered.complete(Unit)
+                            awaitCancellation()
+                        } finally {
+                            withContext(NonCancellable) {
+                                cleaning.complete(Unit)
+                                release.await()
+                            }
+                        }
+                    }
+                    override suspend fun resume(onEvent: suspend (ScanEvent) -> Unit) = Unit
+                }
+            }, createExifSource = { ExifSource { reads++; ExifReadResult(ExifStatus.NO_EXIF) } })
+        try {
+            container.scanController.start(root)
+            entered.await()
+            val stopping = async { container.shutdown() }
+            cleaning.await()
+            assertFalse(container.exifQueue.start(root))
+            release.complete(Unit)
+            stopping.await()
+            assertFalse(container.exifQueue.start(root))
+            assertFalse(container.exifQueue.start(emptyList()))
+            assertEquals(0, reads)
+        } finally {
+            release.complete(Unit)
+            container.shutdown()
+        }
+    }
+
+    @Test
+    fun failedExifSourceConstructionClosesDriverWithoutStartingScanner() = runTest(timeout = 10.seconds) {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        var closed = false
+        var scannerCreated = false
+        assertFailsWith<IllegalStateException> {
+            createAppContainer(dispatcher, dispatcher, openDriver = {
+                val driver = createInMemoryDriver()
+                object : SqlDriver by driver {
+                    override fun close() {
+                        closed = true
+                        driver.close()
+                    }
+                }
+            }, createScanner = { _, _ ->
+                scannerCreated = true
+                error("Scanner must not start")
+            }, createExifSource = { error("EXIF source construction failed") })
+        }
+        assertTrue(closed)
+        assertFalse(scannerCreated)
+    }
+
     @Test
     fun failedScannerConstructionClosesDriverAndNextStartupSucceeds() = runTest(timeout = 10.seconds) {
         val dispatcher = StandardTestDispatcher(testScheduler)

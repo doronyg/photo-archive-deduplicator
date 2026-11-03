@@ -7,6 +7,22 @@ plugins {
     alias(libs.plugins.sqldelight)
 }
 
+val kimVersion = libs.versions.kim.get()
+val kimVersionSource = layout.buildDirectory.dir("generated/kimVersion")
+val generateKimVersion by tasks.registering {
+    inputs.property("kimVersion", kimVersion)
+    outputs.dir(kimVersionSource)
+    doLast {
+        val source = kimVersionSource.get().file("com/doronyg/photoarchivededuplicator/exif/KimDependency.kt").asFile
+        source.parentFile.mkdirs()
+        source.writeText(
+            "// Generated from the version catalog; do not edit.\n" +
+                "package com.doronyg.photoarchivededuplicator.exif\n\n" +
+                "internal const val KIM_VERSION = \"$kimVersion\"\n",
+        )
+    }
+}
+
 kotlin {
     jvmToolchain(17)
 
@@ -21,6 +37,7 @@ kotlin {
     jvm()
 
     sourceSets {
+        commonMain { kotlin.srcDir(generateKimVersion) }
         commonMain.dependencies {
             implementation(libs.cmp.runtime)
             implementation(libs.cmp.foundation)
@@ -30,6 +47,7 @@ kotlin {
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.sqldelight.runtime)
             implementation(libs.sqldelight.async.extensions)
+            implementation(libs.kim)
             // api: okio.Path appears in the public API (scan models, ScanTarget)
             api(libs.okio)
         }

@@ -65,17 +65,27 @@ sealed interface ScanState {
 /**
  * Runs at most one scan at a time in [scope] and publishes its [state].
  * Pausing cancels the scan; all progress is already persisted, so [resume] continues it.
+ * [onScanAccepted] synchronously gates competing starts before the scan is published.
+ * [beforeScan] drains competing work before session initialization or scanner access.
+ * [afterScan] runs once per accepted run after children and the final checkpoint finish,
+ * never for restored state. Its root can be null if resume initialization failed.
+ * Completion requires a successful checkpoint and no explicit pause request.
+ * [afterScan] failures are diagnostic only and cannot invalidate the persisted scan outcome.
  */
 class ScanController internal constructor(
     private val scanner: InventoryScanner,
     private val scope: CoroutineScope,
     private val repository: DirectoryRepository,
     private val clock: () -> Long = monotonicClock(),
+    private val beforeScan: suspend () -> Unit = {},
+    private val afterScan: suspend (root: Path?, completed: Boolean) -> Unit = { _, _ -> },
+    private val onScanAccepted: () -> Unit = {},
 ) {
     private val mutableState = MutableStateFlow<ScanState>(ScanState.Idle)
     val state: StateFlow<ScanState> = mutableState.asStateFlow()
     private val stoppedAt = MutableStateFlow<Long?>(null)
     private val controls = Mutex()
+    private var pauseRequested = MutableStateFlow(false)
     private var job: Job? = scope.launch {
         try {
             val saved = repository.currentScanSession()
@@ -104,6 +114,7 @@ class ScanController internal constructor(
 
     fun pause() {
         Diagnostics.logger.i(LogTags.SCAN_CONTROLLER, "Pause requested")
+        pauseRequested.value = true
         stoppedAt.compareAndSet(null, clock())
         job?.cancel()
     }
@@ -112,7 +123,10 @@ class ScanController internal constructor(
     private fun launchScan(root: Path?, newScan: Boolean, run: suspend (onEvent: suspend (ScanEvent) -> Unit) -> Unit): Boolean {
         Diagnostics.logger.i(LogTags.SCAN_CONTROLLER, "Launch requested root=$root newScan=$newScan state=${mutableState.value::class.simpleName}")
         if (mutableState.value is ScanState.Running) return false
+        onScanAccepted()
         val previous = job
+        val runPauseRequested = MutableStateFlow(false)
+        pauseRequested = runPauseRequested
         stoppedAt.value = null
         mutableState.value = ScanState.Running(ScanProgress())
         // Dispatch first, but still enter try/finally if Pause wins before dispatch.
@@ -129,6 +143,7 @@ class ScanController internal constructor(
             try {
                 // Joining and initialization are cancellable too; neither may leave Running stuck.
                 Diagnostics.logger.operation(LogTags.SCAN_CONTROLLER, "previous scan join") { previous?.join() }
+                beforeScan()
                 session = if (newScan) repository.beginScanSession(root!!) else repository.resumableScanSession(root)
                 progress = progress.copy(root = session.root, totalElapsedMillis = session.activeMillis)
                 startedAt = clock()
@@ -197,6 +212,14 @@ class ScanController internal constructor(
                     } catch (e: Exception) {
                         failure?.let { e.addSuppressed(it) }
                         failure = e
+                    }
+                    // This is a real run's finalization, never startup restoration. Keep
+                    // Running until the hook returns so a new run cannot overtake it.
+                    try {
+                        afterScan(session?.root ?: root,
+                            session != null && failure == null && !runPauseRequested.value)
+                    } catch (e: Exception) {
+                        Diagnostics.logger.e(LogTags.SCAN_CONTROLLER, "Scan lifecycle hook failed: ${e.message}")
                     }
                     mutableState.value = when (val error = failure) {
                         null -> ScanState.Completed(progress)

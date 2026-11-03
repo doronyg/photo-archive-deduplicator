@@ -12,6 +12,7 @@ slf4j = "2.0.16"
 kotlinxSerialization = "1.7.3"
 sqldelight = "2.4.1"
 okio = "3.18.2"
+kim = "0.48.0"
 composeBom = "2026.05.01"
 activityCompose = "1.13.0"
 lifecycleCompose = "2.10.0"
@@ -62,6 +63,7 @@ sqldelight-sqlite-driver = { module = "app.cash.sqldelight:sqlite-driver", versi
 sqldelight-android-driver = { module = "app.cash.sqldelight:android-driver", version.ref = "sqldelight" }
 okio = { module = "com.squareup.okio:okio", version.ref = "okio" }
 okio-fakefilesystem = { module = "com.squareup.okio:okio-fakefilesystem", version.ref = "okio" }
+kim = { module = "de.stefan-oltmann:kim", version.ref = "kim" }
 # ---------- Networking ----------
 ktor-client-core = { module = "io.ktor:ktor-client-core", version.ref = "ktor" }
 ktor-client-okhttp = { module = "io.ktor:ktor-client-okhttp", version.ref = "ktor" }

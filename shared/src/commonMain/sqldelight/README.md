@@ -33,6 +33,7 @@ the header comment, to see that a file lives under `build/`.
 | `db/UiPreference.kt`, `db/UiPreferenceQueries.kt` | `UiPreference.sq` | Local UI choices stored as key/value entries |
 | `db/FileScore.kt`, `db/FileScoreQueries.kt` | `FileScore.sq` | Independent, versioned algorithm/model assessments and their input metadata |
 | `db/FileScoreFactor.kt`, `db/FileScoreFactorQueries.kt` | `FileScoreFactor.sq` | Ordered numeric contributions and human-readable explanations |
+| `db/FileExif.kt`, `db/FileExifQueries.kt` | `FileExif.sq` | Sparse latest EXIF results, reader identity, and input metadata |
 | `db/FilesDatabase.kt` | All `.sq` files + Gradle config | Database interface, `Schema`, factory |
 | `db/shared/FilesDatabaseImpl.kt` | All `.sq` files + Gradle config | Implementation, `CREATE TABLE`/`INDEX` statements |
 
@@ -57,8 +58,9 @@ of `shared/build.gradle.kts` adds it.
 ## Rules for writing `.sq` files
 
 - **camelCase** for tables, columns, indexes and parameters, so the generated Kotlin is idiomatic.
-- **No status string literals.** `status` maps to the `DirectoryStatus` enum through
-  `EnumColumnAdapter`; always bind it as a parameter (`:status`) instead of writing `'PENDING'`.
+- **No status string literals.** Directory `status` maps to the `DirectoryStatus` enum through
+  `EnumColumnAdapter`; EXIF status stores the enum name without an adapter. Always bind
+  status as a parameter (`:status`) instead of writing `'PENDING'` or `'EXTRACTED'`.
 - **Named parameters** (`:path`), not `?`, so generated argument names are meaningful.
 - SQLDelight type-checks every query against the schema, so mistakes fail the build.
 
@@ -112,6 +114,9 @@ order is supported by SQLDelight's explicit named-column queries. Version 3 adds
 inventory, exclusions, and scan sessions. Version 4 adds separate score and score-factor
 tables through `com/doronyg/photoarchivededuplicator/db/3.sqm`; it does not rewrite
 inventory or reset scan queues, sessions, exclusions, or UI preferences.
+Version 5 adds only the sparse `fileExif` table through
+`com/doronyg/photoarchivededuplicator/db/4.sqm`. Existing inventory, scores and factors,
+queues, sessions, exclusions, and preferences are unchanged.
 An unreleased intermediate version 1 containing
 some of the new columns/tables is not the historical migration target; do not infer its
 schema by dropping the session table from today's schema.
@@ -139,6 +144,47 @@ Current-to-next upgrades are the supported migration-development focus until the
 schema stabilizes. Earlier migration files remain intact, and databases are never
 deleted or recreated as an upgrade strategy. The v3-to-v4 regression uses populated
 records and verifies that existing inventory and preferences survive the upgrade.
+The v4-to-v5 regression automatically upgrades a populated on-disk JDBC database,
+compares every pre-existing table, then stores EXIF and closes/reopens it again.
+
+## Independent EXIF results
+
+EXIF extraction runs in an app-owned queue after a genuine scan completes and regular
+duplicate scoring finishes, or on explicit request in the duplicates browser. Paused,
+failed, and startup-restored scans do not trigger it. It never runs during filesystem
+scanning or automatically when results are opened. Results are stored separately from inventory
+and file scores. Unprocessed files have no EXIF row. Each path holds its latest result
+plus its input snapshot, including status, nullable metadata, error, extraction time,
+and reader ID/version; a new extraction replaces only that row. Status names are
+persisted as strings, not enum ordinals.
+
+Capture time preserves raw `DateTimeOriginal` with its matching original offset and
+subseconds; no timezone is inferred. GPS is not extracted or stored. Retention scoring
+uses only successful, current stored original capture dates; scoring itself never opens files.
+The streaming parser has a 16 MiB input cap and returns
+`LIMIT_EXCEEDED` when exceeded, never a partial success.
+
+`fileExif` reads bounded batches and defaults to current inputs only. A matching inventory
+row must have the same path, directory, byte size, and nullable modification/creation times
+(`IS` comparisons preserve null equality). `lastScanned` is not an extraction input.
+Historical rows remain accessible with `currentOnly = false`, even after inventory changes
+or deletion. Writes validate these inputs inside the same transaction as the upsert and
+return false for changed or deleted files. Persisting EXIF does not directly rewrite
+inventory, scores, or factors. The queue reassesses retention only after all selected
+groups finish, not after each member or group. Cancellation keeps completed EXIF rows
+without rescoring the partial queue. The additive migration does not reset or recreate
+the database.
+
+Reuse unchanged inventory inputs with matching reader identity/version, including failed
+attempts. Do not retry merely because a new scan updates `lastScanned`, a user clicks again,
+or a read-limit failure is cached. `KIM_VERSION` is generated under `shared/build/generated`
+from `libs.versions.kim`; it is not a second hand-maintained library version.
+
+Queue selection uses the two highest current retention scores (gap at most 10) and requires
+at least one complete, valid directory date. Process every member of each selected group,
+reusing cached attempts. Year-only and year/month-only groups are skipped because EXIF
+cannot change their current organization scores. Queue progress/state is app-owned,
+cancellable, and independent of browser navigation. Starting a new scan drains it first.
 
 ## Independent file scores
 
@@ -147,11 +193,18 @@ configuration. Each row stores its relevant input metadata, numeric value,
 assessment time, and ordered factor explanations. Different identities coexist;
 recomputing one identity replaces only its value and factor breakdown.
 
-Retention scoring uses stored path/size/creation/modification metadata, not content.
+Retention scoring uses stored path/size/creation/modification metadata and usable stored
+EXIF original capture dates, not content reads.
 `lastScanned` is not a scoring input. Assessments are reused only when their inputs
-and identity match. Writes recheck the current file metadata within the same
-database transaction, rejecting changed/deleted files instead of publishing stale
-calculations as current. Batches are bounded to avoid an archive-wide write lock.
+and identity match, including zero-contribution `exif-date-evidence` factors that track
+the usable original calendar date. Extraction time, camera metadata, offsets, and time
+of day do not invalidate scores when this date is unchanged. Cached scores are loaded
+before current EXIF so evidence comparisons use the later EXIF snapshot. Writes recheck
+current file metadata within the same database transaction. Retention writes also supply
+an optional expected EXIF snapshot, rejecting a concurrent EXIF replacement/removal
+before saving rather than publishing an obsolete calculation. A rejected write leaves
+existing score identities intact; a subsequent assessment can recompute it. Batches are
+bounded to avoid an archive-wide write lock.
 
 Default retention weights/rules live in `retention/RetentionScoring.kt` as
 `RetentionConfig`. Changing weights or matching rules changes the canonical
@@ -160,12 +213,26 @@ its explicit algorithm version; this is independent of the SQLDelight schema
 version. New score types or algorithm versions do not need an inventory schema
 change and do not replace older identities.
 
-Retention algorithm v3 gives valid year/month organization +30 while retaining +10
-for year-only organization. It keeps v2's conservative filename/folder-date
-disagreement evidence and WhatsApp/PhotoSync location rules.
-Find candidates or Recompute scores produces v3 assessments from the existing
-inventory; v1/v2 assessments and other score types remain available. No database
-schema version change, source-file access, or rescan is needed for this update.
+Retention algorithm v4 currently awards year/month organization +45 and year-only +10,
+plus filename/folder-date disagreement evidence and WhatsApp/PhotoSync location rules.
+Matching stored EXIF raises alternative full-date folder organization from +40 to +90;
+preferred organization remains +100. Reliable disagreement contributes -40 once across
+WhatsApp filename and EXIF evidence, unless a recognized filename date supports the folder.
+Standard camera/IMG/VID/PXL filename dates only protect a matching folder from EXIF
+penalties; they do not introduce standalone filename mismatch penalties.
+Missing, failed, limit-exceeded, invalid, or stale EXIF is neutral. Year/month backup
+copies score +45 -25 = +20 even when extraction fails; temporary-only copies remain -60.
+Dates use the original calendar date,
+not timezone conversion. Find candidates or Recompute scores produces v4 assessments
+from stored metadata when the queue is inactive. During queue processing the browser uses
+`RetentionScoreService.stored`, a database-only read that hides obsolete evidence without
+computing or saving scores. The extraction barrier also downgrades overlapping assessment
+requests to stored reads, so a previously queued browser request cannot rescore partial
+EXIF after cancellation. A fresh explicit assessment remains available afterward.
+After the whole queue finishes, final reassessment refreshes
+visible scores and member ranking. The ambiguity label also uses a 10-point margin.
+v1/v2/v3 assessments and other score types remain available. Queue scheduling and caching
+need no database schema change or inventory reset.
 
 ## Remembered UI choices
 

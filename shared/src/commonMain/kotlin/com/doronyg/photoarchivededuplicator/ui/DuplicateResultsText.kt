@@ -5,6 +5,7 @@ import com.doronyg.photoarchivededuplicator.scan.DuplicateCandidateGroup
 import com.doronyg.photoarchivededuplicator.scan.DuplicateSortRule
 import com.doronyg.photoarchivededuplicator.retention.RetentionPresentation
 import com.doronyg.photoarchivededuplicator.retention.formatScoreValue
+import com.doronyg.photoarchivededuplicator.exif.ExifRecord
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
@@ -20,6 +21,7 @@ internal suspend fun formatDuplicateResults(
     groups: List<DuplicateCandidateGroup>,
     dispatcher: CoroutineDispatcher = Dispatchers.Default,
     retention: Map<Path, RetentionPresentation> = emptyMap(),
+    exif: Map<Path, ExifRecord> = emptyMap(),
 ): String = withContext(dispatcher) {
     val context = currentCoroutineContext()
     buildString {
@@ -45,6 +47,11 @@ internal suspend fun formatDuplicateResults(
                 appendLine("  Path: ${quoteResultText(file.path.toString())}")
                 appendLine("  Created: ${file.createdAt?.let { "${formatEpochMillis(it)} UTC" } ?: "unknown"}")
                 appendLine("  Modified: ${file.modifiedAt?.let { "${formatEpochMillis(it)} UTC" } ?: "unknown"}")
+                val metadata = presentExif(exif[file.path])
+                appendLine("  ${quoteResultText(metadata.summary)}")
+                metadata.details.forEach { (label, value) ->
+                    appendLine("    $label: ${quoteResultText(value)}")
+                }
                 val assessment = retention[file.path]
                 val score = assessment?.score
                 if (score == null) appendLine("  Retention: ${assessment?.label ?: "Not scored"}")
@@ -64,7 +71,7 @@ internal suspend fun formatDuplicateResults(
     }
 }
 
-private fun quoteResultText(value: String): String = buildString {
+internal fun quoteResultText(value: String): String = buildString {
     append('"')
     value.forEach {
         when (it) {

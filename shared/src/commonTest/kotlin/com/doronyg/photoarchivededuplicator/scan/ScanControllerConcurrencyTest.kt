@@ -51,7 +51,11 @@ class ScanControllerConcurrencyTest {
 
         fun gate() = CompletableDeferred<Unit>().also { gates += it }
 
-        fun controller(body: suspend (Path, suspend (ScanEvent) -> Unit) -> Unit): ScanController {
+        fun controller(
+            beforeScan: suspend () -> Unit = {},
+            afterScan: suspend (Path?, Boolean) -> Unit = { _, _ -> },
+            body: suspend (Path, suspend (ScanEvent) -> Unit) -> Unit,
+        ): ScanController {
             val scanner = object : InventoryScanner {
                 override suspend fun startScan(root: Path, onEvent: suspend (ScanEvent) -> Unit) {
                     invocations += root
@@ -64,7 +68,8 @@ class ScanControllerConcurrencyTest {
                     body(root, onEvent)
                 }
             }
-            return ScanController(scanner, scope, repository, clock = { test.testScheduler.currentTime })
+            return ScanController(scanner, scope, repository, clock = { test.testScheduler.currentTime },
+                beforeScan = beforeScan, afterScan = afterScan)
         }
 
         suspend fun finish(root: Path, emit: suspend (ScanEvent) -> Unit, files: Int = 3) {
@@ -96,6 +101,143 @@ class ScanControllerConcurrencyTest {
             gates.forEach { it.complete(Unit) }
             owner.cancelAndJoin()
             lane.close { driver.close() }
+        }
+    }
+
+    @Test
+    fun hooksWaitForScannerChildrenAndCheckpointAndRunOnceForStartAndResumeOnly() = runTest(timeout = 10.seconds) {
+        val f = Fixture(this)
+        try {
+            f.repository.beginScanSession(root)
+            f.repository.checkpointScanSession(ScanSessionRecord(root, 10, finished = true))
+            val calls = mutableListOf<Pair<Path?, Boolean>>()
+            val beforeEntered = f.gate()
+            val releaseBefore = f.gate()
+            val childEntered = f.gate()
+            val releaseChild = f.gate()
+            var beforeCalls = 0
+            var runs = 0
+            val controller = f.controller(beforeScan = {
+                beforeCalls++
+                beforeEntered.complete(Unit)
+                releaseBefore.await()
+            }, afterScan = { selected, completed ->
+                if (completed) assertTrue(f.repository.currentScanSession()!!.finished)
+                calls += selected to completed
+            }) { selected, emit ->
+                runs++
+                f.finish(selected, emit)
+                if (runs == 1) kotlinx.coroutines.coroutineScope {
+                    launch {
+                        childEntered.complete(Unit)
+                        releaseChild.await()
+                    }
+                }
+            }
+            runCurrent()
+            assertIs<ScanState.Completed>(controller.state.value)
+            assertTrue(calls.isEmpty(), "Restored completion is not a real run")
+            assertTrue(controller.start(other))
+            beforeEntered.await()
+            assertTrue(f.invocations.isEmpty(), "Scanner must wait for the before hook")
+            assertFalse(controller.start(root))
+            releaseBefore.complete(Unit)
+            childEntered.await()
+            assertTrue(calls.isEmpty(), "Zero pending directories is not completion")
+            releaseChild.complete(Unit)
+            runCurrent()
+            assertEquals(listOf<Pair<Path?, Boolean>>(other to true), calls)
+            f.repository.beginScanSession(root)
+            assertTrue(controller.resume(root))
+            runCurrent()
+            assertEquals(listOf<Pair<Path?, Boolean>>(other to true, root to true), calls)
+            assertEquals(2, beforeCalls)
+        } finally {
+            f.close()
+        }
+    }
+
+    @Test
+    fun pausedFailedAndCheckpointFailedRunsNeverReportSuccessfulCompletion() = runTest(timeout = 10.seconds) {
+        val f = Fixture(this)
+        try {
+            val calls = mutableListOf<Pair<Path?, Boolean>>()
+            val entered = f.gate()
+            var attempt = 0
+            val controller = f.controller(afterScan = { selected, completed -> calls += selected to completed }) { selected, emit ->
+                when (++attempt) {
+                    1 -> {
+                        entered.complete(Unit)
+                        awaitCancellation()
+                    }
+                    2 -> error("scanner failed")
+                    else -> f.finish(selected, emit)
+                }
+            }
+            controller.start(root)
+            entered.await()
+            controller.pause()
+            runCurrent()
+            assertIs<ScanState.Paused>(controller.state.value)
+            controller.resume(root)
+            runCurrent()
+            assertIs<ScanState.Failed>(controller.state.value)
+            var injected = false
+            f.beforeStatement = {
+                if (!injected && it.startsWith("UPDATE scanSession")) {
+                    injected = true
+                    error("final checkpoint failed")
+                }
+            }
+            controller.resume(root)
+            runCurrent()
+            assertIs<ScanState.Failed>(controller.state.value)
+            assertEquals(listOf<Pair<Path?, Boolean>>(root to false, root to false, root to false), calls)
+        } finally {
+            f.close()
+        }
+    }
+
+    @Test
+    fun pauseDuringBeforeHookFinalizesWithoutHoldingCommandMutex() = runTest(timeout = 10.seconds) {
+        val f = Fixture(this)
+        try {
+            val entered = f.gate()
+            val finalized = f.gate()
+            lateinit var controller: ScanController
+            controller = f.controller(beforeScan = {
+                entered.complete(Unit)
+                awaitCancellation()
+            }, afterScan = { _, completed ->
+                assertFalse(completed)
+                assertFalse(controller.start(other))
+                assertFalse(controller.resume(root))
+                finalized.complete(Unit)
+            }) { _, _ -> error("Scanner must not start") }
+            controller.start(root)
+            entered.await()
+            controller.pause()
+            finalized.await()
+            runCurrent()
+            assertIs<ScanState.Paused>(controller.state.value)
+            assertTrue(f.invocations.isEmpty())
+        } finally {
+            f.close()
+        }
+    }
+
+    @Test
+    fun completionHookFailureDoesNotTurnPersistedCompletionIntoScanFailure() = runTest(timeout = 10.seconds) {
+        val f = Fixture(this)
+        try {
+            val controller = f.controller(afterScan = { _, _ -> error("queue startup failed") }) { selected, emit ->
+                f.finish(selected, emit)
+            }
+            controller.start(root)
+            runCurrent()
+            f.assertCompleted(controller, root)
+        } finally {
+            f.close()
         }
     }
 
@@ -356,9 +498,10 @@ class ScanControllerConcurrencyTest {
     fun pauseAtFinalCheckpointLeavesTerminalStateConsistentWithPersistence() = runTest(timeout = 10.seconds) {
         val f = Fixture(this)
         try {
+            val completions = mutableListOf<Boolean>()
             val scanned = f.gate()
             val returnScanner = f.gate()
-            val controller = f.controller { selected, emit ->
+            val controller = f.controller(afterScan = { _, completed -> completions += completed }) { selected, emit ->
                 f.finish(selected, emit)
                 scanned.complete(Unit)
                 returnScanner.await()
@@ -397,6 +540,7 @@ class ScanControllerConcurrencyTest {
                 f.repository.currentScanSession())
             assertEquals(DirectoryStatus.COMPLETED, f.repository.directory(root)!!.status)
             assertEquals(3, f.repository.allFiles().size)
+            assertEquals(listOf(false), completions, "Explicit pause must suppress EXIF even after a successful final checkpoint")
         } finally {
             f.close()
         }

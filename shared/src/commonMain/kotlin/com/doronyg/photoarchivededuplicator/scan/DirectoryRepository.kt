@@ -15,6 +15,11 @@ import com.doronyg.photoarchivededuplicator.loadUiChoicesInLane
 import com.doronyg.photoarchivededuplicator.db.FilesDatabase
 import com.doronyg.photoarchivededuplicator.db.ScanDirectory
 import com.doronyg.photoarchivededuplicator.db.ScanFile
+import com.doronyg.photoarchivededuplicator.exif.ExifInput
+import com.doronyg.photoarchivededuplicator.exif.ExifMetadata
+import com.doronyg.photoarchivededuplicator.exif.ExifReadResult
+import com.doronyg.photoarchivededuplicator.exif.ExifRecord
+import com.doronyg.photoarchivededuplicator.exif.ExifStatus
 import com.doronyg.photoarchivededuplicator.retention.FileScore
 import com.doronyg.photoarchivededuplicator.retention.FileScoreInput
 import com.doronyg.photoarchivededuplicator.retention.ScoreFactor
@@ -352,6 +357,64 @@ class DirectoryRepository internal constructor(
         files.selectAll().awaitAsList().map { it.toRecord() }
     }
 
+    suspend fun fileExif(paths: List<Path>, currentOnly: Boolean = true): List<ExifRecord> =
+        io("fileExif count=${paths.size}") {
+            fileExifInLane(paths, currentOnly)
+        }
+
+    private suspend fun fileExifInLane(paths: List<Path>, currentOnly: Boolean): List<ExifRecord> =
+        paths.map { it.toString() }.distinct().chunked(400).flatMap { chunk ->
+            database.fileExifQueries.selectForPaths(chunk, if (currentOnly) 1L else 0L).awaitAsList()
+        }.map { row ->
+            ExifRecord(
+                input = ExifInput(row.filePath.toPath(), row.directoryPath.toPath(),
+                    row.inputSizeBytes, row.inputModifiedAt, row.inputCreatedAt),
+                result = ExifReadResult(
+                    status = ExifStatus.valueOf(row.status),
+                    metadata = ExifMetadata(row.capturedAt, row.offsetOriginal, row.subsecondOriginal,
+                        row.make, row.model, row.orientation?.toInt(), row.width?.toInt(), row.height?.toInt()),
+                    error = row.error,
+                ),
+                extractedAt = row.extractedAt,
+                readerId = row.readerId,
+                readerVersion = row.readerVersion,
+            )
+        }
+
+    suspend fun saveFileExif(record: ExifRecord): Boolean = io("saveFileExif transaction") {
+        database.transactionWithResult {
+            val input = record.input
+            val current = files.selectByPath(input.path.toString()).awaitAsOneOrNull()?.toRecord()
+            if (current == null || ExifInput.from(current) != input) {
+                Diagnostics.logger.w(LogTags.DATABASE, "Discarding stale EXIF: ${input.path}")
+                return@transactionWithResult false
+            }
+            val result = record.result
+            val metadata = result.metadata
+            database.fileExifQueries.upsert(
+                filePath = input.path.toString(),
+                directoryPath = input.directoryPath.toString(),
+                inputSizeBytes = input.sizeBytes,
+                inputModifiedAt = input.modifiedAt,
+                inputCreatedAt = input.createdAt,
+                status = result.status.name,
+                capturedAt = metadata.capturedAt,
+                offsetOriginal = metadata.offsetOriginal,
+                subsecondOriginal = metadata.subsecondOriginal,
+                make = metadata.make,
+                model = metadata.model,
+                orientation = metadata.orientation?.toLong(),
+                width = metadata.width?.toLong(),
+                height = metadata.height?.toLong(),
+                error = result.error,
+                extractedAt = record.extractedAt,
+                readerId = record.readerId,
+                readerVersion = record.readerVersion,
+            )
+            true
+        }
+    }
+
     suspend fun fileScores(
         paths: List<Path>,
         identity: ScoreIdentity? = null,
@@ -403,15 +466,26 @@ class DirectoryRepository internal constructor(
     suspend fun saveFileScore(score: FileScore): Boolean =
         score.input.path in saveFileScores(listOf(score))
 
-    suspend fun saveFileScores(scores: List<FileScore>): Set<Path> = io("saveFileScores transaction count=${scores.size}") {
+    suspend fun saveFileScores(
+        scores: List<FileScore>,
+        expectedExif: Map<Path, ExifRecord?>? = null,
+    ): Set<Path> = io("saveFileScores transaction count=${scores.size}") {
         scores.forEach { score ->
             require(score.value.isFinite()) { "File score must be finite." }
             require(score.factors.all { it.contribution.isFinite() }) { "Score contributions must be finite." }
+            require(expectedExif == null || score.input.path in expectedExif) { "Missing expected EXIF snapshot." }
         }
         if (scores.isEmpty()) return@io emptySet()
         database.transactionWithResult {
+            val currentExif = expectedExif?.let {
+                fileExifInLane(scores.map { it.input.path }, currentOnly = true).associateBy { it.input.path }
+            }
             buildSet {
                 for (score in scores) {
+                    if (expectedExif != null && currentExif?.get(score.input.path) != expectedExif[score.input.path]) {
+                        Diagnostics.logger.w(LogTags.DATABASE, "Discarding score after EXIF changed: ${score.input.path}")
+                        continue
+                    }
                     if (saveFileScoreInLane(score)) add(score.input.path)
                 }
             }
