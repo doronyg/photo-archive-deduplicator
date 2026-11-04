@@ -506,6 +506,20 @@ recommendations are persisted and no database migration is needed.
 
 #### User-triggered Ollama directory classification
 
+Prompt version 3 expands protection examples to personal/family document archives,
+creative work, printing selections and multilingual path hierarchies. It uses no
+preferred-root list. Older prompt results remain viewable but are not reused.
+
+Retention algorithm v6 adds a deterministic `.picasaoriginals` directory-component
+rule (case-insensitive, including descendants): an additional -10, counted once,
+on top of other location penalties. For example, Backup/-25 plus this rule/-10
+totals -35. The directory is a backup location even without AI. AI hints cannot
+promote it above a qualifying retained normal copy or protect it as an independent
+collection; explicit file protection, duplicate confidence, direct replacement
+evidence and last-survivor safeguards still apply. Existing score rows become
+outdated through the normal algorithm/configuration identity mechanism; no schema
+change or archive read is needed.
+
 The Ollama settings screen configures a server base URL and model identifier.
 Both default to empty; configuration alone never
 contacts a server. An explicit Fetch models action calls `GET {baseUrl}/api/tags`

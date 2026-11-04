@@ -54,6 +54,7 @@ data class RetentionConfig(
     val exifDateMismatchPenalty: Double = -40.0,
     val backupFilenamePenalty: Double = -20.0,
     val numberedFilenamePenalty: Double = -10.0,
+    val picasaOriginalsPenalty: Double = -10.0,
     val ambiguityMargin: Double = 10.0,
     val backupDirectoryNames: Set<String> = setOf(
         "MobileBackup", "Google Photos", "Picasa", "Backup", "Backups", "Import", "Imports", "Sync", "PhotoSync",
@@ -66,7 +67,7 @@ data class RetentionConfig(
         val bonuses = listOf(isoDateBonus, alternativeDateBonus, yearMonthDateBonus, partialDateBonus,
             modifiedDateBonus, createdDateBonus, exifConfirmedDateScore)
         val penalties = listOf(backupPenalty, temporaryPenalty, filenameDateMismatchPenalty, exifDateMismatchPenalty,
-            backupFilenamePenalty, numberedFilenamePenalty)
+            backupFilenamePenalty, numberedFilenamePenalty, picasaOriginalsPenalty)
         require((bonuses + penalties).all { it.isFinite() && it == floor(it) && it in -1_000_000.0..1_000_000.0 }) {
             "Scoring weights must be finite whole numbers within +/- 1,000,000."
         }
@@ -105,7 +106,7 @@ class RetentionScorer(config: RetentionConfig = RetentionConfig()) {
     val identity: ScoreIdentity = ScoreIdentity(
         type = "retention",
         algorithmId = "directory-retention",
-        algorithmVersion = "5",
+        algorithmVersion = "6",
         configurationId = configurationId(this.config),
     )
     val ambiguityMargin: Double = config.ambiguityMargin
@@ -164,8 +165,12 @@ class RetentionScorer(config: RetentionConfig = RetentionConfig()) {
             val location = directoryEvidence(file).location
             if (location == RetentionLocation.TEMPORARY) {
                 add(ScoreFactor("temporary-location", config.temporaryPenalty, "Temporary directory location (counted once)."))
-            } else if (location == RetentionLocation.BACKUP) {
+            } else if (hasBackupLocation(components)) {
                 add(ScoreFactor("backup-location", config.backupPenalty, "Backup, import, or sync directory location (counted once)."))
+            }
+            if (isPicasaOriginals(file)) {
+                add(ScoreFactor("picasa-originals-location", config.picasaOriginalsPenalty,
+                    "Picasa originals backup directory (.picasaoriginals); additional location penalty counted once."))
             }
             if (filename.backupSuffix) {
                 add(ScoreFactor("backup-filename", config.backupFilenamePenalty,
@@ -197,6 +202,15 @@ class RetentionScorer(config: RetentionConfig = RetentionConfig()) {
     internal fun filenameDateEvidence(file: FileRecord): String? =
         filenameDate(filenameEvidence(file.name).normalizedName, includeCameraDates = true)
 
+    internal fun isPicasaOriginals(file: FileRecord): Boolean =
+        file.directoryPath.segments.any { it.equals(".picasaoriginals", ignoreCase = true) }
+
+    private fun hasBackupLocation(components: List<String>): Boolean = components.any { name ->
+        val component = name.lowercase()
+        component in config.backupDirectoryNames ||
+            config.backupDirectoryWords.any { containsWord(component, it) }
+    }
+
     internal fun directoryEvidence(file: FileRecord): DirectoryRetentionEvidence {
         val components = file.directoryPath.segments
         val date = strongestDate(components)
@@ -206,10 +220,7 @@ class RetentionScorer(config: RetentionConfig = RetentionConfig()) {
                 component in config.temporaryDirectoryNames ||
                     config.temporaryDirectoryPrefixes.any { component.startsWith(it) }
             } -> RetentionLocation.TEMPORARY
-            lowercase.any { component ->
-                component in config.backupDirectoryNames ||
-                    config.backupDirectoryWords.any { containsWord(component, it) }
-            } -> RetentionLocation.BACKUP
+            hasBackupLocation(components) || isPicasaOriginals(file) -> RetentionLocation.BACKUP
             else -> RetentionLocation.ORDINARY
         }
         val directlyDated = date?.isoDate != null && date.endIndex == components.lastIndex &&
@@ -350,6 +361,7 @@ class RetentionScorer(config: RetentionConfig = RetentionConfig()) {
                 "exifDateMismatchPenalty" to config.exifDateMismatchPenalty,
                 "backupFilenamePenalty" to config.backupFilenamePenalty,
                 "numberedFilenamePenalty" to config.numberedFilenamePenalty,
+                "picasaOriginalsPenalty" to config.picasaOriginalsPenalty,
                 "ambiguityMargin" to config.ambiguityMargin,
             ).forEach { (key, value) ->
                 append(key).append('=').append(if (value == 0.0) 0.0 else value).append(';')

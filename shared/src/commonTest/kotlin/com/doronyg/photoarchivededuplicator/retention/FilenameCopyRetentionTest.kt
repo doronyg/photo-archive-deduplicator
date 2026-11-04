@@ -44,7 +44,7 @@ class FilenameCopyRetentionTest {
             "DSC_4061-001 (2021_12_30 01_53_40 UTC).jpg" to 70.0,
         )
         expected.forEach { (name, value) -> assertEquals(value, score(name, folder, capture).value, name) }
-        assertEquals(-25.0, score("DSC_4061.JPG", "/Pictures/Google Photos/.picasaoriginals", capture).value)
+        assertEquals(-35.0, score("DSC_4061.JPG", "/Pictures/Google Photos/.picasaoriginals", capture).value)
         assertEquals(60.0, score("DSC_4061.jpg", "/Pictures/2019-07-17", capture).value)
     }
 
@@ -95,7 +95,7 @@ class FilenameCopyRetentionTest {
         assertEquals(-10.0, defaults.numberedFilenamePenalty)
         assertNotEquals(scorer.identity, RetentionScorer(defaults.copy(backupFilenamePenalty = -21.0)).identity)
         assertNotEquals(scorer.identity, RetentionScorer(defaults.copy(numberedFilenamePenalty = -11.0)).identity)
-        assertEquals("5", scorer.identity.algorithmVersion)
+        assertEquals("6", scorer.identity.algorithmVersion)
         assertFailsWith<IllegalArgumentException> { RetentionConfig(backupFilenamePenalty = 1.0) }
         assertFailsWith<IllegalArgumentException> { RetentionConfig(numberedFilenamePenalty = Double.NaN) }
         assertTrue(score("photo-001.jpg").factors.single { it.key == "numbered-filename" }.explanation.contains("not proof"))

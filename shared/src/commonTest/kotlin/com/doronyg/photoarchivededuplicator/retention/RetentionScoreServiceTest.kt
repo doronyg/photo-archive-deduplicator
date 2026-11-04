@@ -81,7 +81,7 @@ class RetentionScoreServiceTest {
         val service = RetentionScoreService(fixture.repository, dispatcher = fixture.dispatcher, clock = { (++computations).toLong() })
         val current = service.assess(groups)
         assertEquals(listOf(-25.0, 60.0, 60.0), current.files.values.map { it.score!!.value }.sorted())
-        assertTrue(current.files.values.all { it.score!!.identity.algorithmVersion == "5" })
+        assertTrue(current.files.values.all { it.score!!.identity.algorithmVersion == "6" })
         assertEquals(2, current.files.values.count { it.rank == RetentionRank.TIED })
         for (identity in legacyIdentities) {
             assertEquals(oldScores.filter { it.identity == identity }.toSet(),

@@ -71,6 +71,23 @@ class AiDirectoryRecommendationTest {
     }
 
     @Test
+    fun picasaOriginalsIsDeterministicBackupEvenIfAiCallsItProtectedOrPreferred() {
+        val normal = file("/Photos/Family")
+        val picasa = file("/Photos/Family/.picasaoriginals")
+        for (classification in DirectoryClassification.entries) {
+            val result = recommend(listOf(normal, picasa), classifications(picasa to classification))
+            assertEquals(normal, result.preferredFile)
+            assertEquals(listOf(picasa), result.redundantCandidates)
+            assertEquals(normal.path, result.files.getValue(picasa.path).retainedReplacementPath)
+        }
+        val explicit = recommend(listOf(normal, picasa), protectedPaths = setOf(picasa.path))
+        assertEquals(RecommendationAction.PROTECTED, explicit.action)
+        assertTrue(explicit.redundantCandidates.isEmpty())
+        val weak = recommend(listOf(normal, picasa), records = emptyMap())
+        assertTrue(weak.redundantCandidates.isEmpty())
+    }
+
+    @Test
     fun protectedCollectionUnderBackupAncestorRetainsItsRepresentativeButNotEveryLocalVariant() {
         val keeper = file("/Photos/2023-02-18")
         val protected = file("/Photos/Backup/Family")

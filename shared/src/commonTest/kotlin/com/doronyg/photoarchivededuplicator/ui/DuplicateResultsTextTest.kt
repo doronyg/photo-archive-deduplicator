@@ -214,7 +214,7 @@ class DuplicateResultsTextTest {
         assertTrue("Retention: 100 - Tied - ambiguous" in report)
         assertTrue("+100: \"Preferred chronological folder\"" in report)
         assertTrue("Retention: Not scored" in report)
-        assertTrue("directory-retention v5" in report)
+        assertTrue("directory-retention v6" in report)
         assertTrue("Assessed: 1970-01-01 00:00:01 UTC" in report)
         assertTrue("not probabilities or deletion instructions" in report)
         val stale = formatDuplicateResults("/archive", DuplicateCandidateFilter(), defaultDuplicateSortRules(),

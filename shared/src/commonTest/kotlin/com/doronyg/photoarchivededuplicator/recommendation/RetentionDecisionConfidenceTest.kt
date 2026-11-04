@@ -200,7 +200,7 @@ class RetentionDecisionConfidenceTest {
         assertDecisions(result, 95, ConfidenceReason.FILENAME_DATE_MATCHES_DIRECTORY)
         assertTrue(RecommendationReason.FILENAME_CONTRADICTS_DIRECTORY in result.files.getValue(files.last().path).reasonCodes)
         assertTrue(RecommendationReason.MATCHING_SIZE_AND_CAPTURE !in result.reasonCodes)
-        assertEquals(scorer.identity.algorithmVersion, "5")
+        assertEquals(scorer.identity.algorithmVersion, "6")
     }
 
     private fun assertDecisions(

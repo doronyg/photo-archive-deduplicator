@@ -28,6 +28,19 @@ class RetentionScoringTest {
     private fun instant(date: String): Long = Instant.parse("${date}T12:00:00Z").toEpochMilliseconds()
 
     @Test
+    fun picasaOriginalsPenaltyIsExactCaseInsensitiveAdditionalAndCountedOnce() {
+        assertEquals(-10.0, value("/archive/.picasaoriginals"))
+        assertEquals(-10.0, value("/archive/.PICASAORIGINALS/.picasaoriginals/nested"))
+        assertEquals(-35.0, value("/Backup/Family/.picasaoriginals"))
+        assertEquals(-70.0, value("/Temp/.picasaoriginals"))
+        assertEquals(90.0, value("/archive/2024-02-29/.picasaoriginals"))
+        assertEquals(0.0, value("/archive/my.picasaoriginals"))
+        val score = scorer.score(file("/archive/.picasaoriginals"), 99)
+        assertEquals(-10.0, score.factors.single { it.key == "picasa-originals-location" }.contribution)
+        assertEquals(RetentionLocation.BACKUP, scorer.directoryEvidence(file("/archive/.picasaoriginals")).location)
+    }
+
+    @Test
     fun approvedExamplePairsHaveExpectedValuesAndNoInventedDateAgePreference() {
         val pairs = listOf(
             Triple("/Pictures/2007-06-06", "/Pictures/Casio/Image Library/2007_06_06", 40.0),
@@ -171,7 +184,7 @@ class RetentionScoringTest {
         val first = scorer.score(file, 123)
         assertEquals(first.copy(createdAt = 456), scorer.score(file, 456))
         assertEquals(FileScoreInput.from(file), first.input)
-        assertEquals(ScoreIdentity("retention", "directory-retention", "5", scorer.identity.configurationId),
+        assertEquals(ScoreIdentity("retention", "directory-retention", "6", scorer.identity.configurationId),
             first.identity)
         assertEquals(10.0, scorer.ambiguityMargin)
     }
@@ -198,6 +211,7 @@ class RetentionScoringTest {
             base.copy(exifDateMismatchPenalty = -79.0),
             base.copy(backupFilenamePenalty = -21.0),
             base.copy(numberedFilenamePenalty = -11.0),
+            base.copy(picasaOriginalsPenalty = -11.0),
         )
         variants.forEach { assertNotEquals(scorer.identity, RetentionScorer(it).identity) }
         val reordered = base.copy(

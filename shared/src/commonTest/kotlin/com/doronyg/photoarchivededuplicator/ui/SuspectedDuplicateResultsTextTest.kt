@@ -69,7 +69,7 @@ class SuspectedDuplicateResultsTextTest {
             "Wildcard (case-insensitive): \"IMG*.jpg\"", "Recommendation filter: KEEP_ONE",
             "RECOMMENDATION ASCENDING", "Group recommendation: KEEP_ONE", "File recommendation: REDUNDANT_CANDIDATE",
             "File recommendation: PREFERRED", "Normalized filename: \"IMG_1234.jpg\"",
-            "Retention: 90", "directory-retention v5", "Created: 1970-01-01 00:00:02 UTC",
+            "Retention: 90", "directory-retention v6", "Created: 1970-01-01 00:00:02 UTC",
             "Modified: 1970-01-01 00:00:01 UTC", "Camera make: \"A\\n\\\"B\\\"\"",
             quoteResultText(copy.path.toString()), quoteResultText(original.path.toString()),
             "outside the folder filter", "No files have been changed",

@@ -42,11 +42,12 @@ class DuplicateRecommendationEngine(
                 directory to type
             }
         }.toMap()
-        fun collectionFloor(file: FileRecord): Boolean = classified[file.directoryPath] in
+        fun collectionFloor(file: FileRecord): Boolean = !scorer.isPicasaOriginals(file) && classified[file.directoryPath] in
             setOf(DirectoryClassification.PROTECTED, DirectoryClassification.UNKNOWN)
         fun aiExplanation(directory: Path): String = classified[directory]?.let {
             "Cached AI ${it.name} applies to this exact directory $directory only; classifications are not inherited from ancestors."
-        }.orEmpty()
+        }.orEmpty() + if (ordered.any { it.directoryPath == directory && scorer.isPicasaOriginals(it) })
+            " Deterministic .picasaoriginals backup policy takes precedence over AI location hints." else ""
         val duplicateConfidence = if (evidenceReady) confidenceCalculator.assess(ordered, exif, retention)
             else DuplicateConfidenceAssessment(null, ConfidenceAssessment(0,
                 setOf(ConfidenceReason.EVIDENCE_UNAVAILABLE), "Evidence is updating; confidence has not been assessed."), emptyMap())
@@ -177,7 +178,7 @@ class DuplicateRecommendationEngine(
         }
         val rankedRepresentatives = representatives.sortedWith(
             compareByDescending<FileRecord> { retention.getValue(it.path).score!!.value }.thenBy { it.path.toString() })
-        fun isBackup(file: FileRecord): Boolean = when (classified[file.directoryPath]) {
+        fun isBackup(file: FileRecord): Boolean = if (scorer.isPicasaOriginals(file)) true else when (classified[file.directoryPath]) {
             DirectoryClassification.BACKUP -> true
             DirectoryClassification.PREFERRED, DirectoryClassification.PROTECTED, DirectoryClassification.UNKNOWN -> false
             null -> directories.getValue(file.path).location == RetentionLocation.BACKUP
@@ -190,9 +191,12 @@ class DuplicateRecommendationEngine(
                 (location.date == null || (!conflictingDates && (preferredDate == null || location.date == preferredDate)))
         }
         val aiPreferred = representatives.filter {
-            classified[it.directoryPath] == DirectoryClassification.PREFERRED && qualifiesAsReplacement(it)
+            classified[it.directoryPath] == DirectoryClassification.PREFERRED && !scorer.isPicasaOriginals(it) &&
+                qualifiesAsReplacement(it)
         }.singleOrNull()
-        val backupReplacement = aiPreferred ?: rankedRepresentatives.firstOrNull(::qualifiesAsReplacement)
+        val backupReplacement = aiPreferred ?: rankedRepresentatives.firstOrNull {
+            !scorer.isPicasaOriginals(it) && qualifiesAsReplacement(it)
+        } ?: rankedRepresentatives.firstOrNull(::qualifiesAsReplacement)
         val reducedBackupDirectories = mutableSetOf<Path>()
         for (backup in rankedRepresentatives) {
             if (backup.path in redundant || !isBackup(backup)) continue

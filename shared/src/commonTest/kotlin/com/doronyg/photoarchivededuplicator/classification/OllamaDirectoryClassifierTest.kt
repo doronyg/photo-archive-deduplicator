@@ -58,6 +58,10 @@ class OllamaDirectoryClassifierTest {
                 val prompt = system["content"]!!.jsonPrimitive.content
                 assertFalse("preferredRoots" in prompt)
                 assertFalse("configured roots" in prompt)
+                for (evidence in listOf("family archives", "documents", "Bialik documents",
+                    "mama's documents", "full directory path", "PROTECTED over UNKNOWN")) {
+                    assertTrue(evidence in prompt, evidence)
+                }
                 for (word in listOf("data", "instructions", "Hebrew", "PROTECTED", "UNKNOWN", "BACKUP", "PREFERRED")) {
                     assertTrue(word in prompt)
                 }
@@ -236,7 +240,7 @@ class OllamaDirectoryClassifierTest {
         val canonical = settings.context()
         assertEquals("https://server.test/prefix", canonical.baseUrl)
         assertEquals("model", canonical.model)
-        assertEquals("2", canonical.promptVersion)
+        assertEquals("3", canonical.promptVersion)
         for (url in listOf("", "file:///a", "server.test", "http://", "http:///path", "http://[",
             "http://server.test:bad", "http://u:p@server.test", "http://server.test?q=1", "http://server.test#x")) {
             assertFailsWith<IllegalArgumentException>(url) { settings.copy(baseUrl = url).context() }

@@ -7,7 +7,7 @@ import okio.Path
 
 enum class DirectoryClassification { PREFERRED, BACKUP, PROTECTED, UNKNOWN }
 
-const val DIRECTORY_CLASSIFICATION_PROMPT_VERSION: String = "2"
+const val DIRECTORY_CLASSIFICATION_PROMPT_VERSION: String = "3"
 
 data class OllamaSettings(
     val baseUrl: String = "",
