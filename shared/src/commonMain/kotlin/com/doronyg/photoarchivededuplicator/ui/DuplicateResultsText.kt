@@ -65,9 +65,11 @@ internal fun StringBuilder.appendDuplicateSortContext(rules: List<DuplicateSortR
 
 internal fun StringBuilder.appendGroupRecommendation(recommendation: DuplicateGroupRecommendation?) {
     if (recommendation != null) {
-        appendLine("Group recommendation: ${recommendation.action.name} (${recommendation.evidenceStrength.name} metadata evidence)")
+        appendLine("Group recommendation: ${recommendation.action.name}")
         appendLine("Recommendation explanation: ${quoteResultText(recommendation.explanation)}")
         appendLine("Recommendation reasons: ${recommendation.reasonCodes.joinToString { it.name }}")
+        appendLine(groupConfidenceSummaryText(recommendation))
+        appendLine(groupConfidenceDetailsText(recommendation))
     }
 }
 
@@ -87,6 +89,8 @@ internal suspend fun StringBuilder.appendDuplicateFileResult(
         appendLine("  Recommendation explanation: ${quoteResultText(advice.explanation)}")
         appendLine("  Normalized filename: ${quoteResultText(advice.normalizedFilename)}")
         appendLine("  Recommendation reasons: ${advice.reasonCodes.joinToString { it.name }}")
+        appendLine("  ${fileDecisionConfidenceSummaryText(advice)}")
+        fileDecisionConfidenceDetailsText(advice).lineSequence().forEach { appendLine("  $it") }
     }
     val metadata = presentExif(exif)
     appendLine("  ${quoteResultText(metadata.summary)}")

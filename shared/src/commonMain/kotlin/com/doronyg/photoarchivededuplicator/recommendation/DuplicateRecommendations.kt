@@ -17,13 +17,14 @@ internal suspend fun recommendDuplicateGroups(
     retention: Map<Path, RetentionPresentation>,
     evidenceReady: Boolean = true,
     dispatcher: CoroutineDispatcher = Dispatchers.Default,
+    protectedPaths: Set<Path> = emptySet(),
 ): Map<Path, DuplicateGroupRecommendation> = withContext(dispatcher) {
     val context = currentCoroutineContext()
     val engine = DuplicateRecommendationEngine()
     buildMap {
         for (files in groups) {
             context.ensureActive()
-            val recommendation = engine.recommend(files, exif, retention, evidenceReady)
+            val recommendation = engine.recommend(files, exif, retention, evidenceReady, protectedPaths)
             for (file in files) {
                 context.ensureActive()
                 put(file.path, recommendation)

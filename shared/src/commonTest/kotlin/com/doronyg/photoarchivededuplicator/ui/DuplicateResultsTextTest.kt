@@ -35,6 +35,24 @@ import kotlin.time.Duration.Companion.seconds
 @OptIn(ExperimentalCoroutinesApi::class)
 class DuplicateResultsTextTest {
     @Test
+    fun exportsIndependentConfidenceScoresAndCompleteEscapedComparisonEvidence() = runTest {
+        val recommendation = confidencePresentationFixture()
+        val files = recommendation.files.values.map { it.file }
+        val report = formatDuplicateResults("/Pictures", DuplicateCandidateFilter(), emptyList(),
+            listOf(DuplicateCandidateGroup("image.jpg", files.first().sizeBytes, files)),
+            StandardTestDispatcher(testScheduler), recommendations = files.associate { it.path to recommendation })
+        assertTrue("Duplicate confidence: 100/100 (Very high)" in report)
+        assertFalse("Retention-decision confidence:" in report.substringBefore("  Path:"))
+        assertConfidencePresentationDetails(report, includesSummary = true)
+        assertFileDecisionPresentationDetails(report)
+        assertEquals(3, report.lineSequence().count { "Retention-decision confidence:" in it })
+        val fileSections = report.substringAfter("  Path:")
+        assertTrue(fileSections.indexOf(quoteResultText(files[1].path.toString())) <
+            fileSections.indexOf(quoteResultText(files[2].path.toString())))
+        assertFalse("100%" in report)
+    }
+
+    @Test
     fun exifReportQuotesRawFieldsAndDoesNotChangeRetentionOrOrder() = runTest(timeout = 10.seconds) {
         val group = group("IMG.jpg")
         val file = group.files.first()

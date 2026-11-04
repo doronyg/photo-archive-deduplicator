@@ -194,6 +194,9 @@ class RetentionScorer(config: RetentionConfig = RetentionConfig()) {
     internal fun hasCompleteDirectoryDate(file: FileRecord): Boolean =
         strongestDate(file.directoryPath.segments)?.isoDate != null
 
+    internal fun filenameDateEvidence(file: FileRecord): String? =
+        filenameDate(filenameEvidence(file.name).normalizedName, includeCameraDates = true)
+
     internal fun directoryEvidence(file: FileRecord): DirectoryRetentionEvidence {
         val components = file.directoryPath.segments
         val date = strongestDate(components)

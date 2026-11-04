@@ -1,6 +1,6 @@
 package com.doronyg.photoarchivededuplicator.scan
 
-import com.doronyg.photoarchivededuplicator.recommendation.DuplicateGroupRecommendation
+import com.doronyg.photoarchivededuplicator.recommendation.DuplicateRecommendationEngine
 import com.doronyg.photoarchivededuplicator.recommendation.EvidenceStrength
 import com.doronyg.photoarchivededuplicator.recommendation.RecommendationAction
 import kotlinx.coroutines.CoroutineStart
@@ -29,7 +29,8 @@ class SuspectedDuplicateSortingTest {
     })
 
     private fun recommendation(action: RecommendationAction) =
-        DuplicateGroupRecommendation(action, EvidenceStrength.SUPPORTED, emptySet(), "Fixture", emptyMap())
+        DuplicateRecommendationEngine().recommend(emptyList(), emptyMap(), emptyMap()).copy(
+            action = action, evidenceStrength = EvidenceStrength.SUPPORTED, reasonCodes = emptySet(), explanation = "Fixture")
 
     @Test
     fun filenameUsesSmallestCaseSensitiveMemberRegardlessOfRetentionOrder() = runTest {

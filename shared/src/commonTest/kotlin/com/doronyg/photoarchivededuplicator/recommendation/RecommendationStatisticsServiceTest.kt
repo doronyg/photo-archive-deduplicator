@@ -48,7 +48,7 @@ class RecommendationStatisticsServiceTest {
         val statistics = RecommendationStatisticsService(f.repository, retention, f.dispatcher).load()
         assertEquals(1L, statistics.regular.groupCount)
         assertEquals(FileStatistics(2, 240_000), statistics.regular.totals)
-        assertEquals(FileStatistics(2, 240_000), statistics.regular.byAction.getValue(RecommendationAction.REVIEW).totals)
+        assertEquals(FileStatistics(2, 240_000), statistics.regular.byAction.getValue(RecommendationAction.KEEP_MULTIPLE).totals)
         assertEquals(1L, statistics.suspected.groupCount)
         assertEquals(FileStatistics(4, 480_000), statistics.suspected.totals)
         assertEquals(FileStatistics(4, 480_000), statistics.suspected.byAction.getValue(RecommendationAction.KEEP_MULTIPLE).totals)

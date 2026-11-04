@@ -281,11 +281,33 @@ remains available after cancellation. No scoring operation reopens image files.
 Deterministic group recommendations are computed in memory from these stored
 snapshots; they introduce no tables, migration, or score version change. Both
 duplicate screens reuse existing filename and directory evidence and expose
-group actions, per-file roles, explanations, and reason codes. Missing/stale or
-conflicting evidence produces review-only results. No source files are reread or
-modified, and no recommendation is a content-identity guarantee. Collection
-protection is deferred; the `PROTECTED` action is reserved but never emitted by
-current rules.
+group actions, per-file roles, explanations, and reason codes, plus independent
+group duplicate and per-file retention-decision confidence assessments. Confidence uses the
+existing persisted timestamps, EXIF and retention factors; it adds no columns or
+score writes. Duplicate confidence is the weakest reference comparison using
+filename (30), modification timestamp (25), capture timestamp (30), camera
+make/model (5 each), and dimensions (5). Size earns no points, missing evidence
+earns nothing, and known EXIF contradictions block redundant recommendations.
+No source files are reread or modified, and even 100/100 is not content verification.
+Insufficient duplicate confidence or missing/stale retention assessments produces
+review-only results. High-confidence groups preserve one representative per
+unknown/special ordinary collection; uncertain chronological locations remain preserved.
+The existing backup/import/sync directory classification is an explicit expendable
+location policy for all descendants, including Google Photos and device/Camera
+folders beneath PhotoSync. A strictly higher-scoring retained replacement without
+known folder-date contradictions and sufficient direct duplicate evidence can
+make such a copy redundant. Other required collections, explicit protection and
+at least one surviving copy remain enforced. Backups without a qualifying better
+replacement are preserved; individual retention scores/weights remain unchanged.
+Explicit protected-path input forces preservation through `PROTECTED`; the input
+defaults empty and no directory-protection classifier or configuration is added.
+Every redundant candidate names a surviving replacement in its group and its
+confidence is capped by a direct cached-metadata comparison with that replacement.
+Whole-plan validation rejects losing every copy or a required collection,
+invalid/cyclic dependencies, protected candidates, and inconsistent roles.
+Rejected plans preserve all original members for review with zero per-file
+decision confidence and no replacement dependencies. No group retention-confidence
+number or hypothetical high removal confidence is presented.
 
 Recommendation statistics read all stored roots using the same candidate queries
 and exclusions. `duplicateCandidates(root = null)` groups exact filename/size

@@ -5,7 +5,7 @@ import okio.Path
 
 enum class RecommendationAction {
     KEEP_ONE, KEEP_MULTIPLE, REVIEW,
-    // Reserved for a future, explicit collection-protection policy. No current rule emits this.
+    // Only explicit protection can emit this; directory classification is not inferred.
     PROTECTED,
 }
 
@@ -37,6 +37,17 @@ enum class RecommendationReason {
     DIRECTORY_EVIDENCE_CONFLICT,
     UNKNOWN_OR_SPECIAL_LOCATION,
     MULTIPLE_RETAINED_LOCATIONS,
+    DUPLICATE_CONFIDENCE_TOO_LOW,
+    CONFLICTING_EXIF_METADATA,
+    SAME_DIRECTORY_REPRESENTATIVE,
+    FILENAME_MATCHES_DIRECTORY,
+    FILENAME_CONTRADICTS_DIRECTORY,
+    EXPLICIT_PROTECTION,
+    MATCHING_DUPLICATE_EVIDENCE,
+    RETAINED_REPLACEMENT,
+    RETENTION_PLAN_INVALID,
+    EXPENDABLE_BACKUP_LOCATION,
+    BACKUP_FALLBACK_COPY,
 }
 
 data class FileRecommendation(
@@ -45,6 +56,8 @@ data class FileRecommendation(
     val normalizedFilename: String,
     val reasonCodes: Set<RecommendationReason>,
     val explanation: String,
+    val retentionDecisionConfidence: ConfidenceAssessment,
+    val retainedReplacementPath: Path? = null,
 )
 
 data class DuplicateGroupRecommendation(
@@ -53,6 +66,7 @@ data class DuplicateGroupRecommendation(
     val reasonCodes: Set<RecommendationReason>,
     val explanation: String,
     val files: Map<Path, FileRecommendation>,
+    val duplicateConfidence: DuplicateConfidenceAssessment,
 ) {
     val preferredFile: FileRecord?
         get() = files.values.singleOrNull { it.role == FileRecommendationRole.PREFERRED }?.file

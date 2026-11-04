@@ -1,6 +1,6 @@
 package com.doronyg.photoarchivededuplicator.scan
 
-import com.doronyg.photoarchivededuplicator.recommendation.DuplicateGroupRecommendation
+import com.doronyg.photoarchivededuplicator.recommendation.DuplicateRecommendationEngine
 import com.doronyg.photoarchivededuplicator.recommendation.EvidenceStrength
 import com.doronyg.photoarchivededuplicator.recommendation.RecommendationAction
 import kotlinx.coroutines.CoroutineStart
@@ -66,8 +66,8 @@ class SuspectedDuplicateFilterTest {
         val pending = group("/Photos/pending.jpg", "/Backup/pending-copy.jpg")
         val recommendations = listOf(keep to RecommendationAction.KEEP_ONE, review to RecommendationAction.REVIEW)
             .flatMap { (group, action) ->
-                group.files.map { it.path to DuplicateGroupRecommendation(action, EvidenceStrength.SUPPORTED,
-                    emptySet(), "Fixture", emptyMap()) }
+                group.files.map { it.path to DuplicateRecommendationEngine().recommend(emptyList(), emptyMap(), emptyMap()).copy(
+                    action = action, evidenceStrength = EvidenceStrength.SUPPORTED, reasonCodes = emptySet(), explanation = "Fixture") }
             }.toMap()
         val dispatcher = StandardTestDispatcher(testScheduler)
         assertEquals(listOf(keep), filterSuspectedDuplicateCandidates(listOf(pending, review, keep),

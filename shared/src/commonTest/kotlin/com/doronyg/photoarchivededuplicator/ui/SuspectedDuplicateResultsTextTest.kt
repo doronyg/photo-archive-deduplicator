@@ -27,6 +27,24 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class SuspectedDuplicateResultsTextTest {
+    @Test
+    fun sharesCompleteConfidenceExportWithRegularDuplicateResults() = runTest {
+        val recommendation = confidencePresentationFixture()
+        val files = recommendation.files.values.map { it.file }
+        val report = formatSuspectedDuplicateResults(SuspectedDuplicateFilter(), emptyList(),
+            listOf(SuspectedDuplicateGroup(files.first().sizeBytes, "2023:02:18 12:44:25", null, files)),
+            StandardTestDispatcher(testScheduler), recommendations = files.associate { it.path to recommendation })
+        assertTrue("Duplicate confidence: 100/100 (Very high)" in report)
+        assertFalse("Retention-decision confidence:" in report.substringBefore("  Path:"))
+        assertConfidencePresentationDetails(report, includesSummary = true)
+        assertFileDecisionPresentationDetails(report)
+        assertEquals(3, report.lineSequence().count { "Retention-decision confidence:" in it })
+        val fileSections = report.substringAfter("  Path:")
+        assertTrue(fileSections.indexOf(quoteResultText(files[1].path.toString())) <
+            fileSections.indexOf(quoteResultText(files[2].path.toString())))
+        assertFalse("100%" in report)
+    }
+
     private val directory = "/Photos/2023-02-18".toPath()
     private val original = FileRecord(directory / "IMG_1234.jpg", directory, "IMG_1234.jpg", "jpg", 120_000, 1000, 1, 2000)
     private val copy = original.copy(path = directory / "IMG_1234-001.jpg", name = "IMG_1234-001.jpg")

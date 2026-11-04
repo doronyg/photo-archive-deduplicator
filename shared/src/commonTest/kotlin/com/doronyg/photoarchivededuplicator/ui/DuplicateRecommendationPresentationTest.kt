@@ -6,6 +6,14 @@ import com.doronyg.photoarchivededuplicator.exif.ExifReadResult
 import com.doronyg.photoarchivededuplicator.exif.ExifRecord
 import com.doronyg.photoarchivededuplicator.exif.ExifStatus
 import com.doronyg.photoarchivededuplicator.recommendation.DuplicateRecommendationEngine
+import com.doronyg.photoarchivededuplicator.recommendation.ConfidenceAssessment
+import com.doronyg.photoarchivededuplicator.recommendation.ConfidenceEvidence
+import com.doronyg.photoarchivededuplicator.recommendation.ConfidenceReason
+import com.doronyg.photoarchivededuplicator.recommendation.DuplicateConfidenceAssessment
+import com.doronyg.photoarchivededuplicator.recommendation.DuplicateGroupRecommendation
+import com.doronyg.photoarchivededuplicator.recommendation.FileDuplicateConfidence
+import com.doronyg.photoarchivededuplicator.recommendation.FileRecommendationRole
+import com.doronyg.photoarchivededuplicator.recommendation.RecommendationAction
 import com.doronyg.photoarchivededuplicator.recommendation.RecommendationReason
 import com.doronyg.photoarchivededuplicator.retention.RetentionPresentation
 import com.doronyg.photoarchivededuplicator.retention.RetentionRank
@@ -18,6 +26,7 @@ import kotlinx.coroutines.test.runTest
 import okio.Path.Companion.toPath
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class DuplicateRecommendationPresentationTest {
@@ -32,12 +41,57 @@ class DuplicateRecommendationPresentationTest {
 
     @Test
     fun summaryAndPerFileLabelsDistinguishRecommendationsFromConfirmedDuplicates() {
-        assertTrue(groupRecommendationText(recommendation).contains("Keep one"))
-        assertTrue(groupRecommendationText(recommendation).contains("metadata"))
-        assertTrue(fileRecommendationText(recommendation.files.getValue(original.path)).contains("Preferred copy"))
-        assertTrue(fileRecommendationText(recommendation.files.getValue(copy.path)).contains("Likely redundant candidate"))
+        assertEquals("Recommendation: Review - no automatic action", groupRecommendationText(recommendation))
+        assertTrue(fileRecommendationText(recommendation.files.getValue(original.path)).contains("Preserve for review"))
+        assertTrue(fileRecommendationText(recommendation.files.getValue(copy.path)).contains("Preserve for review"))
+        assertEquals(60, recommendation.duplicateConfidence.score)
+        recommendation.files.values.forEach {
+            assertEquals(0, it.retentionDecisionConfidence.score)
+            assertEquals(null, it.retainedReplacementPath)
+            assertEquals("Retention-decision confidence: 0/100 (Very low)", fileDecisionConfidenceSummaryText(it))
+        }
+        assertTrue(recommendation.redundantCandidates.isEmpty())
+        assertTrue("Duplicate confidence: 60/100 (Medium)" in groupConfidenceSummaryText(recommendation))
+        assertFalse("Retention" in groupConfidenceSummaryText(recommendation))
         assertEquals("Recommendation: Loading stored evidence...", groupRecommendationText(null))
         assertEquals("Recommendation: Loading stored evidence...", fileRecommendationText(null))
+    }
+
+    @Test
+    fun summaryShowsOnlyGroupDuplicateConfidenceAndFilesHaveIndependentDecisionConfidence() {
+        val recommendation = confidencePresentationFixture()
+        assertEquals(
+            "Duplicate confidence: 100/100 (Very high)",
+            groupConfidenceSummaryText(recommendation),
+        )
+        assertFalse("100" in groupRecommendationText(recommendation))
+        assertFalse("%" in groupConfidenceSummaryText(recommendation))
+        val details = groupConfidenceDetailsText(recommendation)
+        assertTrue("Heuristic scores, not probabilities; even 100/100 is not content-verified." in details)
+        assertFalse("100%" in details)
+        assertFalse("Retention" in details)
+        val files = recommendation.files.values.toList()
+        assertEquals("Retention-decision confidence: 95/100 (Very high)", fileDecisionConfidenceSummaryText(files[0]))
+        assertEquals("Retention-decision confidence: 75/100 (High)", fileDecisionConfidenceSummaryText(files[1]))
+        assertFileDecisionPresentationDetails(
+            files.joinToString("\n") { fileDecisionConfidenceSummaryText(it) + "\n" + fileDecisionConfidenceDetailsText(it) },
+        )
+    }
+
+    @Test
+    fun expandedConfidenceDetailsQuoteEvidenceAndPreserveComparisonOrder() {
+        assertConfidencePresentationDetails(groupConfidenceDetailsText(confidencePresentationFixture()))
+    }
+
+    @Test
+    fun unavailableReferenceAndEmptyComparisonsAreExplicit() {
+        val recommendation = confidencePresentationFixture()
+        val details = groupConfidenceDetailsText(recommendation.copy(
+            duplicateConfidence = recommendation.duplicateConfidence.copy(referenceFile = null, comparisons = emptyMap()),
+        ))
+        assertTrue("Duplicate-confidence reference: unavailable" in details)
+        assertTrue("Duplicate-confidence comparisons: none" in details)
+        assertFalse("Retention-confidence explanation:" in details)
     }
 
     @Test
@@ -46,14 +100,89 @@ class DuplicateRecommendationPresentationTest {
         val text = formatDuplicateResults("/Pictures", DuplicateCandidateFilter(), emptyList(), listOf(group),
             StandardTestDispatcher(testScheduler), retention, exif,
             recommendations = files.associate { it.path to recommendation })
-        assertTrue("Group recommendation: KEEP_ONE" in text)
-        assertTrue("SAME_DIRECTORY_COPY_VARIANTS" in text)
-        assertTrue("File recommendation: REDUNDANT_CANDIDATE" in text)
-        assertTrue("File recommendation: PREFERRED" in text)
+        assertTrue("Group recommendation: REVIEW" in text)
+        assertTrue("DUPLICATE_CONFIDENCE_TOO_LOW" in text)
+        assertTrue("File recommendation: REVIEW" in text)
+        assertFalse("File recommendation: REDUNDANT_CANDIDATE" in text)
+        assertEquals(2, text.lineSequence().count { "Retention-decision confidence: 0/100 (Very low)" in it })
+        assertFalse("Retained replacement: \"" in text)
         assertTrue("Normalized filename: \"IMG_1234.jpg\"" in text)
         assertTrue(text.indexOf(quoteResultText(copy.path.toString())) < text.indexOf("  Path: ${quoteResultText(original.path.toString())}"))
         assertTrue(RecommendationReason.NUMBERED_COPY_SUFFIX.name in text)
         assertTrue("not content-verified" in text)
         assertTrue("No files have been changed" in text)
     }
+
+}
+
+internal fun confidencePresentationFixture(): DuplicateGroupRecommendation {
+    val directory = "/Pictures/\u96ea\n\"album\"".toPath()
+    val reference = FileRecord(directory / "reference.jpg", directory, "reference.jpg", "jpg", 120_000, 1, 1)
+    val files = listOf(reference, reference.copy(path = directory / "z.jpg", name = "z.jpg"),
+        reference.copy(path = directory / "a.jpg", name = "a.jpg"))
+    val duplicate = ConfidenceAssessment(100, setOf(ConfidenceReason.WEAKEST_MEMBER), "Duplicate\n\"evidence\"\t\u0001")
+    val comparisons = files.drop(1).associate { file ->
+        file.path to FileDuplicateConfidence(file, reference,
+            ConfidenceAssessment(100, setOf(ConfidenceReason.NORMALIZED_FILENAME_MATCH), "Compared\n\"file\""),
+            listOf(
+                ConfidenceEvidence(ConfidenceReason.NORMALIZED_FILENAME_MATCH, 30, "Name\n\"match\""),
+                ConfidenceEvidence(ConfidenceReason.SIZE_NOT_SCORED, 0, "Size is a prerequisite\t only"),
+            ), hasContradictions = false)
+    }
+    val base = DuplicateRecommendationEngine().recommend(files, emptyMap(), emptyMap())
+    return base.copy(
+        action = RecommendationAction.KEEP_MULTIPLE,
+        duplicateConfidence = DuplicateConfidenceAssessment(reference, duplicate, comparisons),
+        files = files.associate { file ->
+            val candidate = file.path == files[1].path
+            file.path to base.files.getValue(file.path).copy(
+                role = if (candidate) FileRecommendationRole.REDUNDANT_CANDIDATE else FileRecommendationRole.PRESERVE,
+                retentionDecisionConfidence = ConfidenceAssessment(
+                    if (candidate) 75 else if (file.path == reference.path) 95 else 90,
+                    setOf(ConfidenceReason.SAME_DIRECTORY),
+                    if (candidate) "Candidate\r\"retained survivor\"\t\u0001" else "Keep\n\"collection representative\"",
+                ),
+                retainedReplacementPath = if (candidate) reference.path else null,
+            )
+        },
+    )
+}
+
+internal fun assertConfidencePresentationDetails(text: String, includesSummary: Boolean = false) {
+    val recommendation = confidencePresentationFixture()
+    assertTrue("Duplicate-confidence reference: ${quoteResultText(recommendation.duplicateConfidence.referenceFile!!.path.toString())}" in text)
+    assertTrue("Duplicate-confidence explanation: \"Duplicate\\n\\\"evidence\\\"\\t\\u0001\"" in text)
+    assertFalse(recommendation.duplicateConfidence.assessment.explanation in text)
+    assertTrue("Duplicate-confidence reasons: WEAKEST_MEMBER" in text)
+    val comparisons = recommendation.duplicateConfidence.comparisons.values.toList()
+    comparisons.forEach { comparison ->
+        assertTrue("Comparison: ${quoteResultText(comparison.file.path.toString())}" in text)
+        assertFalse(comparison.file.path.toString() in text)
+        assertFalse(comparison.assessment.explanation in text)
+        comparison.evidence.forEach { assertFalse(it.explanation in text) }
+    }
+
+    assertTrue(text.indexOf("Comparison: ${quoteResultText(comparisons[0].file.path.toString())}") <
+        text.indexOf("Comparison: ${quoteResultText(comparisons[1].file.path.toString())}"))
+    assertEquals(if (includesSummary) 3 else 2,
+        text.lineSequence().count { "Duplicate confidence: 100/100 (Very high)" in it })
+    assertEquals(2, text.lineSequence().count { "Comparison explanation: \"Compared\\n\\\"file\\\"\"" in it })
+    assertEquals(2, text.lineSequence().count { "Comparison reasons: NORMALIZED_FILENAME_MATCH" in it })
+    assertEquals(2, text.lineSequence().count { "+30 points [NORMALIZED_FILENAME_MATCH]: \"Name\\n\\\"match\\\"\"" in it })
+    assertEquals(2, text.lineSequence().count { "0 points [SIZE_NOT_SCORED]: \"Size is a prerequisite\\t only\"" in it })
+    assertTrue("Heuristic scores, not probabilities; even 100/100 is not content-verified." in text)
+}
+
+internal fun assertFileDecisionPresentationDetails(text: String) {
+    val files = confidencePresentationFixture().files.values.toList()
+    files.forEach { advice ->
+        assertTrue(fileDecisionConfidenceSummaryText(advice) in text)
+        assertTrue("Retention-confidence explanation: ${quoteResultText(advice.retentionDecisionConfidence.explanation)}" in text)
+        assertFalse(advice.retentionDecisionConfidence.explanation in text)
+        assertTrue("Retention-confidence reasons: SAME_DIRECTORY" in text)
+    }
+    val candidate = files.single { it.role == FileRecommendationRole.REDUNDANT_CANDIDATE }
+    assertTrue("Retained replacement: ${quoteResultText(candidate.retainedReplacementPath.toString())}" in text)
+    assertFalse(candidate.retainedReplacementPath.toString() in text)
+    assertTrue("Heuristic scores, not probabilities; even 100/100 is not content-verified." in text)
 }

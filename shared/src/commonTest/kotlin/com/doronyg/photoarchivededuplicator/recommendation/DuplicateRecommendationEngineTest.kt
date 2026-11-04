@@ -39,7 +39,7 @@ class DuplicateRecommendationEngineTest {
 
     private fun recommend(files: List<FileRecord>): DuplicateGroupRecommendation {
         val exif = records(files)
-        return engine.recommend(files, exif, scores(files, exif))
+        return engine.recommend(files, exif, scores(files, exif)).also(::assertCoherentPlan)
     }
 
     @Test
@@ -55,6 +55,9 @@ class DuplicateRecommendationEngineTest {
         assertTrue(RecommendationReason.SAME_DIRECTORY_COPY_VARIANTS in result.reasonCodes)
         assertTrue(RecommendationReason.NUMBERED_COPY_SUFFIX in result.files.getValue(copy.path).reasonCodes)
         assertTrue(result.files.getValue(copy.path).explanation.contains(original.name))
+        assertEquals(90, result.files.getValue(original.path).retentionDecisionConfidence.score)
+        assertEquals(85, result.files.getValue(copy.path).retentionDecisionConfidence.score)
+        assertEquals(original.path, result.files.getValue(copy.path).retainedReplacementPath)
         assertTrue(result.explanation.contains("not content-verified"))
     }
 
@@ -73,6 +76,8 @@ class DuplicateRecommendationEngineTest {
         copies.forEach {
             assertEquals("IMG_1234.jpg", result.files.getValue(it.path).normalizedFilename)
             assertTrue(RecommendationReason.BACKUP_TIMESTAMP_SUFFIX in result.files.getValue(it.path).reasonCodes)
+            assertEquals(85, result.files.getValue(it.path).retentionDecisionConfidence.score)
+            assertEquals(original.path, result.files.getValue(it.path).retainedReplacementPath)
         }
     }
 
@@ -91,6 +96,9 @@ class DuplicateRecommendationEngineTest {
         assertTrue(RecommendationReason.EXIF_MATCHES_DIRECTORY in result.files.getValue(correct.path).reasonCodes)
         assertTrue(RecommendationReason.EXIF_CONTRADICTS_DIRECTORY in result.files.getValue(wrong.path).reasonCodes)
         assertTrue(result.explanation.contains("capture date"))
+        assertEquals(95, result.files.getValue(correct.path).retentionDecisionConfidence.score)
+        assertEquals(85, result.files.getValue(wrong.path).retentionDecisionConfidence.score)
+        assertCoherentPlan(result)
     }
 
     @Test
@@ -101,8 +109,9 @@ class DuplicateRecommendationEngineTest {
             presentation.copy(score = presentation.score!!.copy(value = if (path == files.first().path) 1000.0 else 0.0))
         }
         val result = engine.recommend(files, exif, scores)
-        assertReview(result, RecommendationReason.UNKNOWN_OR_SPECIAL_LOCATION, files)
-        assertTrue(result.explanation.contains("location"))
+        assertMultipleLocations(result, RecommendationReason.UNKNOWN_OR_SPECIAL_LOCATION, files)
+        assertTrue(result.files.values.all { it.retentionDecisionConfidence.score == 90 })
+        assertTrue(result.files.values.all { it.retentionDecisionConfidence.explanation.contains("collection") })
     }
 
     @Test
@@ -115,7 +124,7 @@ class DuplicateRecommendationEngineTest {
                 presentation.copy(score = presentation.score!!.copy(value = if (path == files.last().path) 1000.0 else 0.0))
             }
             val result = engine.recommend(files, exif, scores)
-            assertReview(result, RecommendationReason.UNKNOWN_OR_SPECIAL_LOCATION, files)
+            assertMultipleLocations(result, RecommendationReason.UNKNOWN_OR_SPECIAL_LOCATION, files)
             assertFalse(result.action == RecommendationAction.PROTECTED, "Protection is reserved, not inferred")
         }
     }
@@ -180,6 +189,8 @@ class DuplicateRecommendationEngineTest {
             assertEquals(RecommendationAction.REVIEW, result.action)
             assertTrue(result.redundantCandidates.isEmpty())
             assertEquals(files.toSet(), result.mustPreserve.toSet())
+            assertTrue(result.files.values.all { it.retentionDecisionConfidence.score == 0 })
+            assertCoherentPlan(result)
         }
     }
 
@@ -190,25 +201,36 @@ class DuplicateRecommendationEngineTest {
         val scores = scores(files, exif)
         assertReview(engine.recommend(files, exif, scores - files.last().path),
             RecommendationReason.MISSING_RETENTION_ASSESSMENT, files)
+        assertTrue(engine.recommend(files, exif, scores - files.last().path).files.values.all {
+            ConfidenceReason.MISSING_RETENTION_ASSESSMENT in it.retentionDecisionConfidence.reasonCodes
+        })
         val oldScores = scores.mapValues { (_, presentation) ->
             presentation.copy(score = presentation.score!!.copy(identity = scorer.identity.copy(algorithmVersion = "old")))
         }
         assertReview(engine.recommend(files, exif, oldScores), RecommendationReason.STALE_RETENTION_ASSESSMENT, files)
+        assertTrue(engine.recommend(files, exif, oldScores).files.values.all {
+            ConfidenceReason.STALE_RETENTION_ASSESSMENT in it.retentionDecisionConfidence.reasonCodes
+        })
         assertReview(engine.recommend(files, exif, scores, evidenceReady = false), RecommendationReason.EVIDENCE_UPDATING, files)
     }
 
     @Test
-    fun suffixesNeedSameSizeSameFamilyAndUniqueOriginal() {
+    fun suffixesNeedSameSizeAndSufficientDuplicateEvidenceButNotAUniqueOriginal() {
         val mismatched = listOf(file("IMG_1234.jpg"), file("IMG_1234-001.jpg", size = 120_001))
         assertReview(recommend(mismatched), RecommendationReason.SIZE_MISMATCH, mismatched)
         for (files in listOf(
             listOf(file("IMG_1234.jpg"), file("IMG_5678-001.jpg")),
-            listOf(file("IMG_1234-001.jpg"), file("IMG_1234-002.jpg")),
-            listOf(file("IMG_1234.jpg"), file("IMG_1234.JPG")),
             listOf(file("IMG_1234.jpg"), file("IMG_1234 (2023_02_29 12_00_00 UTC).jpg")),
         )) {
             assertEquals(RecommendationAction.REVIEW, recommend(files).action)
             assertTrue(recommend(files).redundantCandidates.isEmpty())
+        }
+        for (files in listOf(
+            listOf(file("IMG_1234-001.jpg"), file("IMG_1234-002.jpg")),
+            listOf(file("IMG_1234.jpg"), file("IMG_1234.JPG")),
+        )) {
+            assertEquals(RecommendationAction.KEEP_ONE, recommend(files).action)
+            assertEquals(1, recommend(files).redundantCandidates.size)
         }
     }
 
@@ -230,7 +252,7 @@ class DuplicateRecommendationEngineTest {
     fun dateOnlyFoldersUnderDifferentCollectionRootsAreNeverTreatedAsInterchangeable() {
         val files = listOf(file("IMG_1234.jpg", "/Pictures/Family/2023-02-19"),
             file("IMG_1234.jpg", "/Pictures/Zoo/2023-02-18"))
-        assertReview(recommend(files), RecommendationReason.UNKNOWN_OR_SPECIAL_LOCATION, files)
+        assertMultipleLocations(recommend(files), RecommendationReason.UNKNOWN_OR_SPECIAL_LOCATION, files)
     }
 
     @Test
@@ -249,7 +271,7 @@ class DuplicateRecommendationEngineTest {
     @Test
     fun equalCaptureDateInTwoDateFormatsIsNotDecidedByFormatBonus() {
         val files = listOf(file("IMG_1234.jpg"), file("IMG_1234.jpg", "/Pictures/2023_02_18"))
-        assertEquals(RecommendationAction.REVIEW, recommend(files).action)
+        assertEquals(RecommendationAction.KEEP_MULTIPLE, recommend(files).action)
         assertNull(recommend(files).preferredFile)
     }
 
@@ -257,7 +279,7 @@ class DuplicateRecommendationEngineTest {
     fun matchingDateDoesNotOverrideExistingFilenameDateProtection() {
         val files = listOf(file("20230219_124425.jpg"), file("20230219_124425.jpg", "/Pictures/2023-02-19"))
         val result = recommend(files)
-        assertReview(result, RecommendationReason.DIRECTORY_EVIDENCE_CONFLICT, files)
+        assertMultipleLocations(result, RecommendationReason.DIRECTORY_EVIDENCE_CONFLICT, files)
     }
 
     @Test
@@ -290,5 +312,38 @@ class DuplicateRecommendationEngineTest {
         assertEquals(files.toSet(), result.mustPreserve.toSet())
         assertTrue(reason in result.reasonCodes, result.reasonCodes.toString())
         assertTrue(result.explanation.isNotBlank())
+        assertTrue(result.files.values.all { it.retentionDecisionConfidence.score == 0 })
+        assertCoherentPlan(result)
+    }
+
+    private fun assertMultipleLocations(
+        result: DuplicateGroupRecommendation,
+        reason: RecommendationReason,
+        files: List<FileRecord>,
+    ) {
+        assertEquals(RecommendationAction.KEEP_MULTIPLE, result.action)
+        assertNull(result.preferredFile)
+        assertTrue(result.redundantCandidates.isEmpty())
+        assertEquals(files.toSet(), result.mustPreserve.toSet())
+        assertTrue(reason in result.reasonCodes)
+        assertTrue(result.explanation.isNotBlank())
+        assertTrue(result.files.values.all { it.retentionDecisionConfidence.score == 90 })
+        assertCoherentPlan(result)
+    }
+
+    private fun assertCoherentPlan(result: DuplicateGroupRecommendation) {
+        val retained = result.mustPreserve.map { it.path }.toSet()
+        if (result.files.isNotEmpty()) assertTrue(retained.isNotEmpty())
+        for (recommendation in result.files.values) {
+            if (recommendation.role == FileRecommendationRole.REDUNDANT_CANDIDATE) {
+                val replacement = assertNotNull(recommendation.retainedReplacementPath)
+                assertTrue(replacement in retained)
+                assertTrue(replacement != recommendation.file.path)
+                assertTrue(recommendation.explanation.contains(result.files.getValue(replacement).file.name))
+                assertTrue(recommendation.retentionDecisionConfidence.score <= result.duplicateConfidence.score)
+            } else {
+                assertNull(recommendation.retainedReplacementPath)
+            }
+        }
     }
 }

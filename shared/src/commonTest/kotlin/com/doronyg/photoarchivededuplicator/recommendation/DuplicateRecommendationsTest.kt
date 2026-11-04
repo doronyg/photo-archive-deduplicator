@@ -47,6 +47,12 @@ class DuplicateRecommendationsTest {
         assertEquals(beforeExif, f.repository.fileExif(files.map { it.path }))
         assertEquals(beforeInventory, f.repository.filesIn(directory))
         assertEquals(scores, service.storedSuspected(groups))
+        val protected = recommendDuplicateGroups(groups.map { it.files },
+            beforeExif.associateBy { it.input.path }, scores.files, dispatcher = f.dispatcher,
+            protectedPaths = setOf(files.last().path))
+        assertTrue(protected.values.all { it.action == RecommendationAction.PROTECTED && it.redundantCandidates.isEmpty() })
+        assertEquals(beforeExif, f.repository.fileExif(files.map { it.path }))
+        assertEquals(scores, service.storedSuspected(groups))
         val pending = recommendDuplicateGroups(groups.map { it.files },
             beforeExif.associateBy { it.input.path }, scores.files, evidenceReady = false, dispatcher = f.dispatcher)
         assertTrue(pending.values.all { it.action == RecommendationAction.REVIEW && it.redundantCandidates.isEmpty() })

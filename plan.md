@@ -375,26 +375,64 @@ deletion/modification/movement is involved.
 Return a group action (`KEEP_ONE`, `KEEP_MULTIPLE`, or `REVIEW`), qualitative
 metadata evidence strength, per-file roles, human-readable explanations, and
 stable reason codes. Derive preferred, redundant-candidate, and must-preserve
-members from those roles. `PROTECTED` is reserved for a future explicit policy;
-there is currently no protection classifier or protected-directory configuration.
-Do not hardcode names such as Zoo.
+members from those roles. Explicitly supplied protected paths force `PROTECTED`
+and preserve every member before ordinary ranking; the optional input defaults
+empty. There is still no protection classifier or protected-directory configuration.
+Do not hardcode names such as Zoo or infer protection from directory names.
 
 Use the retention scorer's shared filename parser and directory evidence rather
 than interpreting explanation text or duplicating detection/scoring rules.
 Recognized copy suffixes normalize a filename family; stem case is preserved and
 only extension case is normalized for this comparison. Paths are not case-folded.
 
-For a unique unsuffixed original and valid numbered/backup timestamp variants in
-the same directory and filename family, prefer the original when sizes and
-successful, current full EXIF capture timestamps agree. Original offsets must be
-identical, with unknown separate from known and no timezone conversion. Known
-conflicting subseconds prevent a recommendation. Suffixes alone are insufficient.
-Repeated or mixed-order suffixes follow the existing parser. Numerical closeness
-does not veto an otherwise clear naming rule.
+Assess group duplicate confidence separately from each file's retention-decision
+confidence. Do not assign a retention-confidence number to the whole group.
+Scores are integer heuristics from 0 to 100, never calibrated probabilities or
+content verification. Bands are Very low (0-24), Low (25-49), Medium (50-74),
+High (75-89), and Very high (90-100).
+
+Choose the highest current individual retention score as the reference; equal
+scores use case-sensitive path order. If no current score is available, use a
+deterministic reference and explain that limitation; missing/stale retention
+assessments still prevent a retention recommendation. Compare every other file
+against the reference. Default adjustable `DuplicateConfidenceConfig` weights:
+
+| Evidence | Points |
+|---|---:|
+| Matching normalized filename | 30 |
+| Matching non-null modification timestamp, exact stored milliseconds | 25 |
+| Matching valid original capture timestamp | 30 |
+| Matching camera make / model | 5 / 5 |
+| Matching complete positive width and height | 5 |
+
+Equal size is a prerequisite and earns zero points. Missing, invalid, failed, or
+stale EXIF is unavailable, earns no points, and is not contradictory. Do not
+renormalize the total when fields are absent. Camera fields compare trimmed
+case-sensitive values. Filename and modification-time differences lose their
+supporting points but are not content contradictions. Recognized suffixes use the
+existing strict parser; arbitrary filename similarity earns nothing.
+
+Original offsets and subseconds retain camera-local semantics, without timezone
+conversion or correlated extra points. Equivalent subsecond fractions compare
+equally. Reliable known EXIF contradictions, including capture time, offset,
+subseconds, make/model, dimensions, and orientation, cap duplicate confidence at
+24 and block redundant-candidate recommendations. Missing offset evidence is not
+a contradiction, but the existing mixed-known/unknown offset safety gate remains.
+Use the weakest reference comparison, not an average, for group confidence.
+Check known contradictions throughout the group too, so a field missing from the
+reference cannot hide conflicting values in two other members.
+
+At least High duplicate confidence (75 by default) and current retention
+assessments are required before identifying redundant candidates. Within each
+directory, keep the highest-scoring representative; equal scores use stable path
+order and explicitly acknowledge that any representative is acceptable. A unique
+unsuffixed original is no longer required. Never claim that a small numerical
+score gap establishes a decisively better original.
 
 Across locations, prefer a unique capture-date-matching chronological directory
 only when all remaining representatives have date-only directories under the same
-organization root and belong to the same normalized filename family. Other
+organization root. Fall back to a reliable recognized filename date when capture
+date evidence is unavailable and duplicate confidence otherwise qualifies. Other
 directories must contradict that capture date. Date-prefixed event labels,
 collections below a date, configured backup/temporary locations, and different
 organization roots do not qualify. Respect conflicting filename/folder-date
@@ -402,16 +440,66 @@ evidence from the existing retention assessment; a higher score cannot override
 it. Never choose between two locations that both match the capture date merely
 because one date format scores higher.
 
-Local copy rules can retain one representative per name/location and return
-`KEEP_MULTIPLE`, preserving unknown collections rather than discarding their only
-copy. Otherwise return `REVIEW` for insufficient/conflicting evidence, absent or
-stale assessments, or unresolved alternatives. All non-candidate files remain
-preserved. These are advisory metadata recommendations, never proof of identical
-contents or permission to delete.
+Keep one representative in each non-standard/special ordinary collection.
+As an explicit user-approved exception, locations classified by the existing
+backup/import/sync rules are expendable when a strictly higher-scoring retained
+replacement exists and passes the duplicate-evidence rules. This applies to all
+descendants, not just flat roots: for example Google Photos albums and
+PhotoSync/<device>/Camera. Reuse `RetentionConfig.backupDirectoryNames` and
+`backupDirectoryWords` through the scorer's directory evidence, without adding
+a second list or changing individual scores. Temporary locations are not promoted
+to replacement keepers by this rule.
+
+Choose a stronger surviving replacement in stable score/path order, excluding
+known date-folder contradictions; do not infer a better location from a higher
+score in a contradicted dated folder. Flatten local-copy dependencies to the final
+survivor, validate its direct duplicate evidence, and waive collection preservation
+only for backup directories actually replaced. Multiple ordinary collections
+remain represented. Backup-only groups retain their best available copy; equal
+copies in separate backup locations remain preserved when neither is stronger.
+Explain unreduced backups as necessary fallback copies, not special collections.
+Explicit protection and insufficient/conflicting evidence still block candidates.
+No archive files are deleted or changed.
+
+Ambiguous chronological locations likewise
+return `KEEP_MULTIPLE`, explaining why each location's representative must remain.
+Insufficient or contradictory duplicate evidence returns `REVIEW` with no
+redundant candidates, even when the conditional retention decision is clear.
+
+Per-file retention-decision confidence measures support for that file's assigned
+role, not whether it is the best original. Preservation uses explicit rule tiers:
+95 for a uniquely supported date location or a meaningful same-directory score
+advantage beyond the existing ambiguity margin; 90 for a designated same-directory
+survivor or a collection representative, including unresolved dated locations;
+100 for obeying explicit protection. Equal copies can have a high-confidence
+representative assignment without claiming the chosen copy is better.
+
+Every redundant candidate names `retainedReplacementPath`: an actual surviving
+preferred/preserved file in this group, never another candidate. Compare the
+candidate directly against that replacement using cached metadata, not merely
+against the group's original reference. Require High duplicate evidence for that
+pair too; if it is weak/conflicting, return `REVIEW` for the whole group. Its
+per-file decision confidence is the minimum of retention justification, direct
+replacement duplicate confidence, and group duplicate confidence. Include the
+direct comparison evidence, explicit dependency, and unverified-content warning
+in the explanation and codes. Unresolved review files have confidence 0 and no
+replacement; do not display a high hypothetical removal confidence.
+
+Validate the complete plan before publication: every original member must be
+accounted for with current metadata, at least one must remain, required
+collections must retain representatives, and explicitly protected files cannot
+be candidates. Reject missing/self/out-of-group/candidate-to-candidate replacement
+dependencies, low-confidence candidates, and action/role inconsistencies. Reject
+an unsafe plan as `REVIEW` with all original members preserved, per-file confidence
+0, cleared dependencies, and `RETENTION_PLAN_INVALID` explanations. Reassessment
+rebuilds every dependency when the designated keeper changes. This is advisory
+plan validation, not a deletion mechanism.
 
 Both duplicate tabs show a group summary and per-file explanations with expandable
 normalized names and reason codes. Both tabs' Copy results include the displayed
-recommendation snapshot without changing file order. Calculations run off the UI
+recommendation snapshot, group duplicate confidence, per-file decision confidence
+and replacement dependencies, reference/comparison evidence, explanations and
+reason codes without changing file order. Calculations run off the UI
 dispatcher; source/evidence changes invalidate previous presentation snapshots.
 Active scans/EXIF queues or loading evidence produce review-only results. No
 recommendations are persisted and no database migration is needed.

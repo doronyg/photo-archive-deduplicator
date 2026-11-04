@@ -22,14 +22,16 @@ class RecommendationStatisticsTest {
         return FileRecommendation(
             FileRecord(directory / name, directory, name, null, size, 1, 2),
             role, name, emptySet(), "",
+            retentionDecisionConfidence = ConfidenceAssessment(0, emptySet(), "Fixture"),
         )
     }
 
     private fun group(
         action: RecommendationAction,
         vararg files: FileRecommendation,
-    ) = DuplicateGroupRecommendation(action, EvidenceStrength.STRONG, emptySet(), "",
-        files.associateBy { it.file.path })
+    ) = DuplicateRecommendationEngine().recommend(emptyList(), emptyMap(), emptyMap()).copy(
+        action = action, evidenceStrength = EvidenceStrength.STRONG, reasonCodes = emptySet(),
+        explanation = "", files = files.associateBy { it.file.path })
 
     @Test
     fun groupActionsIncludeEveryMemberWhileRolesCountMembersIndependently() = runTest {
