@@ -310,6 +310,18 @@ Existing preferences without these keys use
 the default filename sort; unknown future criteria warn and are ignored while
 known criteria retain their priority.
 
+Suspected-result display filters are independent of the regular duplicate search:
+`suspectedDuplicateRoot`, `suspectedDuplicateFilenamePattern`, and
+`suspectedDuplicateRecommendation`. Missing keys default to all roots, any filename,
+and all recommendation actions; the latter is stored as `ALL`, or an action's enum
+name. Unknown actions warn and fall back to all recommendations. These settings use
+the existing key-value table without a schema migration.
+Filtering happens against loaded groups only, retaining every member of a matching
+group; folder and filename must match the same member. Copy results exports that
+displayed snapshot and its metadata/recommendations, without querying the database
+or reading source files. Analysis/recomputation and Statistics remain independent
+of these display filters.
+
 An app-lifetime writer conflates pending edits and saves complete snapshots in a single
 database-lane transaction. UI callbacks only update in-memory state and enqueue work.
 Normal shutdown drains accepted edits before closing the driver; a force-kill can lose

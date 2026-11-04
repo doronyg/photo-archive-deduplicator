@@ -8,6 +8,8 @@ import com.doronyg.photoarchivededuplicator.retention.RetentionPresentation
 import com.doronyg.photoarchivededuplicator.retention.formatScoreValue
 import com.doronyg.photoarchivededuplicator.exif.ExifRecord
 import com.doronyg.photoarchivededuplicator.recommendation.DuplicateGroupRecommendation
+import com.doronyg.photoarchivededuplicator.recommendation.FileRecommendation
+import com.doronyg.photoarchivededuplicator.scan.FileRecord
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
@@ -35,12 +37,7 @@ internal suspend fun formatDuplicateResults(
         appendLine("Root: ${quoteResultText(root)}")
         appendLine("Type: ${filter.fileType.name}")
         appendLine("Wildcard (case-insensitive): ${quoteResultText(filter.filenamePattern.trim().ifEmpty { "*" })}")
-        val priority = rules.filter { it.enabled }.joinToString(" > ") { "${it.criterion.name} ${it.direction.name}" }
-        appendLine("Sort priority: ${priority.ifEmpty { "none (search order)" }}")
-        if (rules.any { it.enabled && it.criterion == DuplicateSortCriterion.RECOMMENDATION }) {
-            appendLine("Recommendation ascending: KEEP_ONE, KEEP_MULTIPLE, REVIEW, PROTECTED; unavailable results stay last.")
-        }
-        appendLine("Creation sorting uses the earliest known date per group; unknown dates sort last.")
+        appendDuplicateSortContext(rules)
         appendLine("Candidate groups: ${groups.size}")
         groups.forEachIndexed { index, group ->
             context.ensureActive()
@@ -49,42 +46,62 @@ internal suspend fun formatDuplicateResults(
             appendLine("Size per file: ${group.sizeBytes} bytes (${formatBytes(group.sizeBytes)})")
             appendLine("Copies: ${group.files.size}")
             val recommendation = group.files.firstOrNull()?.let { recommendations[it.path] }
-            if (recommendation != null) {
-                appendLine("Group recommendation: ${recommendation.action.name} (${recommendation.evidenceStrength.name} metadata evidence)")
-                appendLine("Recommendation explanation: ${quoteResultText(recommendation.explanation)}")
-                appendLine("Recommendation reasons: ${recommendation.reasonCodes.joinToString { it.name }}")
-            }
+            appendGroupRecommendation(recommendation)
             group.files.forEach { file ->
-                context.ensureActive()
-                appendLine("  Path: ${quoteResultText(file.path.toString())}")
-                appendLine("  Created: ${file.createdAt?.let { "${formatEpochMillis(it)} UTC" } ?: "unknown"}")
-                appendLine("  Modified: ${file.modifiedAt?.let { "${formatEpochMillis(it)} UTC" } ?: "unknown"}")
-                recommendation?.files?.get(file.path)?.let { advice ->
-                    appendLine("  File recommendation: ${advice.role.name}")
-                    appendLine("  Recommendation explanation: ${quoteResultText(advice.explanation)}")
-                    appendLine("  Normalized filename: ${quoteResultText(advice.normalizedFilename)}")
-                    appendLine("  Recommendation reasons: ${advice.reasonCodes.joinToString { it.name }}")
-                }
-                val metadata = presentExif(exif[file.path])
-                appendLine("  ${quoteResultText(metadata.summary)}")
-                metadata.details.forEach { (label, value) ->
-                    appendLine("    $label: ${quoteResultText(value)}")
-                }
-                val assessment = retention[file.path]
-                val score = assessment?.score
-                if (score == null) appendLine("  Retention: ${assessment?.label ?: "Not scored"}")
-                else {
-                    appendLine("  Retention: ${assessment.scoreText} - ${assessment.label}")
-                    appendLine("  Retention explanation: ${quoteResultText(assessment.mainReason)}")
-                    appendLine("  Score algorithm: ${score.identity.algorithmId} v${score.identity.algorithmVersion}")
-                    appendLine("  Assessed: ${formatEpochMillis(score.createdAt)} UTC")
-                    score.factors.forEach { factor ->
-                        context.ensureActive()
-                        val value = formatScoreValue(factor.contribution)
-                        appendLine("    ${if (factor.contribution > 0) "+" else ""}$value: ${quoteResultText(factor.explanation)}")
-                    }
-                }
+                appendDuplicateFileResult(file, retention[file.path], exif[file.path], recommendation?.files?.get(file.path))
             }
+        }
+    }
+}
+
+internal fun StringBuilder.appendDuplicateSortContext(rules: List<DuplicateSortRule>) {
+    val priority = rules.filter { it.enabled }.joinToString(" > ") { "${it.criterion.name} ${it.direction.name}" }
+    appendLine("Sort priority: ${priority.ifEmpty { "none (search order)" }}")
+    if (rules.any { it.enabled && it.criterion == DuplicateSortCriterion.RECOMMENDATION }) {
+        appendLine("Recommendation ascending: KEEP_ONE, KEEP_MULTIPLE, REVIEW, PROTECTED; unavailable results stay last.")
+    }
+    appendLine("Creation sorting uses the earliest known date per group; unknown dates sort last.")
+}
+
+internal fun StringBuilder.appendGroupRecommendation(recommendation: DuplicateGroupRecommendation?) {
+    if (recommendation != null) {
+        appendLine("Group recommendation: ${recommendation.action.name} (${recommendation.evidenceStrength.name} metadata evidence)")
+        appendLine("Recommendation explanation: ${quoteResultText(recommendation.explanation)}")
+        appendLine("Recommendation reasons: ${recommendation.reasonCodes.joinToString { it.name }}")
+    }
+}
+
+internal suspend fun StringBuilder.appendDuplicateFileResult(
+    file: FileRecord,
+    assessment: RetentionPresentation?,
+    exif: ExifRecord?,
+    advice: FileRecommendation?,
+) {
+    val context = currentCoroutineContext()
+    context.ensureActive()
+    appendLine("  Path: ${quoteResultText(file.path.toString())}")
+    appendLine("  Created: ${file.createdAt?.let { "${formatEpochMillis(it)} UTC" } ?: "unknown"}")
+    appendLine("  Modified: ${file.modifiedAt?.let { "${formatEpochMillis(it)} UTC" } ?: "unknown"}")
+    if (advice != null) {
+        appendLine("  File recommendation: ${advice.role.name}")
+        appendLine("  Recommendation explanation: ${quoteResultText(advice.explanation)}")
+        appendLine("  Normalized filename: ${quoteResultText(advice.normalizedFilename)}")
+        appendLine("  Recommendation reasons: ${advice.reasonCodes.joinToString { it.name }}")
+    }
+    val metadata = presentExif(exif)
+    appendLine("  ${quoteResultText(metadata.summary)}")
+    metadata.details.forEach { (label, value) -> appendLine("    $label: ${quoteResultText(value)}") }
+    val score = assessment?.score
+    if (score == null) appendLine("  Retention: ${assessment?.label ?: "Not scored"}")
+    else {
+        appendLine("  Retention: ${assessment.scoreText} - ${assessment.label}")
+        appendLine("  Retention explanation: ${quoteResultText(assessment.mainReason)}")
+        appendLine("  Score algorithm: ${score.identity.algorithmId} v${score.identity.algorithmVersion}")
+        appendLine("  Assessed: ${formatEpochMillis(score.createdAt)} UTC")
+        score.factors.forEach { factor ->
+            context.ensureActive()
+            val value = formatScoreValue(factor.contribution)
+            appendLine("    ${if (factor.contribution > 0) "+" else ""}$value: ${quoteResultText(factor.explanation)}")
         }
     }
 }

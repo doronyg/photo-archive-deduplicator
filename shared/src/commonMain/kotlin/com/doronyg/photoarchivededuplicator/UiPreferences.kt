@@ -2,6 +2,7 @@ package com.doronyg.photoarchivededuplicator
 
 import app.cash.sqldelight.async.coroutines.awaitAsList
 import com.doronyg.photoarchivededuplicator.db.FilesDatabase
+import com.doronyg.photoarchivededuplicator.recommendation.RecommendationAction
 import com.doronyg.photoarchivededuplicator.scan.DuplicateFileType
 import com.doronyg.photoarchivededuplicator.scan.DuplicateSortCriterion
 import com.doronyg.photoarchivededuplicator.scan.DuplicateSortRule
@@ -33,6 +34,9 @@ data class UiChoices(
     val duplicateFilenamePattern: String = "",
     val duplicateSort: List<DuplicateSortRule> = defaultDuplicateSortRules(),
     val suspectedDuplicateSort: List<DuplicateSortRule> = defaultDuplicateSortRules(),
+    val suspectedDuplicateRoot: String = "",
+    val suspectedDuplicateFilenamePattern: String = "",
+    val suspectedDuplicateRecommendation: RecommendationAction? = null,
     val logFilter: String = "",
     val logMinimum: LogLevel = LogLevel.D,
     val logFollow: Boolean = true,
@@ -123,6 +127,9 @@ internal fun encodeUiChoices(choices: UiChoices): Map<String, String> = buildMap
     put("duplicateFilenamePattern", choices.duplicateFilenamePattern)
     putSort("duplicateSort", choices.duplicateSort)
     putSort("suspectedDuplicateSort", choices.suspectedDuplicateSort)
+    put("suspectedDuplicateRoot", choices.suspectedDuplicateRoot)
+    put("suspectedDuplicateFilenamePattern", choices.suspectedDuplicateFilenamePattern)
+    put("suspectedDuplicateRecommendation", choices.suspectedDuplicateRecommendation?.name ?: "ALL")
     put("logFilter", choices.logFilter)
     put("logMinimum", choices.logMinimum.name)
     put("logFollow", choices.logFollow.toString())
@@ -148,6 +155,12 @@ internal fun decodeUiChoices(
     val follow = entries["logFollow"]?.let {
         requireNotNull(it.toBooleanStrictOrNull()) { "Invalid UI preference logFollow '$it'" }
     } ?: true
+    val suspectedRecommendation = entries["suspectedDuplicateRecommendation"]?.let { saved ->
+        if (saved == "ALL") null
+        else RecommendationAction.entries.firstOrNull { it.name == saved }.also {
+            if (it == null) warn("Unknown UI preference suspectedDuplicateRecommendation '$saved'; using ALL")
+        }
+    }
     fun decodeSort(prefix: String): List<DuplicateSortRule> {
         val defaults = defaultDuplicateSortRules()
         val order = mutableListOf<DuplicateSortCriterion>()
@@ -184,6 +197,9 @@ internal fun decodeUiChoices(
         duplicateFilenamePattern = entries["duplicateFilenamePattern"] ?: "",
         duplicateSort = decodeSort("duplicateSort"),
         suspectedDuplicateSort = decodeSort("suspectedDuplicateSort"),
+        suspectedDuplicateRoot = entries["suspectedDuplicateRoot"] ?: "",
+        suspectedDuplicateFilenamePattern = entries["suspectedDuplicateFilenamePattern"] ?: "",
+        suspectedDuplicateRecommendation = suspectedRecommendation,
         logFilter = entries["logFilter"] ?: "",
         logMinimum = enumValue("logMinimum", LogLevel.entries, LogLevel.D),
         logFollow = follow,

@@ -43,14 +43,17 @@ internal fun rememberDuplicateRecommendations(
     return snapshot?.takeIf { it.token === token }?.byFile
 }
 
-internal fun groupRecommendationText(recommendation: DuplicateGroupRecommendation?): String {
-    if (recommendation == null) return "Recommendation: Loading stored evidence..."
-    val action = when (recommendation.action) {
+internal fun recommendationActionLabel(action: RecommendationAction): String =
+    when (action) {
         RecommendationAction.KEEP_ONE -> "Keep one"
         RecommendationAction.KEEP_MULTIPLE -> "Keep multiple"
         RecommendationAction.REVIEW -> "Review - no automatic action"
         RecommendationAction.PROTECTED -> "Protected"
     }
+
+internal fun groupRecommendationText(recommendation: DuplicateGroupRecommendation?): String {
+    if (recommendation == null) return "Recommendation: Loading stored evidence..."
+    val action = recommendationActionLabel(recommendation.action)
     val strength = when (recommendation.evidenceStrength) {
         EvidenceStrength.INSUFFICIENT -> "Insufficient evidence"
         EvidenceStrength.SUPPORTED -> "Supported by metadata"

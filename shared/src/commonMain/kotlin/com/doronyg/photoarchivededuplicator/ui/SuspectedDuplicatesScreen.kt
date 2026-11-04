@@ -6,15 +6,20 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.selection.DisableSelection
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -28,6 +33,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import com.doronyg.photoarchivededuplicator.PathActions
 import com.doronyg.photoarchivededuplicator.UiPreferences
@@ -38,10 +46,14 @@ import com.doronyg.photoarchivededuplicator.exif.ExifRecord
 import com.doronyg.photoarchivededuplicator.scan.DirectoryRepository
 import com.doronyg.photoarchivededuplicator.scan.SUSPECTED_IMAGE_MIN_SIZE_BYTES
 import com.doronyg.photoarchivededuplicator.scan.SuspectedDuplicateGroup
+import com.doronyg.photoarchivededuplicator.scan.SuspectedDuplicateFilter
+import com.doronyg.photoarchivededuplicator.scan.filterSuspectedDuplicateCandidates
+import com.doronyg.photoarchivededuplicator.scan.inventoryPath
 import com.doronyg.photoarchivededuplicator.scan.DuplicateSortRule
 import com.doronyg.photoarchivededuplicator.scan.DuplicateSortCriterion
 import com.doronyg.photoarchivededuplicator.scan.sortSuspectedDuplicateCandidates
 import com.doronyg.photoarchivededuplicator.recommendation.DuplicateGroupRecommendation
+import com.doronyg.photoarchivededuplicator.recommendation.RecommendationAction
 import com.doronyg.photoarchivededuplicator.retention.RetentionScoreService
 import com.doronyg.photoarchivededuplicator.retention.RetentionPresentation
 import com.doronyg.photoarchivededuplicator.retention.sortSuspectedFilesByRetention
@@ -50,10 +62,12 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import okio.Path
+import okio.Path.Companion.toPath
 
 private data class SortedSuspectedCandidates(
     val source: List<SuspectedDuplicateGroup>,
     val rules: List<DuplicateSortRule>,
+    val filter: SuspectedDuplicateFilter,
     val recommendations: Map<Path, DuplicateGroupRecommendation>?,
     val groups: List<SuspectedDuplicateGroup>,
 )
@@ -89,25 +103,53 @@ internal fun SuspectedDuplicatesScreen(
     var loading by remember { mutableStateOf(true) }
     var cancelling by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    var filtersExpanded by remember { mutableStateOf(false) }
+    var copying by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
+    val clipboard = LocalClipboardManager.current
+    val filterResult = remember(choices.suspectedDuplicateRoot, choices.suspectedDuplicateFilenamePattern,
+        choices.suspectedDuplicateRecommendation) {
+        try {
+            Result.success(SuspectedDuplicateFilter(
+                choices.suspectedDuplicateRoot.trim().takeIf { it.isNotEmpty() }?.toPath()?.inventoryPath(),
+                choices.suspectedDuplicateFilenamePattern,
+                choices.suspectedDuplicateRecommendation,
+            ))
+        } catch (e: IllegalArgumentException) {
+            Result.failure<SuspectedDuplicateFilter>(e)
+        }
+    }
+    val filter = filterResult.getOrNull()
     val recommendationGroups = remember(groups) { groups.map { it.files } }
     val recommendations = rememberDuplicateRecommendations(recommendationGroups, exif, scores,
         evidenceReady = !loading && !scanning && !queueState.isRunning && loadedRevision == queueState.revision)
     val sortRecommendations = recommendations.takeIf {
-        choices.suspectedDuplicateSort.any { rule -> rule.enabled && rule.criterion == DuplicateSortCriterion.RECOMMENDATION }
+        filter?.recommendation != null ||
+            choices.suspectedDuplicateSort.any { rule -> rule.enabled && rule.criterion == DuplicateSortCriterion.RECOMMENDATION }
     }
-    val sorted by produceState<SortedSuspectedCandidates?>(null, groups, choices.suspectedDuplicateSort, sortRecommendations) {
+    val sorted by produceState<SortedSuspectedCandidates?>(null, groups, filter, choices.suspectedDuplicateSort, sortRecommendations) {
         value = null
         val source = groups
         val rules = choices.suspectedDuplicateSort
         val advice = sortRecommendations
-        value = SortedSuspectedCandidates(source, rules, advice,
-            sortSuspectedDuplicateCandidates(source, rules, recommendations = advice.orEmpty()))
+        val selected = filter
+        if (selected != null && (selected.recommendation == null || advice != null)) {
+            val matches = filterSuspectedDuplicateCandidates(source, selected, advice.orEmpty())
+            value = SortedSuspectedCandidates(source, rules, selected, advice,
+                sortSuspectedDuplicateCandidates(matches, rules, recommendations = advice.orEmpty()))
+        }
     }
     val displayedSnapshot = sorted?.takeIf {
-        it.source === groups && it.rules == choices.suspectedDuplicateSort && it.recommendations === sortRecommendations
+        it.source === groups && it.filter == filter && it.rules == choices.suspectedDuplicateSort &&
+            it.recommendations === sortRecommendations
     }
+    var copyStatus by remember(groups, filter, choices.suspectedDuplicateSort, scores, exif, recommendations) {
+        mutableStateOf<String?>(null)
+    }
+    val filtersActive = choices.suspectedDuplicateRoot.isNotBlank() ||
+        choices.suspectedDuplicateFilenamePattern.trim().let { it.isNotEmpty() && it != "*" } ||
+        choices.suspectedDuplicateRecommendation != null
 
     LaunchedEffect(repository, retentionScores, queue, queueState.revision, refresh, scanning) {
         val request = ++generation
@@ -160,6 +202,9 @@ internal fun SuspectedDuplicatesScreen(
             Modifier.horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            OutlinedButton(onClick = { filtersExpanded = !filtersExpanded }) {
+                Text(if (filtersExpanded) "Hide filters" else if (filtersActive) "Filters (active)" else "Filters")
+            }
             OutlinedButton(enabled = !scanning && !queueState.isRunning, onClick = {
                 error = null
                 if (!queue.startSuspected()) error = "Analysis could not start: a scan or EXIF queue is already running."
@@ -188,6 +233,44 @@ internal fun SuspectedDuplicatesScreen(
                 }) { Text(if (cancelling) "Cancelling..." else "Cancel EXIF queue") }
             }
         }
+        if (filtersExpanded) {
+            Column(
+                Modifier.fillMaxWidth().heightIn(max = 260.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                OutlinedTextField(
+                    value = choices.suspectedDuplicateRoot,
+                    onValueChange = { value -> preferences.update { it.copy(suspectedDuplicateRoot = value) } },
+                    label = { Text("Absolute folder path (optional; all roots)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = choices.suspectedDuplicateFilenamePattern,
+                    onValueChange = { value -> preferences.update { it.copy(suspectedDuplicateFilenamePattern = value) } },
+                    label = { Text("Filename wildcard (optional)") },
+                    supportingText = { Text("Case-insensitive, e.g. IMG*.jpg. * = any text, ? = one character; dot is literal.") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(selected = choices.suspectedDuplicateRecommendation == null,
+                        onClick = { preferences.update { it.copy(suspectedDuplicateRecommendation = null) } },
+                        label = { Text("All recommendations") })
+                    RecommendationAction.entries.forEach { action ->
+                        FilterChip(selected = choices.suspectedDuplicateRecommendation == action,
+                            onClick = { preferences.update { it.copy(suspectedDuplicateRecommendation = action) } },
+                            label = { Text(recommendationActionLabel(action)) })
+                    }
+                }
+                Text("Filters apply immediately to loaded groups. Folder and filename must match one member; all copies remain visible, including copies outside that folder. Analysis and score recomputation still cover all roots.",
+                    style = MaterialTheme.typography.bodySmall)
+                TextButton(onClick = {
+                    preferences.update { it.copy(suspectedDuplicateRoot = "", suspectedDuplicateFilenamePattern = "",
+                        suspectedDuplicateRecommendation = null) }
+                }) { Text("Clear filters") }
+            }
+        }
         presentExifQueue(queueState)?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
         DuplicateSortControls(choices.suspectedDuplicateSort, enabled = !loading, onChange = { transform ->
             preferences.update { it.copy(suspectedDuplicateSort = transform(it.suspectedDuplicateSort)) }
@@ -209,6 +292,7 @@ internal fun SuspectedDuplicatesScreen(
         }
 
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        filterResult.exceptionOrNull()?.let { Text("Invalid folder filter: ${it.message}", color = MaterialTheme.colorScheme.error) }
         SelectionContainer(Modifier.weight(1f)) {
             Row(Modifier.fillMaxSize()) {
                 LazyColumn(
@@ -217,14 +301,49 @@ internal fun SuspectedDuplicatesScreen(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     item {
-                        Text(when {
-                            loading -> "Loading stored matches and scores..."
-                            displayedSnapshot == null -> "Sorting stored matches..."
-                            else -> "${groups.size} suspected duplicate groups."
-                        })
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(when {
+                                loading -> "Loading stored matches and scores..."
+                                filter == null -> "Correct the folder filter to display results."
+                                displayedSnapshot == null -> "Filtering/sorting stored matches..."
+                                else -> "${displayedSnapshot.groups.size} of ${groups.size} suspected duplicate groups."
+                            }, modifier = Modifier.weight(1f))
+                            DisableSelection {
+                                TextButton(enabled = !copying && !loading && displayedSnapshot != null, onClick = {
+                                    val displayed = displayedSnapshot ?: return@TextButton
+                                    val reportScores = scores
+                                    val reportExif = exif
+                                    val reportRecommendations = recommendations.orEmpty()
+                                    copying = true
+                                    copyStatus = null
+                                    error = null
+                                    scope.launch {
+                                        try {
+                                            val text = formatSuspectedDuplicateResults(displayed.filter, displayed.rules,
+                                                displayed.groups, retention = reportScores, exif = reportExif,
+                                                recommendations = reportRecommendations)
+                                            clipboard.setText(AnnotatedString(text))
+                                            copyStatus = "Copied ${displayed.groups.size} groups, including all member paths. Review before sharing."
+                                        } catch (e: CancellationException) {
+                                            throw e
+                                        } catch (e: Exception) {
+                                            error = "Could not copy suspected results: ${e.message}"
+                                        } finally {
+                                            copying = false
+                                        }
+                                    }
+                                }) { Text(if (copying) "Copying..." else "Copy results") }
+                            }
+                        }
+                        if (filtersActive) Text("Display filters are active; matching groups retain all their files.",
+                            style = MaterialTheme.typography.bodySmall)
+                        copyStatus?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                     }
                     if (!loading && groups.isEmpty()) {
                         item { Text("No matching stored EXIF timestamps. Analyze inspects eligible images and reuses cached attempts; missing or failed EXIF is not a match.") }
+                    }
+                    if (!loading && groups.isNotEmpty() && displayedSnapshot?.groups?.isEmpty() == true) {
+                        item { Text("No suspected groups match these filters.") }
                     }
                     displayedSnapshot?.groups.orEmpty().forEach { group ->
                         item {

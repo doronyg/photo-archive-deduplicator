@@ -410,7 +410,7 @@ preserved. These are advisory metadata recommendations, never proof of identical
 contents or permission to delete.
 
 Both duplicate tabs show a group summary and per-file explanations with expandable
-normalized names and reason codes. Regular Copy results includes the displayed
+normalized names and reason codes. Both tabs' Copy results include the displayed
 recommendation snapshot without changing file order. Calculations run off the UI
 dispatcher; source/evidence changes invalidate previous presentation snapshots.
 Active scans/EXIF queues or loading evidence produce review-only results. No
@@ -541,6 +541,24 @@ cause an automatic partial-queue reassessment; explicit recomputation can consum
 the persisted data later. A changed capture timestamp, offset, status, reader, or
 input fingerprint invalidates the old group's recommendation even when its
 calendar-date retention contribution would remain unchanged.
+
+A collapsible Filters panel applies folder, filename wildcard, and recommendation
+action filters to loaded results immediately. Remember these independently from
+the regular duplicate filters. Folder matching is case-sensitive, literal, and
+component-aware; filename wildcards share the regular screen's case-insensitive
+`*`/`?` semantics. Folder and filename must match the same member, but retain the
+entire group, including copies outside the folder or with different filenames.
+Filter changes neither query inventory nor extract EXIF or recalculate scores.
+Analysis and Recompute scores continue to cover all stored roots.
+
+Copy results exports the current filtered and sorted snapshot, including off-screen
+members in displayed order, full paths, exact sizes, filesystem dates, cached EXIF,
+retention factors, and group/per-file recommendation explanations and reason codes.
+Include filter/sort context and capture timestamps with their original offsets;
+state explicitly that these are unverified, advisory matches and no files changed.
+Quote paths and other text to escape control characters safely. Invalid folder
+filters show an error instead of exposing or copying stale results.
+
 Schema v6 adds a size-leading index through additive migration `5.sqm`, preserving
 the existing inventory, EXIF cache, scores, and settings.
 

@@ -1,6 +1,7 @@
 package com.doronyg.photoarchivededuplicator
 
 import app.cash.sqldelight.db.SqlDriver
+import com.doronyg.photoarchivededuplicator.recommendation.RecommendationAction
 import com.doronyg.photoarchivededuplicator.scan.ConcurrencyTestDriver
 import com.doronyg.photoarchivededuplicator.scan.DuplicateFileType
 import com.doronyg.photoarchivededuplicator.scan.SortDirection
@@ -48,6 +49,9 @@ internal val allUiChoices = UiChoices(
     suspectedDuplicateSort = defaultDuplicateSortRules().mapIndexed { index, rule ->
         rule.copy(enabled = index % 2 != 0, direction = SortDirection.DESCENDING)
     },
+    suspectedDuplicateRoot = "/疑い\nroot/\\|;☃",
+    suspectedDuplicateFilenamePattern = "写真\n*?[雪]\\|;.jpg",
+    suspectedDuplicateRecommendation = RecommendationAction.KEEP_ONE,
     logFilter = "database\nfailure",
     logMinimum = LogLevel.W,
     logFollow = false,
