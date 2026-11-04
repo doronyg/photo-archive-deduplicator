@@ -3,6 +3,7 @@ package com.doronyg.photoarchivededuplicator.ui
 import com.doronyg.photoarchivededuplicator.scan.DuplicateCandidateFilter
 import com.doronyg.photoarchivededuplicator.scan.DuplicateCandidateGroup
 import com.doronyg.photoarchivededuplicator.scan.DuplicateSortRule
+import com.doronyg.photoarchivededuplicator.scan.DuplicateSortCriterion
 import com.doronyg.photoarchivededuplicator.retention.RetentionPresentation
 import com.doronyg.photoarchivededuplicator.retention.formatScoreValue
 import com.doronyg.photoarchivededuplicator.exif.ExifRecord
@@ -36,6 +37,9 @@ internal suspend fun formatDuplicateResults(
         appendLine("Wildcard (case-insensitive): ${quoteResultText(filter.filenamePattern.trim().ifEmpty { "*" })}")
         val priority = rules.filter { it.enabled }.joinToString(" > ") { "${it.criterion.name} ${it.direction.name}" }
         appendLine("Sort priority: ${priority.ifEmpty { "none (search order)" }}")
+        if (rules.any { it.enabled && it.criterion == DuplicateSortCriterion.RECOMMENDATION }) {
+            appendLine("Recommendation ascending: KEEP_ONE, KEEP_MULTIPLE, REVIEW, PROTECTED; unavailable results stay last.")
+        }
         appendLine("Creation sorting uses the earliest known date per group; unknown dates sort last.")
         appendLine("Candidate groups: ${groups.size}")
         groups.forEachIndexed { index, group ->

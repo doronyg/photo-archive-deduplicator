@@ -115,6 +115,17 @@ class DuplicateResultsTextTest {
     }
 
     @Test
+    fun recommendationSortContextIsIncludedAndExportPreservesDisplayedOrdering() = runTest {
+        val report = formatDuplicateResults("/archive", DuplicateCandidateFilter(),
+            listOf(DuplicateSortRule(DuplicateSortCriterion.RECOMMENDATION, direction = SortDirection.DESCENDING)),
+            listOf(group("z.jpg"), group("a.jpg")), StandardTestDispatcher(testScheduler))
+        assertTrue("Sort priority: RECOMMENDATION DESCENDING" in report)
+        assertTrue("KEEP_ONE, KEEP_MULTIPLE, REVIEW, PROTECTED" in report)
+        assertTrue("unavailable results stay last" in report)
+        assertTrue(report.indexOf("Group 1: \"z.jpg\"") < report.indexOf("Group 2: \"a.jpg\""))
+    }
+
+    @Test
     fun quotesUnicodeAndEscapesLineBreaksAndQuotesInsteadOfCorruptingReportLines() = runTest(timeout = 10.seconds) {
         val report = formatDuplicateResults("/写真\n\"root\"", DuplicateCandidateFilter(),
             defaultDuplicateSortRules(), listOf(group("雪\n\"copy\".jpg")), StandardTestDispatcher(testScheduler))

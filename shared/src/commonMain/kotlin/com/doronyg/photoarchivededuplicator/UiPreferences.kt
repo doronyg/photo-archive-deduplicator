@@ -21,7 +21,7 @@ import kotlinx.coroutines.withContext
 
 enum class UiTab(val title: String) {
     SCAN("Scan"), BROWSE("Browse"), DUPLICATES("Duplicates"), SUSPECTED_DUPLICATES("Suspected duplicates"),
-    EXCLUSIONS("Exclusions"), LOGS("Logs"),
+    STATISTICS("Statistics"), EXCLUSIONS("Exclusions"), LOGS("Logs"),
 }
 
 data class UiChoices(
@@ -32,6 +32,7 @@ data class UiChoices(
     val duplicateFileType: DuplicateFileType = DuplicateFileType.ALL,
     val duplicateFilenamePattern: String = "",
     val duplicateSort: List<DuplicateSortRule> = defaultDuplicateSortRules(),
+    val suspectedDuplicateSort: List<DuplicateSortRule> = defaultDuplicateSortRules(),
     val logFilter: String = "",
     val logMinimum: LogLevel = LogLevel.D,
     val logFollow: Boolean = true,
@@ -86,7 +87,11 @@ class UiPreferences internal constructor(
     }
 
     private fun UiChoices.snapshot(): UiChoices =
-        copy(browseStack = browseStack.toList(), duplicateSort = duplicateSort.toList())
+        copy(
+            browseStack = browseStack.toList(),
+            duplicateSort = duplicateSort.toList(),
+            suspectedDuplicateSort = suspectedDuplicateSort.toList(),
+        )
 
     /** Close the producer only after UI disposal, and drain before cancelling the owning scope. */
     internal suspend fun shutdown() = withContext(NonCancellable) {
@@ -104,16 +109,20 @@ internal suspend fun loadUiChoicesInLane(database: FilesDatabase): UiChoices =
     }
 
 internal fun encodeUiChoices(choices: UiChoices): Map<String, String> = buildMap {
+    fun putSort(prefix: String, rules: List<DuplicateSortRule>) {
+        put("$prefix.order", rules.joinToString(",") { it.criterion.name })
+        rules.forEach { rule ->
+            put("$prefix.${rule.criterion.name}.enabled", rule.enabled.toString())
+            put("$prefix.${rule.criterion.name}.direction", rule.direction.name)
+        }
+    }
     put("selectedTab", choices.selectedTab.name)
     put("scanRoot", choices.scanRoot)
     put("duplicateRoot", choices.duplicateRoot)
     put("duplicateFileType", choices.duplicateFileType.name)
     put("duplicateFilenamePattern", choices.duplicateFilenamePattern)
-    put("duplicateSort.order", choices.duplicateSort.joinToString(",") { it.criterion.name })
-    choices.duplicateSort.forEach { rule ->
-        put("duplicateSort.${rule.criterion.name}.enabled", rule.enabled.toString())
-        put("duplicateSort.${rule.criterion.name}.direction", rule.direction.name)
-    }
+    putSort("duplicateSort", choices.duplicateSort)
+    putSort("suspectedDuplicateSort", choices.suspectedDuplicateSort)
     put("logFilter", choices.logFilter)
     put("logMinimum", choices.logMinimum.name)
     put("logFollow", choices.logFollow.toString())
@@ -139,28 +148,30 @@ internal fun decodeUiChoices(
     val follow = entries["logFollow"]?.let {
         requireNotNull(it.toBooleanStrictOrNull()) { "Invalid UI preference logFollow '$it'" }
     } ?: true
-    val defaults = defaultDuplicateSortRules()
-    val order = mutableListOf<DuplicateSortCriterion>()
-    entries["duplicateSort.order"]?.split(',')?.forEach { name ->
-        val criterion = DuplicateSortCriterion.entries.firstOrNull { it.name == name }
-        when {
-            criterion == null -> warn("Unknown UI preference sort criterion '$name'; ignoring")
-            criterion in order -> warn("Repeated UI preference sort criterion '$name'; ignoring repeat")
-            else -> order.add(criterion)
+    fun decodeSort(prefix: String): List<DuplicateSortRule> {
+        val defaults = defaultDuplicateSortRules()
+        val order = mutableListOf<DuplicateSortCriterion>()
+        entries["$prefix.order"]?.split(',')?.forEach { name ->
+            val criterion = DuplicateSortCriterion.entries.firstOrNull { it.name == name }
+            when {
+                criterion == null -> warn("Unknown UI preference sort criterion '$name'; ignoring")
+                criterion in order -> warn("Repeated UI preference sort criterion '$name'; ignoring repeat")
+                else -> order.add(criterion)
+            }
         }
-    }
-    defaults.forEach { if (it.criterion !in order) order.add(it.criterion) }
-    val sort = order.map { criterion ->
-        val default = defaults.first { it.criterion == criterion }
-        val enabledKey = "duplicateSort.${criterion.name}.enabled"
-        val enabled = entries[enabledKey]?.let {
-            requireNotNull(it.toBooleanStrictOrNull()) { "Invalid UI preference $enabledKey '$it'" }
-        } ?: default.enabled
-        DuplicateSortRule(
-            criterion,
-            enabled,
-            enumValue("duplicateSort.${criterion.name}.direction", SortDirection.entries, default.direction),
-        )
+        defaults.forEach { if (it.criterion !in order) order.add(it.criterion) }
+        return order.map { criterion ->
+            val default = defaults.first { it.criterion == criterion }
+            val enabledKey = "$prefix.${criterion.name}.enabled"
+            val enabled = entries[enabledKey]?.let {
+                requireNotNull(it.toBooleanStrictOrNull()) { "Invalid UI preference $enabledKey '$it'" }
+            } ?: default.enabled
+            DuplicateSortRule(
+                criterion,
+                enabled,
+                enumValue("$prefix.${criterion.name}.direction", SortDirection.entries, default.direction),
+            )
+        }
     }
     return UiChoices(
         selectedTab = enumValue("selectedTab", UiTab.entries, UiTab.SCAN),
@@ -171,7 +182,8 @@ internal fun decodeUiChoices(
         duplicateRoot = entries["duplicateRoot"] ?: "",
         duplicateFileType = enumValue("duplicateFileType", DuplicateFileType.entries, DuplicateFileType.ALL),
         duplicateFilenamePattern = entries["duplicateFilenamePattern"] ?: "",
-        duplicateSort = sort,
+        duplicateSort = decodeSort("duplicateSort"),
+        suspectedDuplicateSort = decodeSort("suspectedDuplicateSort"),
         logFilter = entries["logFilter"] ?: "",
         logMinimum = enumValue("logMinimum", LogLevel.entries, LogLevel.D),
         logFollow = follow,

@@ -196,16 +196,24 @@ Filters affect only candidate searches in the stored inventory, not scanning,
 exclusions, or the exact case-sensitive name-and-size grouping rule. Searches and
 filtering run in the repository's database lane, never on the UI thread.
 
-Candidate groups can be sorted by filename (case-sensitive lexicographic order),
-individual file size, copy count, and earliest known creation date in the group.
+Regular and suspected candidate groups share sorting controls for filename
+(case-sensitive lexicographic order), individual file size, copy count, earliest
+known creation date, and recommendation type. Mixed-name suspected groups use
+their lexicographically smallest filename, independent of retention member order.
 Each criterion has an on/off toggle and ascending/descending direction; left/right
 arrows adjust priority, with the leftmost enabled criterion taking precedence.
-Unknown creation dates sort last in either direction when that criterion is
-compared. Remaining ties use filename then size for deterministic ordering.
+Unknown creation dates and unavailable recommendations sort last in either
+direction when their criterion is compared. Recommendation ascending order is
+`KEEP_ONE`, `KEEP_MULTIPLE`, `REVIEW`, `PROTECTED`; the last action remains reserved,
+not an implemented protection policy. Remaining ties use filename then size;
+suspected ties also use capture timestamp, offset, and path for deterministic order.
 Filename sorting is enabled by default; disabling all criteria preserves search
 order. Sort changes apply to loaded groups without another database query or any
 filesystem reads. Sorting is cancellable and dispatched off the UI thread, and
-priority, enabled flags, and directions are remembered across app restarts.
+priority, enabled flags, and directions are remembered independently for each tab
+across app restarts. Recommendation sorting is disabled by default; older saved
+priorities are preserved with the new criterion appended disabled. Sorting never
+reassesses scores, extracts EXIF, or changes retention-ranked order within a group.
 
 Duplicate result text is selectable. A single **Copy results** action in the result
 header copies all loaded groups in their displayed order, including off-screen
@@ -407,6 +415,31 @@ recommendation snapshot without changing file order. Calculations run off the UI
 dispatcher; source/evidence changes invalidate previous presentation snapshots.
 Active scans/EXIF queues or loading evidence produce review-only results. No
 recommendations are persisted and no database migration is needed.
+
+#### Recommendation statistics
+
+The Statistics tab follows Suspected duplicates. Show plain selectable text for
+regular duplicate candidates and suspected matches separately, across all stored
+roots and excluding excluded folders, independent of the duplicate-tab filters.
+Regular grouping must span roots rather than combining per-root query results,
+so copies in different roots still form a single filename/size group.
+
+For each section show group count, file count, and total MB; break down file counts
+and bytes both by the whole group's recommendation and by each file's individual
+role. A Keep one group's totals include all members, not just its preferred copy.
+Include image, video, document, and other categories overall and within each
+recommendation/role bucket, reusing the existing extension classifications.
+Show zero-valued categories too. MB uses decimal 1,000,000-byte units and two
+rounded decimal places; figures represent file sizes, not reclaimable space.
+The cohorts can overlap, so their totals must not be added together.
+
+Build a cancellable, background, database-only snapshot using stored EXIF,
+stored current-profile retention scores, and the same recommendation engine.
+Missing or stale evidence stays Review; opening or refreshing statistics never
+extracts EXIF or computes/saves retention assessments. Do not publish partially
+loaded results. Wait while scanning or EXIF processing is active, then reload
+after completion/cancellation; allow explicit refresh when inactive. No charting
+library, file operations, new persistence tables, or schema migration is needed.
 
 Measure how many files and groups survive the initial filter.
 

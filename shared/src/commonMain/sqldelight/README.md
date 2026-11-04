@@ -287,14 +287,26 @@ modified, and no recommendation is a content-identity guarantee. Collection
 protection is deferred; the `PROTECTED` action is reserved but never emitted by
 current rules.
 
+Recommendation statistics read all stored roots using the same candidate queries
+and exclusions. `duplicateCandidates(root = null)` groups exact filename/size
+matches across roots; supplied roots retain their existing literal subtree
+semantics. The Statistics tab computes separate regular/suspected aggregates from
+stored scores and EXIF, without saving scores or extracting metadata. Counts by
+group action include every group member; per-file role totals are separate views
+of those same files. The cohorts may overlap and are not combined. This changes
+only a query's optional scope, not the schema or existing inventory.
+
 ## Remembered UI choices
 
 The selected tab, scan folder, browse navigation stack, duplicate-search folder and
 filters/sort choices, and log text/level/follow filters are restored before the container is returned.
 Enum values are stored by name, not ordinal. Browse paths occupy separate indexed
 entries so filenames containing newlines or other delimiters round-trip unchanged.
-Duplicate sort priority is stored as ordered criterion names, with separate enabled
-and direction values per criterion. Existing preferences without these keys use
+Regular and suspected duplicate sort priorities are stored independently under
+`duplicateSort.*` and `suspectedDuplicateSort.*`, as ordered criterion names with
+separate enabled and direction values per criterion. Recommendation type is
+an optional criterion, appended disabled when absent from older saved priorities.
+Existing preferences without these keys use
 the default filename sort; unknown future criteria warn and are ignored while
 known criteria retain their priority.
 

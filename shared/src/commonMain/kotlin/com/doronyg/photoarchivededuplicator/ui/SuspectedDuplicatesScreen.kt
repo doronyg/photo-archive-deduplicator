@@ -23,12 +23,14 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.doronyg.photoarchivededuplicator.PathActions
+import com.doronyg.photoarchivededuplicator.UiPreferences
 import com.doronyg.photoarchivededuplicator.exif.ExifQueueController
 import com.doronyg.photoarchivededuplicator.exif.ExifQueueState
 import com.doronyg.photoarchivededuplicator.exif.ExifQueuePhase
@@ -36,6 +38,10 @@ import com.doronyg.photoarchivededuplicator.exif.ExifRecord
 import com.doronyg.photoarchivededuplicator.scan.DirectoryRepository
 import com.doronyg.photoarchivededuplicator.scan.SUSPECTED_IMAGE_MIN_SIZE_BYTES
 import com.doronyg.photoarchivededuplicator.scan.SuspectedDuplicateGroup
+import com.doronyg.photoarchivededuplicator.scan.DuplicateSortRule
+import com.doronyg.photoarchivededuplicator.scan.DuplicateSortCriterion
+import com.doronyg.photoarchivededuplicator.scan.sortSuspectedDuplicateCandidates
+import com.doronyg.photoarchivededuplicator.recommendation.DuplicateGroupRecommendation
 import com.doronyg.photoarchivededuplicator.retention.RetentionScoreService
 import com.doronyg.photoarchivededuplicator.retention.RetentionPresentation
 import com.doronyg.photoarchivededuplicator.retention.sortSuspectedFilesByRetention
@@ -44,6 +50,13 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import okio.Path
+
+private data class SortedSuspectedCandidates(
+    val source: List<SuspectedDuplicateGroup>,
+    val rules: List<DuplicateSortRule>,
+    val recommendations: Map<Path, DuplicateGroupRecommendation>?,
+    val groups: List<SuspectedDuplicateGroup>,
+)
 
 internal fun shouldAssessSuspectedScores(
     state: ExifQueueState,
@@ -59,9 +72,11 @@ internal fun SuspectedDuplicatesScreen(
     retentionScores: RetentionScoreService,
     queue: ExifQueueController,
     pathActions: PathActions,
+    preferences: UiPreferences,
     scanning: Boolean,
     modifier: Modifier = Modifier,
 ) {
+    val choices by preferences.state.collectAsState()
     val queueState by queue.state.collectAsState()
     var observedRevision by remember(queue) { mutableStateOf(queueState.revision) }
     var loadedRevision by remember(queue) { mutableStateOf<Long?>(null) }
@@ -79,6 +94,20 @@ internal fun SuspectedDuplicatesScreen(
     val recommendationGroups = remember(groups) { groups.map { it.files } }
     val recommendations = rememberDuplicateRecommendations(recommendationGroups, exif, scores,
         evidenceReady = !loading && !scanning && !queueState.isRunning && loadedRevision == queueState.revision)
+    val sortRecommendations = recommendations.takeIf {
+        choices.suspectedDuplicateSort.any { rule -> rule.enabled && rule.criterion == DuplicateSortCriterion.RECOMMENDATION }
+    }
+    val sorted by produceState<SortedSuspectedCandidates?>(null, groups, choices.suspectedDuplicateSort, sortRecommendations) {
+        value = null
+        val source = groups
+        val rules = choices.suspectedDuplicateSort
+        val advice = sortRecommendations
+        value = SortedSuspectedCandidates(source, rules, advice,
+            sortSuspectedDuplicateCandidates(source, rules, recommendations = advice.orEmpty()))
+    }
+    val displayedSnapshot = sorted?.takeIf {
+        it.source === groups && it.rules == choices.suspectedDuplicateSort && it.recommendations === sortRecommendations
+    }
 
     LaunchedEffect(repository, retentionScores, queue, queueState.revision, refresh, scanning) {
         val request = ++generation
@@ -160,6 +189,9 @@ internal fun SuspectedDuplicatesScreen(
             }
         }
         presentExifQueue(queueState)?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+        DuplicateSortControls(choices.suspectedDuplicateSort, enabled = !loading, onChange = { transform ->
+            preferences.update { it.copy(suspectedDuplicateSort = transform(it.suspectedDuplicateSort)) }
+        })
         Text(
             "Matches require successful, current EXIF with the same original capture date/time to the second " +
                 "and compatible original offsets, plus identical byte sizes and at least two different filenames. " +
@@ -185,12 +217,16 @@ internal fun SuspectedDuplicatesScreen(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     item {
-                        Text(if (loading) "Loading stored matches and scores..." else "${groups.size} suspected duplicate groups.")
+                        Text(when {
+                            loading -> "Loading stored matches and scores..."
+                            displayedSnapshot == null -> "Sorting stored matches..."
+                            else -> "${groups.size} suspected duplicate groups."
+                        })
                     }
                     if (!loading && groups.isEmpty()) {
                         item { Text("No matching stored EXIF timestamps. Analyze inspects eligible images and reuses cached attempts; missing or failed EXIF is not a match.") }
                     }
-                    groups.forEach { group ->
+                    displayedSnapshot?.groups.orEmpty().forEach { group ->
                         item {
                             HorizontalDivider()
                             Text(

@@ -45,6 +45,9 @@ internal val allUiChoices = UiChoices(
     duplicateSort = defaultDuplicateSortRules().reversed().mapIndexed { index, rule ->
         rule.copy(enabled = index % 2 == 0, direction = SortDirection.DESCENDING)
     },
+    suspectedDuplicateSort = defaultDuplicateSortRules().mapIndexed { index, rule ->
+        rule.copy(enabled = index % 2 != 0, direction = SortDirection.DESCENDING)
+    },
     logFilter = "database\nfailure",
     logMinimum = LogLevel.W,
     logFollow = false,

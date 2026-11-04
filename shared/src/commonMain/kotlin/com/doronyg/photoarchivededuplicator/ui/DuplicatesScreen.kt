@@ -44,6 +44,7 @@ import com.doronyg.photoarchivededuplicator.exif.ExifExtractionService
 import com.doronyg.photoarchivededuplicator.exif.ExifQueueController
 import com.doronyg.photoarchivededuplicator.exif.ExifQueuePhase
 import com.doronyg.photoarchivededuplicator.exif.ExifRecord
+import com.doronyg.photoarchivededuplicator.recommendation.DuplicateGroupRecommendation
 import com.doronyg.photoarchivededuplicator.retention.RetentionAssessmentResult
 import com.doronyg.photoarchivededuplicator.retention.RetentionScoreService
 import com.doronyg.photoarchivededuplicator.retention.RetentionPresentation
@@ -52,6 +53,7 @@ import com.doronyg.photoarchivededuplicator.scan.DuplicateCandidateGroup
 import com.doronyg.photoarchivededuplicator.scan.DuplicateCandidateFilter
 import com.doronyg.photoarchivededuplicator.scan.DuplicateFileType
 import com.doronyg.photoarchivededuplicator.scan.DuplicateSortRule
+import com.doronyg.photoarchivededuplicator.scan.DuplicateSortCriterion
 import com.doronyg.photoarchivededuplicator.scan.sortDuplicateCandidates
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
@@ -62,6 +64,7 @@ private data class SortedCandidates(
     val source: List<DuplicateCandidateGroup>,
     val rules: List<DuplicateSortRule>,
     val retention: Map<Path, RetentionPresentation>,
+    val recommendations: Map<Path, DuplicateGroupRecommendation>?,
     val groups: List<DuplicateCandidateGroup>,
 )
 
@@ -94,19 +97,6 @@ fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathAc
     val clipboard = LocalClipboardManager.current
     val listState = rememberLazyListState()
     val reportRetention = retention?.files.orEmpty()
-    val sorted by produceState<SortedCandidates?>(null, groups, choices.duplicateSort, reportRetention) {
-        value = null
-        val source = groups
-        val rules = choices.duplicateSort
-        val scores = reportRetention
-        if (source != null) {
-            val orderedGroups = sortDuplicateCandidates(source, rules)
-            value = SortedCandidates(source, rules, scores, sortDuplicateFilesByRetention(orderedGroups, scores))
-        }
-    }
-    val displayedSnapshot = sorted?.takeIf {
-        it.source === groups && it.rules == choices.duplicateSort && it.retention === reportRetention
-    }
     val reportRoot = searchedRoot
     val reportFilter = searchedFilter
     // A new source/filter gets a fresh token; changing only sort order deliberately does not.
@@ -115,6 +105,24 @@ fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathAc
     val recommendations = rememberDuplicateRecommendations(recommendationGroups, exif, reportRetention,
         evidenceReady = !scanRunning && !queueState.isRunning && !scoring && !exifLoading &&
             loadedExifToken?.isCurrent(exifToken) == true && loadedExifKey == queueRefreshKey)
+    val sortRecommendations = recommendations.takeIf {
+        choices.duplicateSort.any { rule -> rule.enabled && rule.criterion == DuplicateSortCriterion.RECOMMENDATION }
+    }
+    val sorted by produceState<SortedCandidates?>(null, groups, choices.duplicateSort, reportRetention, sortRecommendations) {
+        value = null
+        val source = groups
+        val rules = choices.duplicateSort
+        val scores = reportRetention
+        val advice = sortRecommendations
+        if (source != null) {
+            val orderedGroups = sortDuplicateCandidates(source, rules, recommendations = advice.orEmpty())
+            value = SortedCandidates(source, rules, scores, advice, sortDuplicateFilesByRetention(orderedGroups, scores))
+        }
+    }
+    val displayedSnapshot = sorted?.takeIf {
+        it.source === groups && it.rules == choices.duplicateSort && it.retention === reportRetention &&
+            it.recommendations === sortRecommendations
+    }
     var copyStatus by remember(groups, choices.duplicateSort, retention, exif, recommendations) { mutableStateOf<String?>(null) }
     val latestExifToken by rememberUpdatedState(exifToken)
     fun isCurrent(token: ExifSnapshotToken) = token.isCurrent(latestExifToken)

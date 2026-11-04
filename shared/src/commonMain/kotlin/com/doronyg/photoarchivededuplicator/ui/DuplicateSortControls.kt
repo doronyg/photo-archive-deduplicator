@@ -38,6 +38,7 @@ internal fun DuplicateSortControls(
                 DuplicateSortCriterion.FILE_SIZE -> "File size"
                 DuplicateSortCriterion.DUPLICATE_COUNT -> "Copy count"
                 DuplicateSortCriterion.EARLIEST_CREATED -> "Creation date"
+                DuplicateSortCriterion.RECOMMENDATION -> "Recommendation"
             }
             OutlinedCard {
                 Column(Modifier.padding(8.dp)) {
@@ -83,7 +84,8 @@ internal fun DuplicateSortControls(
         }
     }
     Text(
-        "Filename order is case-sensitive. Creation uses the earliest known date in each group; unknown dates stay last. All off keeps search order.",
+        "Filename order is case-sensitive (smallest filename for mixed-name groups). Creation uses the earliest known date. " +
+            "Recommendation ascending: Keep one, Keep multiple, Review, Protected. Unknown dates/recommendations stay last. All off keeps search order.",
         style = MaterialTheme.typography.bodySmall,
     )
 }

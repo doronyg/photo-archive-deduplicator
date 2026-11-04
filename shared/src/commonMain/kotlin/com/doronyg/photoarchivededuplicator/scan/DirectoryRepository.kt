@@ -215,10 +215,10 @@ class DirectoryRepository internal constructor(
     suspend fun isExcluded(path: Path): Boolean = exclusions().any { path.isInTree(it.path) }
 
     suspend fun duplicateCandidates(
-        root: Path,
+        root: Path? = null,
         filter: DuplicateCandidateFilter = DuplicateCandidateFilter(),
     ): List<DuplicateCandidateGroup> = io("duplicateCandidates $root") {
-        files.selectDuplicateCandidates(root.inventoryPath().toString()).awaitAsList()
+        files.selectDuplicateCandidates(root?.inventoryPath()?.toString()).awaitAsList()
             .filter { filter.matches(it.name) }
             .map { FileRecord(it.path.toPath(), it.directoryPath.toPath(), it.name, it.extension,
                 it.sizeBytes, it.modifiedAt, it.lastScanned, it.createdAt) }

@@ -56,7 +56,7 @@ SELECT count(*) AS fileCount, coalesce(sum(sizeBytes), 0) AS totalBytes FROM sca
 selectDuplicateCandidates:
 WITH eligible AS (
     SELECT f.* FROM scanFile f
-    WHERE (f.path = :root OR (
+    WHERE (:root IS NULL OR f.path = :root OR (
         substr(f.path, 1, length(:root)) = :root
         AND (substr(:root, -1) IN ('/', '\') OR substr(f.path, length(:root) + 1, 1) IN ('/', '\'))
     ))
