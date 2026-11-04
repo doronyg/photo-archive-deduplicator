@@ -1,5 +1,6 @@
 package com.doronyg.photoarchivededuplicator.recommendation
 
+import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificationContext
 import com.doronyg.photoarchivededuplicator.retention.RetentionAssessmentResult
 import com.doronyg.photoarchivededuplicator.retention.RetentionScoreService
 import com.doronyg.photoarchivededuplicator.scan.DirectoryRepository
@@ -18,6 +19,7 @@ internal class RecommendationStatisticsService(
     private val repository: DirectoryRepository,
     private val retention: RetentionScoreService,
     private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
+    private val classificationContext: DirectoryClassificationContext? = null,
 ) {
     suspend fun load(): RecommendationStatisticsReport = withContext(dispatcher) {
         RecommendationStatisticsReport(regularStatistics(), suspectedStatistics())
@@ -38,7 +40,12 @@ internal class RecommendationStatisticsService(
         assessment: RetentionAssessmentResult,
     ): RecommendationStatistics {
         val exif = repository.fileExif(groups.flatten().map { it.path }, currentOnly = true).associateBy { it.input.path }
-        val recommendations = recommendDuplicateGroups(groups, exif, assessment.files, dispatcher = dispatcher)
+        val classifications = classificationContext?.let { context ->
+            repository.directoryClassifications(groups.flatten().map { it.directoryPath }.distinct(), context)
+                .associateBy { it.directoryPath }
+        }.orEmpty()
+        val recommendations = recommendDuplicateGroups(groups, exif, assessment.files, dispatcher = dispatcher,
+            directoryClassifications = classifications)
         return aggregateRecommendationStatistics(groups.map { recommendations.getValue(it.first().path) }, dispatcher)
     }
 }

@@ -48,6 +48,10 @@ enum class RecommendationReason {
     RETENTION_PLAN_INVALID,
     EXPENDABLE_BACKUP_LOCATION,
     BACKUP_FALLBACK_COPY,
+    AI_PREFERRED,
+    AI_BACKUP,
+    AI_PROTECTED,
+    AI_UNKNOWN,
 }
 
 data class FileRecommendation(

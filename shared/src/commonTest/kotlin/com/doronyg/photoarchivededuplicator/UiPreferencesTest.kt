@@ -1,6 +1,7 @@
 package com.doronyg.photoarchivededuplicator
 
 import app.cash.sqldelight.db.SqlDriver
+import com.doronyg.photoarchivededuplicator.classification.OllamaSettings
 import com.doronyg.photoarchivededuplicator.recommendation.RecommendationAction
 import com.doronyg.photoarchivededuplicator.scan.ConcurrencyTestDriver
 import com.doronyg.photoarchivededuplicator.scan.DuplicateFileType
@@ -55,6 +56,7 @@ internal val allUiChoices = UiChoices(
     logFilter = "database\nfailure",
     logMinimum = LogLevel.W,
     logFollow = false,
+    ollama = OllamaSettings("http://test.invalid:11434", "test-model:small"),
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)

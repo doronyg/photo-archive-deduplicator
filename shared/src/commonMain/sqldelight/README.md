@@ -318,6 +318,43 @@ group action include every group member; per-file role totals are separate views
 of those same files. The cohorts may overlap and are not combined. This changes
 only a query's optional scope, not the schema or existing inventory.
 
+## Cached AI directory classifications
+
+`DirectoryAiClassification.sq` stores successful directory classifications
+independently of inventory, file scores and EXIF. Additive migration `6.sqm`
+advances schema 6 to 7 without changing existing rows. The composite identity
+includes normalized directory path, configured server/model and prompt version.
+The legacy `preferredRootsKey` column remains in the key for compatibility but
+is empty for new records. Prompt version 2 classifies paths without configured
+preferred roots; version-1 rows remain stored but are not reused. Original path
+and classification time are preserved. Exactly PREFERRED, BACKUP, PROTECTED and UNKNOWN are valid labels.
+No model explanations or confidence values are stored.
+
+Repository reads use the existing serialized database lane and bounded path
+chunks. Each successful request is upserted immediately; HTTP runs outside the
+database lane. A technical failure never replaces a row with UNKNOWN or erases a
+valid cached result. Successful UNKNOWN is reusable until explicit refresh or
+profile changes. Server/model/prompt profiles cannot be mixed.
+
+Only a user-triggered job submits distinct directories from the currently
+filtered complete duplicate groups. The app creates its Ktor client lazily, sends
+paths/names only, and snapshots job scope. Cancellation stops
+pending requests; accepted result commits and revisions finish before shutdown
+closes the client/driver. No filesystem scanning, SMB or EXIF extraction is added.
+
+The Ollama settings results viewer reads all persisted rows without contacting
+the server or scanning the archive. It can filter to the current saved
+server/model/prompt or show historical profiles, preserving separate results
+for the same directory. It displays classification, path, time and provenance.
+This adds a read query only, not a schema change or migration.
+
+Both duplicate screens and Statistics consume cached exact-directory labels
+without network calls. AI PROTECTED and UNKNOWN override backup expendability
+for that directory; a parent BACKUP label is not inherited. Explicit protected
+paths, per-file retained-replacement validation and last-copy/collection safety
+remain authoritative. Individual retention scores and duplicate confidence do
+not change. PREFERRED is a path-based AI hint, not restricted to an explicit root list.
+
 ## Remembered UI choices
 
 The selected tab, scan folder, browse navigation stack, duplicate-search folder and
@@ -392,5 +429,6 @@ or content-URI database column. Missing/inaccessible index entries and absent vi
 as link errors. This media-library view has no portable folder-opening contract: folder links
 explicitly report that the action is unsupported and direct users to their file manager.
 
-No checksum-specific schema, hashing, or AI/Ollama analysis is included. Future analysis
+No checksum-specific schema or hashing is included. Optional Ollama directory
+classification is separate from file identity and never compares contents. Future analysis
 belongs in separate tables, not new checksum fields on this inventory.

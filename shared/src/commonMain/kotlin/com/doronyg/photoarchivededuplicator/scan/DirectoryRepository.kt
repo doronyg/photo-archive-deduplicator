@@ -12,7 +12,11 @@ import com.doronyg.photoarchivededuplicator.IoLane
 import com.doronyg.photoarchivededuplicator.UiChoices
 import com.doronyg.photoarchivededuplicator.encodeUiChoices
 import com.doronyg.photoarchivededuplicator.loadUiChoicesInLane
+import com.doronyg.photoarchivededuplicator.classification.DirectoryClassification
+import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificationContext
+import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificationRecord
 import com.doronyg.photoarchivededuplicator.db.FilesDatabase
+import com.doronyg.photoarchivededuplicator.db.DirectoryAiClassification
 import com.doronyg.photoarchivededuplicator.db.ScanDirectory
 import com.doronyg.photoarchivededuplicator.db.ScanFile
 import com.doronyg.photoarchivededuplicator.exif.ExifInput
@@ -34,6 +38,9 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import okio.Path
 import okio.Path.Companion.toPath
+
+// Keep the schema-7 column without using the removed preferred-roots configuration.
+private const val LEGACY_AI_ROOTS_KEY = ""
 
 internal fun createFilesDatabase(driver: SqlDriver): FilesDatabase =
     FilesDatabase(
@@ -402,6 +409,51 @@ class DirectoryRepository internal constructor(
     suspend fun allFiles(): List<FileRecord> = io("allFiles") {
         files.selectAll().awaitAsList().map { it.toRecord() }
     }
+
+    suspend fun directoryClassifications(
+        paths: List<Path>,
+        context: DirectoryClassificationContext,
+    ): List<DirectoryClassificationRecord> = io("directoryClassifications count=${paths.size}") {
+        paths.map { it.inventoryPath().toString() }.distinct().chunked(400).flatMap { chunk ->
+            database.directoryAiClassificationQueries.selectForPaths(
+                chunk, context.baseUrl, context.model, context.promptVersion, LEGACY_AI_ROOTS_KEY,
+            ).awaitAsList()
+        }.map { it.toRecord() }
+    }
+
+    suspend fun allDirectoryClassifications(): List<DirectoryClassificationRecord> =
+        io("allDirectoryClassifications") {
+            database.directoryAiClassificationQueries.selectAll().awaitAsList().map { it.toRecord() }
+        }
+
+    private fun DirectoryAiClassification.toRecord() = DirectoryClassificationRecord(
+        directoryPath = directoryPath.toPath(),
+        originalPath = originalPath,
+        classification = DirectoryClassification.valueOf(classification),
+        context = DirectoryClassificationContext(serverUrl, model, promptVersion),
+        classifiedAt = classifiedAt,
+    )
+
+    suspend fun saveDirectoryClassification(record: DirectoryClassificationRecord): Unit =
+        io("saveDirectoryClassification transaction") {
+            val path = record.directoryPath.inventoryPath()
+            require(record.originalPath.toPath().inventoryPath() == path) {
+                "The original directory path must identify the classified directory."
+            }
+            val context = record.context
+            database.transaction {
+                database.directoryAiClassificationQueries.upsert(
+                    directoryPath = path.toString(),
+                    serverUrl = context.baseUrl,
+                    model = context.model,
+                    promptVersion = context.promptVersion,
+                    preferredRootsKey = LEGACY_AI_ROOTS_KEY,
+                    originalPath = record.originalPath,
+                    classification = record.classification.name,
+                    classifiedAt = record.classifiedAt,
+                )
+            }
+        }
 
     suspend fun fileExif(paths: List<Path>, currentOnly: Boolean = true): List<ExifRecord> =
         io("fileExif count=${paths.size}") {

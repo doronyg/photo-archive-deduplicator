@@ -39,6 +39,8 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import com.doronyg.photoarchivededuplicator.PathActions
 import com.doronyg.photoarchivededuplicator.UiPreferences
+import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificationController
+import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificationJobState
 import com.doronyg.photoarchivededuplicator.exif.ExifQueueController
 import com.doronyg.photoarchivededuplicator.exif.ExifQueueState
 import com.doronyg.photoarchivededuplicator.exif.ExifQueuePhase
@@ -89,6 +91,7 @@ internal fun SuspectedDuplicatesScreen(
     preferences: UiPreferences,
     scanning: Boolean,
     modifier: Modifier = Modifier,
+    directoryClassifications: DirectoryClassificationController? = null,
 ) {
     val choices by preferences.state.collectAsState()
     val queueState by queue.state.collectAsState()
@@ -122,8 +125,14 @@ internal fun SuspectedDuplicatesScreen(
     }
     val filter = filterResult.getOrNull()
     val recommendationGroups = remember(groups) { groups.map { it.files } }
+    val classificationState = directoryClassifications?.state?.collectAsState()?.value ?: DirectoryClassificationJobState()
+    val classificationContext = remember(choices.ollama) { runCatching { choices.ollama.context() }.getOrNull() }
+    var classificationCacheRefresh by remember { mutableStateOf(0) }
+    val classificationCache = rememberCachedDirectoryClassifications(repository, recommendationGroups,
+        classificationContext, classificationState.revision, classificationCacheRefresh)
     val recommendations = rememberDuplicateRecommendations(recommendationGroups, exif, scores,
-        evidenceReady = !loading && !scanning && !queueState.isRunning && loadedRevision == queueState.revision)
+        evidenceReady = classificationCache.ready && !loading && !scanning && !queueState.isRunning && loadedRevision == queueState.revision,
+        directoryClassifications = classificationCache.records)
     val sortRecommendations = recommendations.takeIf {
         filter?.recommendation != null ||
             choices.suspectedDuplicateSort.any { rule -> rule.enabled && rule.criterion == DuplicateSortCriterion.RECOMMENDATION }
@@ -193,6 +202,11 @@ internal fun SuspectedDuplicatesScreen(
 
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("Suspected duplicates", style = MaterialTheme.typography.titleLarge)
+        directoryClassifications?.let { controller ->
+            DirectoryClassificationControls(controller, choices.ollama,
+                displayedSnapshot?.groups?.map { it.files }?.takeUnless { loading || scanning },
+                classificationCache, onReloadCache = { classificationCacheRefresh++ })
+        }
         Text(
             "Images larger than $SUSPECTED_IMAGE_MIN_SIZE_BYTES bytes across the stored inventory, excluding excluded folders. " +
                 "Only same-size buckets with different filenames are inspected. Unchanged EXIF attempts are reused.",
@@ -363,7 +377,8 @@ internal fun SuspectedDuplicatesScreen(
                                     style = MaterialTheme.typography.bodySmall,
                                 )
                                 RetentionScoreLine(file.path, scores[file.path])
-                                FileRecommendationLine(file.path, recommendations?.get(file.path)?.files?.get(file.path))
+                                FileRecommendationLine(file.path, recommendations?.get(file.path)?.files?.get(file.path),
+                                    classificationCache.records[file.directoryPath.inventoryPath()])
                                 ExifMetadataLine(file.path, exif[file.path])
                             }
                         }

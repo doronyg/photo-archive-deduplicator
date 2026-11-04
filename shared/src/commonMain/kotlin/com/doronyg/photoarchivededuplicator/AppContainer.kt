@@ -10,10 +10,19 @@ import com.doronyg.photoarchivededuplicator.exif.ExifExtractionService
 import com.doronyg.photoarchivededuplicator.exif.ExifQueueController
 import com.doronyg.photoarchivededuplicator.exif.ExifSource
 import com.doronyg.photoarchivededuplicator.exif.FileSystemExifSource
+import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificationController
+import com.doronyg.photoarchivededuplicator.classification.DirectoryClassifier
+import com.doronyg.photoarchivededuplicator.classification.OllamaDirectoryClassifier
+import com.doronyg.photoarchivededuplicator.classification.createOllamaHttpClient
+import com.doronyg.photoarchivededuplicator.classification.fetchOllamaModels
+import com.doronyg.photoarchivededuplicator.classification.ollamaBaseUrl
+import io.ktor.client.HttpClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
@@ -35,6 +44,7 @@ class AppContainer internal constructor(
     createScanner: (DirectoryRepository, IoLane) -> InventoryScanner,
     initialUiChoices: UiChoices = UiChoices(),
     createExifSource: (IoLane) -> ExifSource = { FileSystemExifSource(FileSystem.SYSTEM, it) },
+    createOllamaClient: () -> HttpClient = ::createOllamaHttpClient,
 ) {
     /** Lives as long as the app; scans run here, not in a composition scope. */
     private val appJob = SupervisorJob()
@@ -43,6 +53,11 @@ class AppContainer internal constructor(
     private var closed = false
 
     val repository = DirectoryRepository(createFilesDatabase(driver), databaseLane = databaseLane)
+    private val ollamaClient = lazy(createOllamaClient)
+    val directoryClassifications = DirectoryClassificationController(appScope,
+        DirectoryClassifier { directory, context -> OllamaDirectoryClassifier(ollamaClient.value).classify(directory, context) },
+        load = repository::directoryClassifications, save = repository::saveDirectoryClassification,
+        dispatcher = workerDispatcher)
     val exif = ExifExtractionService(repository, createExifSource(filesystemLane))
     val retentionScores = RetentionScoreService(repository)
     val exifQueue = ExifQueueController(repository, retentionScores, exif, appScope, dispatcher = workerDispatcher)
@@ -56,21 +71,40 @@ class AppContainer internal constructor(
         })
     val uiPreferences = UiPreferences(initialUiChoices, appScope, repository::saveUiChoices)
 
+    internal suspend fun availableOllamaModels(baseUrl: String): List<String> {
+        val server = ollamaBaseUrl(baseUrl)
+        check(!closed && appJob.isActive) { "Application is closed" }
+        val request = appScope.async { fetchOllamaModels(ollamaClient.value, server) }
+        try {
+            return request.await()
+        } finally {
+            request.cancel()
+        }
+    }
+
     /** Desktop awaits this after its UI exits, before the process can terminate. */
     suspend fun shutdown() = withContext(NonCancellable) {
         shutdownLock.withLock {
             if (closed) return@withLock
+            directoryClassifications.shutdown()
             exifQueue.shutdown()
             scanController.pause()
             uiPreferences.shutdown()
             appJob.cancelAndJoin()
             try {
-                // Native path actions are not children of appJob. Drain the filesystem
-                // lane as well, including blocking calls whose callers were cancelled.
-                filesystemLane.close {}
+                if (ollamaClient.isInitialized()) {
+                    ollamaClient.value.close()
+                    ollamaClient.value.coroutineContext[Job]?.join()
+                }
             } finally {
-                databaseLane.close {
-                    Diagnostics.logger.blockingOperation(LogTags.DATABASE, "driver.close") { driver.close() }
+                try {
+                    // Native path actions are not children of appJob. Drain the filesystem
+                    // lane as well, including blocking calls whose callers were cancelled.
+                    filesystemLane.close {}
+                } finally {
+                    databaseLane.close {
+                        Diagnostics.logger.blockingOperation(LogTags.DATABASE, "driver.close") { driver.close() }
+                    }
                 }
             }
             closed = true
@@ -87,6 +121,7 @@ internal suspend fun createAppContainer(
     prepareFilesystem: () -> Unit = {},
     createScanner: (DirectoryRepository, IoLane) -> InventoryScanner,
     createExifSource: (IoLane) -> ExifSource = { FileSystemExifSource(FileSystem.SYSTEM, it) },
+    createOllamaClient: () -> HttpClient = ::createOllamaHttpClient,
 ): AppContainer {
     val databaseLane = ioDispatcher?.let { IoLane("database-test", it) } ?: IoLane.dedicated("inventory-db")
     val filesystemLane = ioDispatcher?.let { IoLane("filesystem-test", it) } ?: IoLane.dedicated("inventory-filesystem")
@@ -97,7 +132,8 @@ internal suspend fun createAppContainer(
             val driver = Diagnostics.logger.blockingOperation(LogTags.DATABASE, "open driver/schema/migrations") { openDriver() }
             try {
                 val choices = loadUiChoicesInLane(createFilesDatabase(driver))
-                AppContainer(driver, databaseLane, filesystemLane, workerDispatcher, createScanner, choices, createExifSource)
+                AppContainer(driver, databaseLane, filesystemLane, workerDispatcher, createScanner, choices, createExifSource,
+                    createOllamaClient)
                     .also { created = it }
             } catch (e: Throwable) {
                 Diagnostics.logger.blockingOperation(LogTags.DATABASE, "failed initialization driver.close") { driver.close() }

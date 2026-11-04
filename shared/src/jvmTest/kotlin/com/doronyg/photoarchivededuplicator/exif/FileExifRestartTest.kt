@@ -63,7 +63,7 @@ class FileExifRestartTest {
             }
             val upgraded = withContext(io) { JdbcSqliteDriver(url, schema = FilesDatabase.Schema.synchronous()) }
             try {
-                assertEquals(6L, FilesDatabase.Schema.version)
+                assertEquals(7L, FilesDatabase.Schema.version)
                 assertEquals(before, snapshot(upgraded))
                 withContext(io) {
                     val columns = upgraded.executeQuery(null, "PRAGMA index_info(scanFileSizeIndex)", { cursor ->

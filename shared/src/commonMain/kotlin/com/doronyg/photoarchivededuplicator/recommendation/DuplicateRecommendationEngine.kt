@@ -1,5 +1,7 @@
 package com.doronyg.photoarchivededuplicator.recommendation
 
+import com.doronyg.photoarchivededuplicator.classification.DirectoryClassification
+import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificationRecord
 import com.doronyg.photoarchivededuplicator.exif.ExifRecord
 import com.doronyg.photoarchivededuplicator.exif.isValidExifOffset
 import com.doronyg.photoarchivededuplicator.exif.validatedExifTimestamp
@@ -29,10 +31,22 @@ class DuplicateRecommendationEngine(
         retention: Map<Path, RetentionPresentation>,
         evidenceReady: Boolean = true,
         protectedPaths: Set<Path> = emptySet(),
+        directoryClassifications: Map<Path, DirectoryClassificationRecord> = emptyMap(),
     ): DuplicateGroupRecommendation {
         val ordered = files.sortedBy { it.path.toString() }
         val filesByPath = ordered.associateBy { it.path }
         val names = ordered.associate { it.path to filenameEvidence(it.path.name) }
+        val classified = ordered.map { it.directoryPath }.distinct().mapNotNull { directory ->
+            directoryClassifications[directory]?.let { record ->
+                val type = if (record.directoryPath == directory) record.classification else DirectoryClassification.UNKNOWN
+                directory to type
+            }
+        }.toMap()
+        fun collectionFloor(file: FileRecord): Boolean = classified[file.directoryPath] in
+            setOf(DirectoryClassification.PROTECTED, DirectoryClassification.UNKNOWN)
+        fun aiExplanation(directory: Path): String = classified[directory]?.let {
+            "Cached AI ${it.name} applies to this exact directory $directory only; classifications are not inherited from ancestors."
+        }.orEmpty()
         val duplicateConfidence = if (evidenceReady) confidenceCalculator.assess(ordered, exif, retention)
             else DuplicateConfidenceAssessment(null, ConfidenceAssessment(0,
                 setOf(ConfidenceReason.EVIDENCE_UNAVAILABLE), "Evidence is updating; confidence has not been assessed."), emptyMap())
@@ -50,7 +64,18 @@ class DuplicateRecommendationEngine(
                     RecommendationReason.CONFLICTING_CAPTURE_SUBSECONDS -> ConfidenceReason.CONFLICTING_EXIF_METADATA
                     else -> ConfidenceReason.EVIDENCE_UNAVAILABLE
                 }), "Preserve for review; a safe redundant-candidate decision is not established. $explanation"))
-            return enforceRetentionPlanSafety(result, ordered, ordered.map { it.directoryPath }.toSet(), protectedPaths)
+            val annotated = if (classified.isEmpty()) result else result.copy(
+                reasonCodes = result.reasonCodes + classified.values.map { it.recommendationReason },
+                files = result.files.mapValues { (_, advice) ->
+                    val type = classified[advice.file.directoryPath] ?: return@mapValues advice
+                    val explanation = aiExplanation(advice.file.directoryPath)
+                    advice.copy(reasonCodes = advice.reasonCodes + type.recommendationReason,
+                        explanation = "${advice.explanation} $explanation",
+                        retentionDecisionConfidence = advice.retentionDecisionConfidence.copy(
+                            reasonCodes = advice.retentionDecisionConfidence.reasonCodes + type.confidenceReason,
+                            explanation = "${advice.retentionDecisionConfidence.explanation} $explanation"))
+                })
+            return enforceRetentionPlanSafety(annotated, ordered, ordered.map { it.directoryPath }.toSet(), protectedPaths)
         }
 
         if (ordered.size < 2) return review(RecommendationReason.INSUFFICIENT_FILES,
@@ -146,23 +171,34 @@ class DuplicateRecommendationEngine(
         val chronologicalWinner = if (representatives.size > 1 && plainChronological && sameOrganization &&
             dateMatches.size == 1 && !protectedByFilenameDate && !conflictingDates) dateMatches.single() else null
         if (chronologicalWinner != null) {
-            representatives.filter { it.path != chronologicalWinner.path }.forEach {
+            representatives.filter { it.path != chronologicalWinner.path && !collectionFloor(it) }.forEach {
                 redundant[it.path] = chronologicalWinner
             }
-            redundant.keys.toList().forEach { redundant[it] = chronologicalWinner }
         }
         val rankedRepresentatives = representatives.sortedWith(
             compareByDescending<FileRecord> { retention.getValue(it.path).score!!.value }.thenBy { it.path.toString() })
-        val backupReplacement = rankedRepresentatives.firstOrNull { candidate ->
+        fun isBackup(file: FileRecord): Boolean = when (classified[file.directoryPath]) {
+            DirectoryClassification.BACKUP -> true
+            DirectoryClassification.PREFERRED, DirectoryClassification.PROTECTED, DirectoryClassification.UNKNOWN -> false
+            null -> directories.getValue(file.path).location == RetentionLocation.BACKUP
+        }
+        fun qualifiesAsReplacement(candidate: FileRecord): Boolean {
             val location = directories.getValue(candidate.path)
-            candidate.path !in redundant && location.location != RetentionLocation.TEMPORARY &&
+            return candidate.path !in redundant &&
+                (classified[candidate.directoryPath] == DirectoryClassification.PREFERRED ||
+                    location.location != RetentionLocation.TEMPORARY) &&
                 (location.date == null || (!conflictingDates && (preferredDate == null || location.date == preferredDate)))
         }
+        val aiPreferred = representatives.filter {
+            classified[it.directoryPath] == DirectoryClassification.PREFERRED && qualifiesAsReplacement(it)
+        }.singleOrNull()
+        val backupReplacement = aiPreferred ?: rankedRepresentatives.firstOrNull(::qualifiesAsReplacement)
         val reducedBackupDirectories = mutableSetOf<Path>()
         for (backup in rankedRepresentatives) {
-            if (backup.path in redundant || directories.getValue(backup.path).location != RetentionLocation.BACKUP) continue
+            if (backup.path in redundant || !isBackup(backup)) continue
             if (backupReplacement == null || backupReplacement.path == backup.path ||
-                retention.getValue(backupReplacement.path).score!!.value <= retention.getValue(backup.path).score!!.value) continue
+                (backupReplacement != aiPreferred &&
+                    retention.getValue(backupReplacement.path).score!!.value <= retention.getValue(backup.path).score!!.value)) continue
             redundant[backup.path] = backupReplacement
             reducedBackupDirectories += backup.directoryPath
         }
@@ -192,11 +228,17 @@ class DuplicateRecommendationEngine(
             if (!plainChronological || !sameOrganization) add(RecommendationReason.UNKNOWN_OR_SPECIAL_LOCATION)
             if (conflictingDates || protectedByFilenameDate) add(RecommendationReason.DIRECTORY_EVIDENCE_CONFLICT)
             if (reducedBackupDirectories.isNotEmpty()) add(RecommendationReason.EXPENDABLE_BACKUP_LOCATION)
+            classified.values.forEach { add(it.recommendationReason) }
         }
         val backupEvidence = ConfidenceAssessment(95, setOf(ConfidenceReason.EXPENDABLE_BACKUP_LOCATION,
             ConfidenceReason.BETTER_RETAINED_LOCATION),
-            "The existing backup/import/sync classification marks this location and its descendants expendable " +
-                "when a higher-scoring retained replacement exists without known folder-date contradictions.")
+            if (classified.isEmpty())
+                "The existing backup/import/sync classification marks this location and its descendants expendable " +
+                    "when a higher-scoring retained replacement exists without known folder-date contradictions."
+            else "An exact-directory AI BACKUP result, or the unchanged legacy backup rule for an unclassified directory, " +
+                "permits considering this location expendable only with a stronger retained replacement. " +
+                "A unique AI PREFERRED location can supply that preference without a larger numerical score; " +
+                "known folder-date contradictions and duplicate/replacement evidence still control the decision.")
         val decision = if (reducedBackupDirectories.isNotEmpty() && preferred != null) backupEvidence else
             retentionEvidence(localDirectories.values.toList(), retention, chronologicalWinner,
                 captureDate, plainChronological && sameOrganization, conflictingDates || protectedByFilenameDate)
@@ -236,8 +278,9 @@ class DuplicateRecommendationEngine(
                 val original = redundant[file.path]
                 val acrossDirectories = original != null && file.directoryPath != original.directoryPath
                 val backupReduction = acrossDirectories && file.directoryPath in reducedBackupDirectories
-                val backupFallback = original == null &&
-                    directories.getValue(file.path).location == RetentionLocation.BACKUP
+                val backupFallback = original == null && isBackup(file)
+                val classification = classified[file.directoryPath]
+                val replacementClassification = original?.let { classified[it.directoryPath] }
                 val role = when {
                     original != null -> FileRecommendationRole.REDUNDANT_CANDIDATE
                     file == preferred -> FileRecommendationRole.PREFERRED
@@ -259,10 +302,15 @@ class DuplicateRecommendationEngine(
                     if (original != null) add(RecommendationReason.RETAINED_REPLACEMENT)
                     if (role == FileRecommendationRole.PRESERVE) add(RecommendationReason.MULTIPLE_RETAINED_LOCATIONS)
                     if (backupFallback) add(RecommendationReason.BACKUP_FALLBACK_COPY)
+                    classification?.let { add(it.recommendationReason) }
+                    if (acrossDirectories) replacementClassification?.let { add(it.recommendationReason) }
                 }
-                val fileExplanation = when {
+                val baseFileExplanation = when {
                     backupReduction ->
-                        "Likely redundant backup/import/sync copy: this location is expendable because the higher-scoring copy ${original.path} remains preserved."
+                        if (classification != null || classified[original.directoryPath] != null)
+                            "Likely redundant backup copy: a qualifying retained replacement ${original.path} remains preserved. " +
+                                aiExplanation(original.directoryPath)
+                        else "Likely redundant backup/import/sync copy: this location is expendable because the higher-scoring copy ${original.path} remains preserved."
                     acrossDirectories ->
                         "Likely redundant candidate: its date-only directory does not match the supported date; prefer ${original.path}."
                     original != null ->
@@ -276,7 +324,13 @@ class DuplicateRecommendationEngine(
                     else ->
                         "Preserve this representative of its name/location; no rule establishes that the collection is expendable."
                 }
-                val locationEvidence = when {
+                val fileExplanation = if (classification == null) baseFileExplanation
+                    else "$baseFileExplanation ${aiExplanation(file.directoryPath)}"
+                val baseLocationEvidence = when {
+                    original == null && collectionFloor(file) -> ConfidenceAssessment(90,
+                        setOf(classification!!.confidenceReason, ConfidenceReason.COLLECTION_REPRESENTATIVE),
+                        "Preserve a representative of this collection regardless of backup ancestors or another preferred location. " +
+                            aiExplanation(file.directoryPath))
                     backupReduction -> backupEvidence
                     backupFallback -> ConfidenceAssessment(90, setOf(ConfidenceReason.BACKUP_FALLBACK_COPY),
                         "No stronger qualifying retained replacement establishes that this backup copy can be redundant; preserve it.")
@@ -284,6 +338,14 @@ class DuplicateRecommendationEngine(
                     original != null || preferred != null -> localEvidence.getValue(file.directoryPath)
                     else -> decision
                 }
+                val classificationReasons = buildSet {
+                    classification?.let { add(it.confidenceReason) }
+                    if (acrossDirectories) replacementClassification?.let { add(it.confidenceReason) }
+                }
+                val locationEvidence = if (classificationReasons.isEmpty()) baseLocationEvidence else
+                    baseLocationEvidence.copy(reasonCodes = baseLocationEvidence.reasonCodes + classificationReasons,
+                        explanation = "${baseLocationEvidence.explanation} ${aiExplanation(file.directoryPath)} " +
+                            if (acrossDirectories) aiExplanation(original.directoryPath) else "")
                 val evidence = if (role == FileRecommendationRole.PRESERVE &&
                     localDirectories.getValue(file.directoryPath).size > 1) {
                     val local = localEvidence.getValue(file.directoryPath)
@@ -314,8 +376,9 @@ class DuplicateRecommendationEngine(
                 file.path to FileRecommendation(file, role, normalizedRecommendationFilename(file.name), reasons,
                     fileExplanation, confidence, original?.path)
             }, duplicateConfidence)
-        val requiredDirectories = if (chronologicalWinner != null) setOf(chronologicalWinner.directoryPath)
-            else localDirectories.keys - reducedBackupDirectories
+        val requiredDirectories = (if (chronologicalWinner != null) setOf(chronologicalWinner.directoryPath)
+            else localDirectories.keys - reducedBackupDirectories) +
+            representatives.filter(::collectionFloor).map { it.directoryPath }
         return enforceRetentionPlanSafety(proposal, ordered, requiredDirectories, protectedPaths)
     }
 
@@ -344,6 +407,22 @@ class DuplicateRecommendationEngine(
 
     private val FilenameEvidence.isCopyVariant: Boolean
         get() = backupSuffix || numberedSuffix != null
+
+    private val DirectoryClassification.recommendationReason: RecommendationReason
+        get() = when (this) {
+            DirectoryClassification.PREFERRED -> RecommendationReason.AI_PREFERRED
+            DirectoryClassification.BACKUP -> RecommendationReason.AI_BACKUP
+            DirectoryClassification.PROTECTED -> RecommendationReason.AI_PROTECTED
+            DirectoryClassification.UNKNOWN -> RecommendationReason.AI_UNKNOWN
+        }
+
+    private val DirectoryClassification.confidenceReason: ConfidenceReason
+        get() = when (this) {
+            DirectoryClassification.PREFERRED -> ConfidenceReason.AI_PREFERRED
+            DirectoryClassification.BACKUP -> ConfidenceReason.AI_BACKUP
+            DirectoryClassification.PROTECTED -> ConfidenceReason.AI_PROTECTED
+            DirectoryClassification.UNKNOWN -> ConfidenceReason.AI_UNKNOWN
+        }
 
     private fun retentionEvidence(
         directories: List<List<FileRecord>>,

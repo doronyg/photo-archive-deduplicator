@@ -1,0 +1,31 @@
+CREATE TABLE directoryAiClassification (
+    directoryPath TEXT NOT NULL,
+    serverUrl TEXT NOT NULL,
+    model TEXT NOT NULL,
+    promptVersion TEXT NOT NULL,
+    preferredRootsKey TEXT NOT NULL,
+    originalPath TEXT NOT NULL,
+    classification TEXT NOT NULL CHECK (classification IN ('PREFERRED', 'BACKUP', 'PROTECTED', 'UNKNOWN')),
+    classifiedAt INTEGER NOT NULL,
+    PRIMARY KEY (directoryPath, serverUrl, model, promptVersion, preferredRootsKey)
+);
+
+selectForPaths:
+SELECT * FROM directoryAiClassification
+WHERE directoryPath IN :paths
+AND serverUrl = :serverUrl AND model = :model
+AND promptVersion = :promptVersion AND preferredRootsKey = :preferredRootsKey
+ORDER BY directoryPath;
+
+selectAll:
+SELECT * FROM directoryAiClassification
+ORDER BY directoryPath, classifiedAt DESC, serverUrl, model, promptVersion, preferredRootsKey;
+
+upsert:
+INSERT OR REPLACE INTO directoryAiClassification (
+    directoryPath, serverUrl, model, promptVersion, preferredRootsKey,
+    originalPath, classification, classifiedAt
+) VALUES (
+    :directoryPath, :serverUrl, :model, :promptVersion, :preferredRootsKey,
+    :originalPath, :classification, :classifiedAt
+);

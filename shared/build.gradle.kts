@@ -45,6 +45,8 @@ kotlin {
             implementation(libs.cmp.material3)
             implementation(libs.cmp.ui.tooling.preview)
             implementation(libs.kotlinx.coroutines.core)
+            api(libs.ktor.client.core)
+            implementation(libs.kotlinx.serialization.json)
             implementation(libs.sqldelight.runtime)
             implementation(libs.sqldelight.async.extensions)
             implementation(libs.kim)
@@ -54,13 +56,16 @@ kotlin {
         commonTest.dependencies {
             implementation(libs.kotlin.test)
             implementation(libs.kotlinx.coroutines.test)
+            implementation(libs.ktor.client.mock)
             implementation(libs.okio.fakefilesystem)
         }
         // Desktop stores the inventory in a SQLite file via JDBC; jvmTest inherits this
         jvmMain.dependencies {
+            implementation(libs.ktor.client.okhttp)
             implementation(libs.sqldelight.sqlite.driver)
         }
         androidMain.dependencies {
+            implementation(libs.ktor.client.okhttp)
             implementation(libs.sqldelight.android.driver)
         }
         // Android host tests also run on the JVM, so they use the in-memory JDBC driver too

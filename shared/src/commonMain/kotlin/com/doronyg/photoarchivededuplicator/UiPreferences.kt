@@ -2,6 +2,7 @@ package com.doronyg.photoarchivededuplicator
 
 import app.cash.sqldelight.async.coroutines.awaitAsList
 import com.doronyg.photoarchivededuplicator.db.FilesDatabase
+import com.doronyg.photoarchivededuplicator.classification.OllamaSettings
 import com.doronyg.photoarchivededuplicator.recommendation.RecommendationAction
 import com.doronyg.photoarchivededuplicator.scan.DuplicateFileType
 import com.doronyg.photoarchivededuplicator.scan.DuplicateSortCriterion
@@ -22,7 +23,7 @@ import kotlinx.coroutines.withContext
 
 enum class UiTab(val title: String) {
     SCAN("Scan"), BROWSE("Browse"), DUPLICATES("Duplicates"), SUSPECTED_DUPLICATES("Suspected duplicates"),
-    STATISTICS("Statistics"), EXCLUSIONS("Exclusions"), LOGS("Logs"),
+    STATISTICS("Statistics"), OLLAMA("Ollama settings"), EXCLUSIONS("Exclusions"), LOGS("Logs"),
 }
 
 data class UiChoices(
@@ -40,6 +41,7 @@ data class UiChoices(
     val logFilter: String = "",
     val logMinimum: LogLevel = LogLevel.D,
     val logFollow: Boolean = true,
+    val ollama: OllamaSettings = OllamaSettings(),
 )
 
 /** App-lifetime writer; edits publish immediately, while only complete snapshots reach SQLite. */
@@ -135,6 +137,8 @@ internal fun encodeUiChoices(choices: UiChoices): Map<String, String> = buildMap
     put("logFollow", choices.logFollow.toString())
     put("browseStack.count", choices.browseStack.size.toString())
     choices.browseStack.forEachIndexed { index, path -> put("browseStack.$index", path) }
+    put("ollama.baseUrl", choices.ollama.baseUrl)
+    put("ollama.model", choices.ollama.model)
 }
 
 internal fun decodeUiChoices(
@@ -203,5 +207,9 @@ internal fun decodeUiChoices(
         logFilter = entries["logFilter"] ?: "",
         logMinimum = enumValue("logMinimum", LogLevel.entries, LogLevel.D),
         logFollow = follow,
+        ollama = OllamaSettings(
+            baseUrl = entries["ollama.baseUrl"] ?: "",
+            model = entries["ollama.model"] ?: "",
+        ),
     )
 }

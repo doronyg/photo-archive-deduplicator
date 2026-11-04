@@ -22,6 +22,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.doronyg.photoarchivededuplicator.exif.ExifQueueController
+import com.doronyg.photoarchivededuplicator.UiPreferences
+import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificationController
+import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificationJobState
 import com.doronyg.photoarchivededuplicator.recommendation.FileRecommendationRole
 import com.doronyg.photoarchivededuplicator.recommendation.FileStatistics
 import com.doronyg.photoarchivededuplicator.recommendation.RecommendationAction
@@ -73,7 +76,7 @@ internal fun formatRecommendationStatistics(report: RecommendationStatisticsRepo
                 RecommendationAction.KEEP_ONE -> "Keep one"
                 RecommendationAction.KEEP_MULTIPLE -> "Keep multiple"
                 RecommendationAction.REVIEW -> "Review"
-                RecommendationAction.PROTECTED -> "Protected (reserved)"
+                RecommendationAction.PROTECTED -> "Protected"
             }
             bucket(name, statistics.byAction.getValue(action))
         }
@@ -105,8 +108,15 @@ internal fun RecommendationStatisticsScreen(
     queue: ExifQueueController,
     scanning: Boolean,
     modifier: Modifier = Modifier,
+    directoryClassifications: DirectoryClassificationController? = null,
+    preferences: UiPreferences? = null,
 ) {
-    val service = remember(repository, retention) { RecommendationStatisticsService(repository, retention) }
+    val settings = preferences?.state?.collectAsState()?.value?.ollama
+    val classificationContext = remember(settings) { settings?.let { runCatching { it.context() }.getOrNull() } }
+    val classificationState = directoryClassifications?.state?.collectAsState()?.value ?: DirectoryClassificationJobState()
+    val service = remember(repository, retention, classificationContext) {
+        RecommendationStatisticsService(repository, retention, classificationContext = classificationContext)
+    }
     val queueState by queue.state.collectAsState()
     val queueKey = exifQueueRefreshKey(queueState)
     val latestScanning by rememberUpdatedState(scanning)
@@ -117,7 +127,7 @@ internal fun RecommendationStatisticsScreen(
     var loading by remember { mutableStateOf(false) }
     val blocked = scanning || queueState.isRunning
 
-    LaunchedEffect(service, queueKey, blocked, refresh) {
+    LaunchedEffect(service, queueKey, blocked, refresh, classificationState.revision) {
         val request = ++generation
         text = null
         error = null
@@ -140,6 +150,8 @@ internal fun RecommendationStatisticsScreen(
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("Recommendation statistics", style = MaterialTheme.typography.titleLarge)
         Text("All stored roots, excluding excluded folders. Independent of duplicate-tab search filters.",
+            style = MaterialTheme.typography.bodySmall)
+        Text("Uses cached AI classifications for the current Ollama settings only; never contacts the server.",
             style = MaterialTheme.typography.bodySmall)
         OutlinedButton(enabled = !blocked && !loading, onClick = { refresh++ }) { Text("Refresh statistics") }
         when {

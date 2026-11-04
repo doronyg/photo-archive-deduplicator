@@ -13,6 +13,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import com.doronyg.photoarchivededuplicator.exif.ExifRecord
+import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificationRecord
 import com.doronyg.photoarchivededuplicator.recommendation.ConfidenceAssessment
 import com.doronyg.photoarchivededuplicator.recommendation.DuplicateGroupRecommendation
 import com.doronyg.photoarchivededuplicator.recommendation.FileRecommendation
@@ -34,11 +35,13 @@ internal fun rememberDuplicateRecommendations(
     exif: Map<Path, ExifRecord>,
     retention: Map<Path, RetentionPresentation>,
     evidenceReady: Boolean,
+    directoryClassifications: Map<Path, DirectoryClassificationRecord> = emptyMap(),
 ): Map<Path, DuplicateGroupRecommendation>? {
-    val token = remember(groups, exif, retention, evidenceReady) { Any() }
+    val token = remember(groups, exif, retention, evidenceReady, directoryClassifications) { Any() }
     val snapshot by produceState<RecommendationSnapshot?>(null, token) {
         value = null
-        value = RecommendationSnapshot(token, recommendDuplicateGroups(groups, exif, retention, evidenceReady))
+        value = RecommendationSnapshot(token, recommendDuplicateGroups(groups, exif, retention, evidenceReady,
+            directoryClassifications = directoryClassifications))
     }
     return snapshot?.takeIf { it.token === token }?.byFile
 }
@@ -129,7 +132,11 @@ internal fun DuplicateRecommendationSummary(recommendation: DuplicateGroupRecomm
 }
 
 @Composable
-internal fun FileRecommendationLine(path: Path, recommendation: FileRecommendation?) {
+internal fun FileRecommendationLine(
+    path: Path,
+    recommendation: FileRecommendation?,
+    directoryClassification: DirectoryClassificationRecord? = null,
+) {
     var expanded by remember(path, recommendation) { mutableStateOf(false) }
     Column {
         Text(fileRecommendationText(recommendation), style = MaterialTheme.typography.bodySmall,
@@ -140,6 +147,9 @@ internal fun FileRecommendationLine(path: Path, recommendation: FileRecommendati
             Text(fileDecisionConfidenceSummaryText(recommendation), style = MaterialTheme.typography.bodySmall)
             if (recommendation.role == FileRecommendationRole.REDUNDANT_CANDIDATE) {
                 Text(retainedReplacementText(recommendation), style = MaterialTheme.typography.bodySmall)
+            }
+            directoryClassification?.let {
+                Text(directoryClassificationRecordText(it), style = MaterialTheme.typography.bodySmall)
             }
         }
         if (expanded && recommendation != null) {

@@ -2,6 +2,10 @@ package com.doronyg.photoarchivededuplicator.scan
 
 import com.doronyg.photoarchivededuplicator.db.FilesDatabase
 import com.doronyg.photoarchivededuplicator.UiChoices
+import com.doronyg.photoarchivededuplicator.allUiChoices
+import com.doronyg.photoarchivededuplicator.classification.*
+import com.doronyg.photoarchivededuplicator.exif.*
+import com.doronyg.photoarchivededuplicator.retention.*
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
@@ -35,7 +39,7 @@ class SchemaMigrationTest {
                     INSERT INTO scanFile VALUES
                     ('/archive/existing.jpg', '/archive', 'existing.jpg', 'jpg', 42, 456, 789)
                 """.trimIndent(), 0).await()
-                assertEquals(6L, FilesDatabase.Schema.version)
+                assertEquals(7L, FilesDatabase.Schema.version)
                 guarded.execute(null, "PRAGMA user_version = 1", 0).await()
             }
             // Uses the same schema constructor as production desktop. Android's driver
@@ -123,6 +127,61 @@ class SchemaMigrationTest {
                 val choices = UiChoices(scanRoot = "/saved")
                 reopened.saveUiChoices(choices)
                 assertEquals(choices, reopened.loadUiChoices())
+            } finally {
+                reopenedDriver.close()
+            }
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun migratingVersionSixAddsClassificationsWithoutChangingExistingData() = runTest {
+        val driver = createMigrationTestDriver(migrate = false)
+        val io = TrackingIoDispatcher(StandardTestDispatcher(testScheduler))
+        val guarded = IoGuardedDriver(driver, io)
+        val root = "/archive".toPath()
+        try {
+            withContext(io) {
+                FilesDatabase.Schema.create(guarded).await()
+                guarded.execute(null, "DROP TABLE directoryAiClassification", 0).await()
+                guarded.execute(null, "PRAGMA user_version = 6", 0).await()
+            }
+            val repository = DirectoryRepository(createFilesDatabase(guarded), io)
+            repository.beginScanSession(root)
+            repository.recordListing(root, DirectoryListing(emptyList(), listOf(
+                DirectoryListing.Entry(root / "雪.jpg", 42, 456, 100),
+            )), 789)
+            repository.addExclusion(root / "private", "Keep out")
+            repository.checkpointScanSession(ScanSessionRecord(root, 12_345, finished = true))
+            repository.saveUiChoices(allUiChoices)
+            val file = repository.allFiles().single()
+            val exif = ExifRecord(ExifInput.from(file), ExifReadResult(ExifStatus.NO_EXIF), 800)
+            val score = FileScore(FileScoreInput.from(file), ScoreIdentity("retention", "rules", "1", "default"),
+                0.5, listOf(ScoreFactor("metadata", 0.5, "Preserved")), 801)
+            assertTrue(repository.saveFileExif(exif))
+            assertTrue(repository.saveFileScore(score))
+            val directories = repository.allDirectories()
+            val files = repository.allFiles()
+            val exclusions = repository.exclusions()
+            val session = repository.currentScanSession()
+            val reopenedDriver = withContext(io) { createMigrationTestDriver(migrate = true) }
+            try {
+                val reopened = DirectoryRepository(createFilesDatabase(IoGuardedDriver(reopenedDriver, io)), io)
+                assertEquals(7L, FilesDatabase.Schema.version)
+                assertEquals(directories, reopened.allDirectories())
+                assertEquals(files, reopened.allFiles())
+                assertEquals(exclusions, reopened.exclusions())
+                assertEquals(session, reopened.currentScanSession())
+                assertEquals(allUiChoices, reopened.loadUiChoices())
+                assertEquals(listOf(exif), reopened.fileExif(listOf(file.path)))
+                assertEquals(listOf(score), reopened.fileScores(listOf(file.path)))
+                val context = DirectoryClassificationContext("http://test.invalid", "test-model")
+                assertTrue(reopened.directoryClassifications(listOf(root), context).isEmpty())
+                val classification = DirectoryClassificationRecord(root, root.toString(),
+                    DirectoryClassification.UNKNOWN, context, 900)
+                reopened.saveDirectoryClassification(classification)
+                assertEquals(listOf(classification), reopened.directoryClassifications(listOf(root), context))
             } finally {
                 reopenedDriver.close()
             }

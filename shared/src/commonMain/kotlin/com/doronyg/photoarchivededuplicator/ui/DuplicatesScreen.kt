@@ -40,6 +40,9 @@ import androidx.compose.ui.unit.dp
 import com.doronyg.photoarchivededuplicator.scan.DirectoryRepository
 import com.doronyg.photoarchivededuplicator.PathActions
 import com.doronyg.photoarchivededuplicator.UiPreferences
+import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificationController
+import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificationJobState
+import com.doronyg.photoarchivededuplicator.scan.inventoryPath
 import com.doronyg.photoarchivededuplicator.exif.ExifExtractionService
 import com.doronyg.photoarchivededuplicator.exif.ExifQueueController
 import com.doronyg.photoarchivededuplicator.exif.ExifQueuePhase
@@ -69,7 +72,7 @@ private data class SortedCandidates(
 )
 
 @Composable
-fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathActions: PathActions, preferences: UiPreferences, retentionScores: RetentionScoreService, exifService: ExifExtractionService, queue: ExifQueueController, scanRunning: Boolean, modifier: Modifier = Modifier) {
+fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathActions: PathActions, preferences: UiPreferences, retentionScores: RetentionScoreService, exifService: ExifExtractionService, queue: ExifQueueController, scanRunning: Boolean, modifier: Modifier = Modifier, directoryClassifications: DirectoryClassificationController? = null) {
     val choices by preferences.state.collectAsState()
     val queueState by queue.state.collectAsState()
     val queueRefreshKey = exifQueueRefreshKey(queueState)
@@ -102,9 +105,15 @@ fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathAc
     // A new source/filter gets a fresh token; changing only sort order deliberately does not.
     val exifToken = remember(groups, rootText, fileType, filenamePattern, repository, exifService, queue, exifGeneration) { ExifSnapshotToken() }
     val recommendationGroups = remember(groups) { groups.orEmpty().map { it.files } }
+    val classificationState = directoryClassifications?.state?.collectAsState()?.value ?: DirectoryClassificationJobState()
+    val classificationContext = remember(choices.ollama) { runCatching { choices.ollama.context() }.getOrNull() }
+    var classificationCacheRefresh by remember { mutableStateOf(0) }
+    val classificationCache = rememberCachedDirectoryClassifications(repository, recommendationGroups,
+        classificationContext, classificationState.revision, classificationCacheRefresh)
     val recommendations = rememberDuplicateRecommendations(recommendationGroups, exif, reportRetention,
-        evidenceReady = !scanRunning && !queueState.isRunning && !scoring && !exifLoading &&
-            loadedExifToken?.isCurrent(exifToken) == true && loadedExifKey == queueRefreshKey)
+        evidenceReady = classificationCache.ready && !scanRunning && !queueState.isRunning && !scoring && !exifLoading &&
+            loadedExifToken?.isCurrent(exifToken) == true && loadedExifKey == queueRefreshKey,
+        directoryClassifications = classificationCache.records)
     val sortRecommendations = recommendations.takeIf {
         choices.duplicateSort.any { rule -> rule.enabled && rule.criterion == DuplicateSortCriterion.RECOMMENDATION }
     }
@@ -219,6 +228,11 @@ fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathAc
 
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("Duplicate candidates", style = MaterialTheme.typography.titleLarge)
+        directoryClassifications?.let { controller ->
+            DirectoryClassificationControls(controller, choices.ollama,
+                displayedSnapshot?.groups?.map { it.files }?.takeUnless { busy || scanRunning },
+                classificationCache, onReloadCache = { classificationCacheRefresh++ })
+        }
         OutlinedTextField(
             value = rootText,
             onValueChange = { value -> invalidateExif(); preferences.update { it.copy(duplicateRoot = value) }; groups = null },
@@ -292,7 +306,8 @@ fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathAc
                     groups = null
                     retention = null
                     try {
-                        val results = repository.duplicateCandidates(selected.toPath(), filter)
+                        val root = selected.toPath().inventoryPath()
+                        val results = completeDuplicateGroupsUnderRoot(repository.duplicateCandidates(filter = filter), root)
                         searchedRoot = selected
                         searchedFilter = filter
                         groups = results
@@ -399,6 +414,8 @@ fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathAc
                             }
                             Text("Sort changes apply immediately; search again after changing inventory or exclusions.",
                                 style = MaterialTheme.typography.bodySmall)
+                            Text("Folder search selects complete matching groups; copies outside the folder are included.",
+                                style = MaterialTheme.typography.bodySmall)
                             Text("Highest retention score first within each group. Scores are advisory, not content verification. Tap a score for its factors.",
                                 style = MaterialTheme.typography.bodySmall)
                             Text("Stored EXIF capture dates influence advisory scores. Manual analysis uses the displayed groups and the same eligibility/cache rules as automatic analysis. Missing EXIF adds no bonus or penalty. No GPS.",
@@ -427,7 +444,8 @@ fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathAc
                                     Text("Created ${formatEpochMillis(file.createdAt)} · modified ${formatEpochMillis(file.modifiedAt)}",
                                         style = MaterialTheme.typography.bodySmall)
                                     RetentionScoreLine(file.path, reportRetention[file.path])
-                                    FileRecommendationLine(file.path, recommendations?.get(file.path)?.files?.get(file.path))
+                                    FileRecommendationLine(file.path, recommendations?.get(file.path)?.files?.get(file.path),
+                                        classificationCache.records[file.directoryPath.inventoryPath()])
                                     ExifMetadataLine(file.path, exif[file.path])
                                 }
                             }

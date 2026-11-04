@@ -369,7 +369,7 @@ Do not classify these candidates as exact duplicates yet.
 Analyze complete regular and suspected groups using stored files, current EXIF,
 and existing retention assessments. This is a separate, pure rule-based layer:
 retention algorithm v5, its weights, scoring ambiguity labels, and persistence
-remain unchanged. No AI, filesystem reads, content verification, or file
+remain unchanged. No AI calls, filesystem reads, content verification, or file
 deletion/modification/movement is involved.
 
 Return a group action (`KEEP_ONE`, `KEEP_MULTIPLE`, or `REVIEW`), qualitative
@@ -503,6 +503,85 @@ reason codes without changing file order. Calculations run off the UI
 dispatcher; source/evidence changes invalidate previous presentation snapshots.
 Active scans/EXIF queues or loading evidence produce review-only results. No
 recommendations are persisted and no database migration is needed.
+
+#### User-triggered Ollama directory classification
+
+The Ollama settings screen configures a server base URL and model identifier.
+Both default to empty; configuration alone never
+contacts a server. An explicit Fetch models action calls `GET {baseUrl}/api/tags`
+using the entered URL, without requiring a selected model or sending directory
+data. Users can choose an installed model from the returned list or enter an
+identifier manually, then save settings. Android permits HTTP for an explicitly configured endpoint
+and declares network access. The app lazily creates its shared Ktor client only
+when the user fetches models or starts a classification job and closes it after cancelling requests
+at shutdown.
+
+Ollama settings also offers View saved directory results, a database-only viewer
+with directory/classification/model text filtering. Current saved settings shows
+only matching server/model/prompt results; All saved results includes older
+profiles and prompt versions, explicitly marked as not used by current settings.
+Show the directory, classification, timestamp, model, server and prompt version.
+Reloading never contacts Ollama; an open viewer updates as job results persist.
+The results list uses the shared desktop scrollbar (touch scrolling on Android).
+Copy results exports the entire filtered snapshot, including off-screen rows,
+in displayed order with profile/timestamp details and escaped paths and text.
+AI classifications affect group retention policy, not numeric individual-file
+retention scores or duplicate-confidence calculations.
+
+Both duplicate screens offer classification, explicit refresh, cancellation and
+retry-failed controls. Scope is every complete group matching the current screen
+filters, including off-screen members and members outside a matching folder.
+Snapshot the selected dataset at invocation; later navigation/filter changes
+must not add new request targets. Deduplicate normalized directory paths and
+submit no directories outside those groups. Retry failures intersects the
+current selected dataset. Display unique/missing directories and completed,
+cached, remaining and failed counts; technical errors are visible.
+
+Use sequential requests through Ktor to `POST {configuredBaseUrl}/api/chat`.
+Send `stream: false`, `think: false`, temperature zero and an object JSON Schema requiring
+exactly `classification`, with only `PREFERRED`, `BACKUP`, `PROTECTED`, `UNKNOWN`.
+The model receives directory full path and directory name
+only: never filenames, contents/images, EXIF, scores or duplicate-group
+information. Paths/names are untrusted data, not instructions. The system prompt
+forbids invented contents, inherited backup labels and unsupported generic
+protection; insufficient evidence should produce UNKNOWN. PREFERRED is inferred
+from the supplied path, with no configured-root restriction. Reject malformed/extra result fields and unsupported
+values. Bound requests/responses and propagate cancellation. Technical failures
+are not successful UNKNOWN classifications and must remain retryable.
+
+Local diagnostics use the `Ollama` tag for request IDs, method/URL, request and
+response body previews, HTTP status, elapsed time, failures and cancellation.
+Body previews are escaped and capped at 4 KiB; they may contain directory paths
+and model output. Job logs include cache skips, persisted results and final counts.
+In the Logs screen, filter by `Ollama` and select `D+` to include payload previews.
+
+Persist each successful result immediately in `directoryAiClassification`.
+Migration `6.sqm` adds this independent table (schema 6 to 7), preserving all
+inventory, EXIF, scores and preferences. Store normalized directory identity,
+original path, one of the four labels, server/model, prompt version and
+classification time. Prompt version 2 removes the preferred-root configuration
+and does not reuse version-1 classifications. The legacy roots-key column remains
+empty for new records to preserve schema compatibility; old rows are left intact.
+Legacy preferred-root preferences are ignored. Reuse only matching profiles;
+explicit refresh bypasses cache, while a failed refresh retains the last valid
+row. No AI explanations or confidence values are requested or stored.
+
+The deterministic group engine consumes cached exact-directory classifications.
+No AI data preserves existing behavior. An exact AI UNKNOWN or PROTECTED result
+vetoes deterministic backup expendability for that directory; BACKUP labels
+themselves never propagate to descendants. PROTECTED retains the collection's
+representative, including under a backup ancestor, without forbidding justified
+same-directory copy reduction. Existing explicit protected paths retain priority.
+PREFERRED is accepted as an AI location hint and supports group location choices;
+BACKUP alone never authorizes a redundant candidate. Duplicate confidence,
+direct retained-replacement evidence, collection/last-copy safety and individual
+retention scores remain independent of model output.
+
+Read cached labels and refresh recommendations as successful rows are persisted,
+without starting network calls from browsing, Statistics, copying or scoring.
+Classification jobs must not block ordinary browsing or depend on the filesystem
+lane. All HTTP tests use MockEngine/fakes and all migration/persistence tests use
+test databases, never the production archive database.
 
 #### Recommendation statistics
 

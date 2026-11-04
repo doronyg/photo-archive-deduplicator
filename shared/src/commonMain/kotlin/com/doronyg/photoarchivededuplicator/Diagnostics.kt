@@ -32,6 +32,7 @@ object LogTags {
     const val SCAN_CONTROLLER = "ScanController"
     const val RETENTION = "Retention"
     const val EXIF = "Exif"
+    const val OLLAMA = "Ollama"
 }
 
 enum class LogLevel { D, I, W, E }

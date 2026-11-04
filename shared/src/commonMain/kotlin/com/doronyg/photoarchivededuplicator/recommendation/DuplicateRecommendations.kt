@@ -1,5 +1,6 @@
 package com.doronyg.photoarchivededuplicator.recommendation
 
+import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificationRecord
 import com.doronyg.photoarchivededuplicator.exif.ExifRecord
 import com.doronyg.photoarchivededuplicator.retention.RetentionPresentation
 import com.doronyg.photoarchivededuplicator.scan.FileRecord
@@ -18,13 +19,14 @@ internal suspend fun recommendDuplicateGroups(
     evidenceReady: Boolean = true,
     dispatcher: CoroutineDispatcher = Dispatchers.Default,
     protectedPaths: Set<Path> = emptySet(),
+    directoryClassifications: Map<Path, DirectoryClassificationRecord> = emptyMap(),
 ): Map<Path, DuplicateGroupRecommendation> = withContext(dispatcher) {
     val context = currentCoroutineContext()
     val engine = DuplicateRecommendationEngine()
     buildMap {
         for (files in groups) {
             context.ensureActive()
-            val recommendation = engine.recommend(files, exif, retention, evidenceReady, protectedPaths)
+            val recommendation = engine.recommend(files, exif, retention, evidenceReady, protectedPaths, directoryClassifications)
             for (file in files) {
                 context.ensureActive()
                 put(file.path, recommendation)
