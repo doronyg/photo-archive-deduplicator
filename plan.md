@@ -356,6 +356,58 @@ For each group, report:
 
 Do not classify these candidates as exact duplicates yet.
 
+#### Deterministic group recommendations
+
+Analyze complete regular and suspected groups using stored files, current EXIF,
+and existing retention assessments. This is a separate, pure rule-based layer:
+retention algorithm v5, its weights, scoring ambiguity labels, and persistence
+remain unchanged. No AI, filesystem reads, content verification, or file
+deletion/modification/movement is involved.
+
+Return a group action (`KEEP_ONE`, `KEEP_MULTIPLE`, or `REVIEW`), qualitative
+metadata evidence strength, per-file roles, human-readable explanations, and
+stable reason codes. Derive preferred, redundant-candidate, and must-preserve
+members from those roles. `PROTECTED` is reserved for a future explicit policy;
+there is currently no protection classifier or protected-directory configuration.
+Do not hardcode names such as Zoo.
+
+Use the retention scorer's shared filename parser and directory evidence rather
+than interpreting explanation text or duplicating detection/scoring rules.
+Recognized copy suffixes normalize a filename family; stem case is preserved and
+only extension case is normalized for this comparison. Paths are not case-folded.
+
+For a unique unsuffixed original and valid numbered/backup timestamp variants in
+the same directory and filename family, prefer the original when sizes and
+successful, current full EXIF capture timestamps agree. Original offsets must be
+identical, with unknown separate from known and no timezone conversion. Known
+conflicting subseconds prevent a recommendation. Suffixes alone are insufficient.
+Repeated or mixed-order suffixes follow the existing parser. Numerical closeness
+does not veto an otherwise clear naming rule.
+
+Across locations, prefer a unique capture-date-matching chronological directory
+only when all remaining representatives have date-only directories under the same
+organization root and belong to the same normalized filename family. Other
+directories must contradict that capture date. Date-prefixed event labels,
+collections below a date, configured backup/temporary locations, and different
+organization roots do not qualify. Respect conflicting filename/folder-date
+evidence from the existing retention assessment; a higher score cannot override
+it. Never choose between two locations that both match the capture date merely
+because one date format scores higher.
+
+Local copy rules can retain one representative per name/location and return
+`KEEP_MULTIPLE`, preserving unknown collections rather than discarding their only
+copy. Otherwise return `REVIEW` for insufficient/conflicting evidence, absent or
+stale assessments, or unresolved alternatives. All non-candidate files remain
+preserved. These are advisory metadata recommendations, never proof of identical
+contents or permission to delete.
+
+Both duplicate tabs show a group summary and per-file explanations with expandable
+normalized names and reason codes. Regular Copy results includes the displayed
+recommendation snapshot without changing file order. Calculations run off the UI
+dispatcher; source/evidence changes invalidate previous presentation snapshots.
+Active scans/EXIF queues or loading evidence produce review-only results. No
+recommendations are persisted and no database migration is needed.
+
 Measure how many files and groups survive the initial filter.
 
 **Deliverable:** a candidate report showing the potential scope of deduplication.

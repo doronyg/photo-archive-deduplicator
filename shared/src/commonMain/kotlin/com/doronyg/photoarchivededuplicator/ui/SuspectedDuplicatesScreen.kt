@@ -32,6 +32,7 @@ import com.doronyg.photoarchivededuplicator.PathActions
 import com.doronyg.photoarchivededuplicator.exif.ExifQueueController
 import com.doronyg.photoarchivededuplicator.exif.ExifQueueState
 import com.doronyg.photoarchivededuplicator.exif.ExifQueuePhase
+import com.doronyg.photoarchivededuplicator.exif.ExifRecord
 import com.doronyg.photoarchivededuplicator.scan.DirectoryRepository
 import com.doronyg.photoarchivededuplicator.scan.SUSPECTED_IMAGE_MIN_SIZE_BYTES
 import com.doronyg.photoarchivededuplicator.scan.SuspectedDuplicateGroup
@@ -63,8 +64,10 @@ internal fun SuspectedDuplicatesScreen(
 ) {
     val queueState by queue.state.collectAsState()
     var observedRevision by remember(queue) { mutableStateOf(queueState.revision) }
+    var loadedRevision by remember(queue) { mutableStateOf<Long?>(null) }
     var groups by remember { mutableStateOf<List<SuspectedDuplicateGroup>>(emptyList()) }
     var scores by remember { mutableStateOf<Map<Path, RetentionPresentation>>(emptyMap()) }
+    var exif by remember { mutableStateOf<Map<Path, ExifRecord>>(emptyMap()) }
     var forceNextRefresh by remember { mutableStateOf(false) }
     var refresh by remember { mutableIntStateOf(0) }
     var generation by remember { mutableIntStateOf(0) }
@@ -73,6 +76,9 @@ internal fun SuspectedDuplicatesScreen(
     var error by remember { mutableStateOf<String?>(null) }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
+    val recommendationGroups = remember(groups) { groups.map { it.files } }
+    val recommendations = rememberDuplicateRecommendations(recommendationGroups, exif, scores,
+        evidenceReady = !loading && !scanning && !queueState.isRunning && loadedRevision == queueState.revision)
 
     LaunchedEffect(repository, retentionScores, queue, queueState.revision, refresh, scanning) {
         val request = ++generation
@@ -82,19 +88,25 @@ internal fun SuspectedDuplicatesScreen(
         val force = forceNextRefresh
         forceNextRefresh = false
         loading = true
+        loadedRevision = null
         groups = emptyList()
         scores = emptyMap()
+        exif = emptyMap()
         error = null
         try {
             val matches = repository.suspectedDuplicates()
             val assessment = if (shouldAssessSuspectedScores(queue.state.value, scanning, terminalRefresh, force)) {
                 retentionScores.assessSuspected(matches, force)
             } else retentionScores.storedSuspected(matches)
+            val storedExif = repository.fileExif(matches.flatMap { it.files }.map { it.path }, currentOnly = true)
+                .associateBy { it.input.path }
             val ordered = sortSuspectedFilesByRetention(matches, assessment.files)
             currentCoroutineContext().ensureActive()
             if (request == generation && revision == queue.state.value.revision) {
                 groups = ordered
                 scores = assessment.files
+                exif = storedExif
+                loadedRevision = revision
                 if (assessment.invalidatedFiles > 0) {
                     error = "Inventory or EXIF changed since these matches were loaded. Refresh to reload the affected groups."
                 }
@@ -186,6 +198,7 @@ internal fun SuspectedDuplicatesScreen(
                                 style = MaterialTheme.typography.titleMedium,
                             )
                             Text("${group.sizeBytes} bytes (${formatBytes(group.sizeBytes)}) · ${group.files.size} files")
+                            DuplicateRecommendationSummary(group.files.firstOrNull()?.let { recommendations?.get(it.path) })
                         }
                         items(group.files, key = { it.path.toString() }) { file ->
                             Column {
@@ -195,6 +208,8 @@ internal fun SuspectedDuplicatesScreen(
                                     style = MaterialTheme.typography.bodySmall,
                                 )
                                 RetentionScoreLine(file.path, scores[file.path])
+                                FileRecommendationLine(file.path, recommendations?.get(file.path)?.files?.get(file.path))
+                                ExifMetadataLine(file.path, exif[file.path])
                             }
                         }
                     }

@@ -88,7 +88,8 @@ fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathAc
     var cancellingQueue by remember { mutableStateOf(false) }
     var observedQueueRefreshKey by remember(queue) { mutableStateOf(queueRefreshKey) }
     var exifGeneration by remember { mutableStateOf(0L) }
-    var copyStatus by remember(groups, choices.duplicateSort, retention, exif) { mutableStateOf<String?>(null) }
+    var loadedExifToken by remember { mutableStateOf<ExifSnapshotToken?>(null) }
+    var loadedExifKey by remember { mutableStateOf<ExifQueueRefreshKey?>(null) }
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboardManager.current
     val listState = rememberLazyListState()
@@ -110,6 +111,11 @@ fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathAc
     val reportFilter = searchedFilter
     // A new source/filter gets a fresh token; changing only sort order deliberately does not.
     val exifToken = remember(groups, rootText, fileType, filenamePattern, repository, exifService, queue, exifGeneration) { ExifSnapshotToken() }
+    val recommendationGroups = remember(groups) { groups.orEmpty().map { it.files } }
+    val recommendations = rememberDuplicateRecommendations(recommendationGroups, exif, reportRetention,
+        evidenceReady = !scanRunning && !queueState.isRunning && !scoring && !exifLoading &&
+            loadedExifToken?.isCurrent(exifToken) == true && loadedExifKey == queueRefreshKey)
+    var copyStatus by remember(groups, choices.duplicateSort, retention, exif, recommendations) { mutableStateOf<String?>(null) }
     val latestExifToken by rememberUpdatedState(exifToken)
     fun isCurrent(token: ExifSnapshotToken) = token.isCurrent(latestExifToken)
     fun invalidateExif() {
@@ -151,6 +157,8 @@ fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathAc
                 val scores = if (loadScores) retentionScores.stored(source) else null
                 if (current()) {
                     exif = stored
+                    loadedExifToken = exifToken
+                    loadedExifKey = refreshKey
                     if (scores != null && generation == assessmentGeneration) retention = scores
                 }
             }
@@ -360,13 +368,14 @@ fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathAc
                                 DisableSelection {
                                     TextButton(enabled = !copying, onClick = {
                                         val reportExif = exif
+                                        val reportRecommendations = recommendations.orEmpty()
                                         copying = true
                                         copyStatus = null
                                         error = null
                                         scope.launch {
                                             try {
                                                 val text = formatDuplicateResults(reportRoot, reportFilter, displayed.rules, results,
-                                                    retention = reportRetention, exif = reportExif)
+                                                    retention = reportRetention, exif = reportExif, recommendations = reportRecommendations)
                                                 clipboard.setText(AnnotatedString(text))
                                                 copyStatus = "Copied ${results.size} groups, including full paths. Review before sharing."
                                             } catch (e: CancellationException) {
@@ -402,6 +411,7 @@ fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathAc
                                         }) { Text("Analyze EXIF") }
                                     }
                                 }
+                                DuplicateRecommendationSummary(group.files.firstOrNull()?.let { recommendations?.get(it.path) })
                             }
                             items(group.files, key = { it.path.toString() }) { file ->
                                 Column {
@@ -409,6 +419,7 @@ fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathAc
                                     Text("Created ${formatEpochMillis(file.createdAt)} · modified ${formatEpochMillis(file.modifiedAt)}",
                                         style = MaterialTheme.typography.bodySmall)
                                     RetentionScoreLine(file.path, reportRetention[file.path])
+                                    FileRecommendationLine(file.path, recommendations?.get(file.path)?.files?.get(file.path))
                                     ExifMetadataLine(file.path, exif[file.path])
                                 }
                             }

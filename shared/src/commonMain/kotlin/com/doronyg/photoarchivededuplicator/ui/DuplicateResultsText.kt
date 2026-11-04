@@ -6,6 +6,7 @@ import com.doronyg.photoarchivededuplicator.scan.DuplicateSortRule
 import com.doronyg.photoarchivededuplicator.retention.RetentionPresentation
 import com.doronyg.photoarchivededuplicator.retention.formatScoreValue
 import com.doronyg.photoarchivededuplicator.exif.ExifRecord
+import com.doronyg.photoarchivededuplicator.recommendation.DuplicateGroupRecommendation
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
@@ -22,6 +23,7 @@ internal suspend fun formatDuplicateResults(
     dispatcher: CoroutineDispatcher = Dispatchers.Default,
     retention: Map<Path, RetentionPresentation> = emptyMap(),
     exif: Map<Path, ExifRecord> = emptyMap(),
+    recommendations: Map<Path, DuplicateGroupRecommendation> = emptyMap(),
 ): String = withContext(dispatcher) {
     val context = currentCoroutineContext()
     buildString {
@@ -42,11 +44,23 @@ internal suspend fun formatDuplicateResults(
             appendLine("Group ${index + 1}: ${quoteResultText(group.name)}")
             appendLine("Size per file: ${group.sizeBytes} bytes (${formatBytes(group.sizeBytes)})")
             appendLine("Copies: ${group.files.size}")
+            val recommendation = group.files.firstOrNull()?.let { recommendations[it.path] }
+            if (recommendation != null) {
+                appendLine("Group recommendation: ${recommendation.action.name} (${recommendation.evidenceStrength.name} metadata evidence)")
+                appendLine("Recommendation explanation: ${quoteResultText(recommendation.explanation)}")
+                appendLine("Recommendation reasons: ${recommendation.reasonCodes.joinToString { it.name }}")
+            }
             group.files.forEach { file ->
                 context.ensureActive()
                 appendLine("  Path: ${quoteResultText(file.path.toString())}")
                 appendLine("  Created: ${file.createdAt?.let { "${formatEpochMillis(it)} UTC" } ?: "unknown"}")
                 appendLine("  Modified: ${file.modifiedAt?.let { "${formatEpochMillis(it)} UTC" } ?: "unknown"}")
+                recommendation?.files?.get(file.path)?.let { advice ->
+                    appendLine("  File recommendation: ${advice.role.name}")
+                    appendLine("  Recommendation explanation: ${quoteResultText(advice.explanation)}")
+                    appendLine("  Normalized filename: ${quoteResultText(advice.normalizedFilename)}")
+                    appendLine("  Recommendation reasons: ${advice.reasonCodes.joinToString { it.name }}")
+                }
                 val metadata = presentExif(exif[file.path])
                 appendLine("  ${quoteResultText(metadata.summary)}")
                 metadata.details.forEach { (label, value) ->

@@ -278,6 +278,15 @@ missing/current-profile scores from stored data only when inactive; queue termin
 refreshes and aborted-queue browsing use stored reads. Explicit Recompute scores
 remains available after cancellation. No scoring operation reopens image files.
 
+Deterministic group recommendations are computed in memory from these stored
+snapshots; they introduce no tables, migration, or score version change. Both
+duplicate screens reuse existing filename and directory evidence and expose
+group actions, per-file roles, explanations, and reason codes. Missing/stale or
+conflicting evidence produces review-only results. No source files are reread or
+modified, and no recommendation is a content-identity guarantee. Collection
+protection is deferred; the `PROTECTED` action is reserved but never emitted by
+current rules.
+
 ## Remembered UI choices
 
 The selected tab, scan folder, browse navigation stack, duplicate-search folder and

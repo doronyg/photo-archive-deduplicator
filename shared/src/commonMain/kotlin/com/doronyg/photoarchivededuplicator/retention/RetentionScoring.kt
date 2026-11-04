@@ -114,13 +114,13 @@ class RetentionScorer(config: RetentionConfig = RetentionConfig()) {
         val components = file.directoryPath.segments
         val date = strongestDate(components)
         val fullDate = date?.isoDate
-        val filename = filenameHints(file.path.name)
-        val filenameDate = if (fullDate != null) filenameDate(filename.dateName) else null
+        val filename = filenameEvidence(file.path.name)
+        val filenameDate = if (fullDate != null) filenameDate(filename.normalizedName) else null
         val filenameMismatch = fullDate != null && filenameDate != null && fullDate != filenameDate
         val exifDate = if (fullDate != null) usableExifDate(file, exif) else null
         val exifMatches = fullDate != null && exifDate == fullDate
         val exifMismatch = exifDate != null && exifDate != fullDate
-        val filenameProtectsFolder = exifMismatch && filenameDate(filename.dateName, includeCameraDates = true) == fullDate
+        val filenameProtectsFolder = exifMismatch && filenameDate(filename.normalizedName, includeCameraDates = true) == fullDate
         val penalizeFilename = filenameMismatch && !exifMatches
         val penalizeExif = exifMismatch && !filenameProtectsFolder
         val factors = buildList {
@@ -161,16 +161,10 @@ class RetentionScorer(config: RetentionConfig = RetentionConfig()) {
                 }
                 add(ScoreFactor("exif-date-mismatch", penalty, explanation))
             }
-            val lowercase = components.map { it.lowercase() }
-            val temporary = lowercase.any { component ->
-                component in config.temporaryDirectoryNames ||
-                    config.temporaryDirectoryPrefixes.any { component.startsWith(it) }
-            }
-            if (temporary) {
+            val location = directoryEvidence(file).location
+            if (location == RetentionLocation.TEMPORARY) {
                 add(ScoreFactor("temporary-location", config.temporaryPenalty, "Temporary directory location (counted once)."))
-            } else if (lowercase.any { component ->
-                component in config.backupDirectoryNames || config.backupDirectoryWords.any { containsWord(component, it) }
-            }) {
+            } else if (location == RetentionLocation.BACKUP) {
                 add(ScoreFactor("backup-location", config.backupPenalty, "Backup, import, or sync directory location (counted once)."))
             }
             if (filename.backupSuffix) {
@@ -200,6 +194,33 @@ class RetentionScorer(config: RetentionConfig = RetentionConfig()) {
     internal fun hasCompleteDirectoryDate(file: FileRecord): Boolean =
         strongestDate(file.directoryPath.segments)?.isoDate != null
 
+    internal fun directoryEvidence(file: FileRecord): DirectoryRetentionEvidence {
+        val components = file.directoryPath.segments
+        val date = strongestDate(components)
+        val lowercase = components.map { it.lowercase() }
+        val location = when {
+            lowercase.any { component ->
+                component in config.temporaryDirectoryNames ||
+                    config.temporaryDirectoryPrefixes.any { component.startsWith(it) }
+            } -> RetentionLocation.TEMPORARY
+            lowercase.any { component ->
+                component in config.backupDirectoryNames ||
+                    config.backupDirectoryWords.any { containsWord(component, it) }
+            } -> RetentionLocation.BACKUP
+            else -> RetentionLocation.ORDINARY
+        }
+        val directlyDated = date?.isoDate != null && date.endIndex == components.lastIndex &&
+            !LABELED_ISO_DATE.matches(components.last())
+        var organizationRoot: Path? = if (directlyDated) file.directoryPath else null
+        if (directlyDated) repeat(date!!.componentCount) { organizationRoot = organizationRoot?.parent }
+        return DirectoryRetentionEvidence(
+            date = date?.isoDate,
+            directlyDated = directlyDated,
+            location = location,
+            organizationRoot = organizationRoot,
+        )
+    }
+
     private fun exifEvidence(file: FileRecord, exif: ExifRecord?): ScoreFactor? {
         val date = usableExifDate(file, exif) ?: return null
         if (strongestDate(file.directoryPath.segments)?.isoDate == null) return null
@@ -213,33 +234,13 @@ class RetentionScorer(config: RetentionConfig = RetentionConfig()) {
             ?.substringBefore(' ')?.replace(':', '-')
     }
 
-    private data class DirectoryDate(val strength: Int, val isoDate: String?, val description: String)
-
-    private data class FilenameHints(val dateName: String, val backupSuffix: Boolean, val numberedSuffix: String?)
-
-    private fun filenameHints(name: String): FilenameHints {
-        val extensionIndex = name.lastIndexOf('.').takeIf { it > 0 }
-        val extension = extensionIndex?.let { name.substring(it) }.orEmpty()
-        var stem = extensionIndex?.let { name.substring(0, it) } ?: name
-        var backup = false
-        var numbered: String? = null
-        while (true) {
-            val backupMatch = BACKUP_COPY_SUFFIX.matchEntire(stem)
-            if (backupMatch != null) {
-                val parts = backupMatch.groupValues
-                val timestamp = "${parts[2]}:${parts[3]}:${parts[4]} ${parts[5]}:${parts[6]}:${parts[7]}"
-                if (validatedExifTimestamp(timestamp) == null) break
-                backup = true
-                stem = parts[1]
-                continue
-            }
-            val match = NUMBERED_COPY_SUFFIX.matchEntire(stem) ?: break
-            if (match.groupValues[2].toInt() == 0) break
-            if (numbered == null) numbered = "-${match.groupValues[2]}"
-            stem = match.groupValues[1]
-        }
-        return FilenameHints(stem + extension, backup, numbered)
-    }
+    private data class DirectoryDate(
+        val strength: Int,
+        val isoDate: String?,
+        val description: String,
+        val endIndex: Int = -1,
+        val componentCount: Int = 1,
+    )
 
     private fun strongestDate(components: List<String>): DirectoryDate? {
         var strongest: DirectoryDate? = null
@@ -254,6 +255,7 @@ class RetentionScorer(config: RetentionConfig = RetentionConfig()) {
                 index >= 2 && YEAR_PATTERN.matches(components[index - 2]) &&
                     MONTH_OR_DAY.matches(components[index - 1]) && MONTH_OR_DAY.matches(component) ->
                     completeDate(components[index - 2], components[index - 1], component, ALTERNATIVE_DATE)
+                        ?.copy(componentCount = 3)
                 YEAR_PATTERN.matches(component) && component.toInt() in 1..9999 ->
                     DirectoryDate(YEAR, null, "year")
                 index >= 1 && YEAR_PATTERN.matches(components[index - 1]) &&
@@ -262,7 +264,9 @@ class RetentionScorer(config: RetentionConfig = RetentionConfig()) {
                     DirectoryDate(YEAR_MONTH, null, "year/month")
                 else -> null
             }
-            if (candidate != null && candidate.strength >= (strongest?.strength ?: 0)) strongest = candidate
+            if (candidate != null && candidate.strength >= (strongest?.strength ?: 0)) {
+                strongest = candidate.copy(endIndex = index)
+            }
         }
         return strongest
     }
@@ -315,11 +319,6 @@ class RetentionScorer(config: RetentionConfig = RetentionConfig()) {
         const val YEAR_MONTH = 2
         const val YEAR = 1
         const val EXIF_EVIDENCE = "exif-date-evidence"
-        val BACKUP_COPY_SUFFIX = Regex(
-            "(.*\\S) \\(([0-9]{4})_([0-9]{2})_([0-9]{2}) ([0-9]{2})_([0-9]{2})_([0-9]{2}) UTC\\)",
-            RegexOption.IGNORE_CASE,
-        )
-        val NUMBERED_COPY_SUFFIX = Regex("(.+)-([0-9]{3})")
         val ISO_DATE = Regex("[0-9]{4}-[0-9]{2}-[0-9]{2}")
         val LABELED_ISO_DATE = Regex("[0-9]{4}-[0-9]{2}-[0-9]{2}[-_ ]+[^\\s_-].*")
         val WHATSAPP_FILENAME = Regex("(?:IMG|VID)-([0-9]{4})([0-9]{2})([0-9]{2})-WA[0-9]+(?:\\.[A-Z0-9]+)?",
