@@ -1,5 +1,6 @@
 package com.doronyg.photoarchivededuplicator.retention
 
+import app.cash.sqldelight.db.QueryResult
 import com.doronyg.photoarchivededuplicator.scan.*
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
@@ -11,6 +12,52 @@ import kotlin.test.*
 @OptIn(ExperimentalCoroutinesApi::class)
 class FileScorePersistenceTest {
     private val identity = ScoreIdentity("retention", "rules", "1", "default")
+
+    private suspend fun storageCounts(f: ConcurrencyFixture): List<Long> = f.lane.run("score storage counts") {
+        f.driver.executeQuery(null, """
+            SELECT (SELECT count(*) FROM scoreProfile),
+                   (SELECT count(*) FROM factorDefinition),
+                   (SELECT count(*) FROM fileScore),
+                   (SELECT count(*) FROM fileScoreFactor)
+        """.trimIndent(), { cursor ->
+            check(cursor.next().value)
+            QueryResult.Value((0..3).map { checkNotNull(cursor.getLong(it)) })
+        }, 0).await()
+    }
+
+    @Test
+    fun repeatedProfilesAndExactFactorTextAreSharedWithoutSharingContributions() = concurrencyTest { f ->
+        val original = seed(f)
+        val otherPath = f.root / "other.jpg"
+        f.repository.recordListing(f.root, DirectoryListing(emptyList(), listOf(
+            DirectoryListing.Entry(original.input.path, 42, 123, 100),
+            DirectoryListing.Entry(otherPath, 43, null, null),
+        )), 200)
+        val other = original.copy(input = FileScoreInput.from(f.repository.file(otherPath)!!),
+            value = 0.375, factors = original.factors.map { it.copy(contribution = it.contribution / 2) })
+        f.repository.saveFileScores(listOf(original, other))
+        assertEquals(listOf(1L, 2L, 2L, 4L), storageCounts(f))
+        assertEquals(setOf(original, other), f.repository.fileScores(listOf(original.input.path, otherPath)).toSet())
+        f.repository.saveFileScores(listOf(original, other))
+        assertEquals(listOf(1L, 2L, 2L, 4L), storageCounts(f))
+    }
+
+    @Test
+    fun failedSaveRollsBackNewDictionaryEntriesAlongWithScoresAndFactors() = concurrencyTest { f ->
+        val original = seed(f)
+        assertTrue(f.repository.saveFileScore(original))
+        val before = storageCounts(f)
+        var inserts = 0
+        f.driver.beforeStatement = {
+            if (it.startsWith("INSERT INTO fileScoreFactor") && ++inserts == 2) error("factor failure")
+        }
+        val replacement = original.copy(identity = identity.copy(configurationId = "new configuration"),
+            factors = listOf(ScoreFactor("new-key", 1.0, "New text"), ScoreFactor("another-key", -1.0, "Other text")))
+        assertFailsWith<IllegalStateException> { f.repository.saveFileScore(replacement) }
+        f.driver.beforeStatement = {}
+        assertEquals(before, storageCounts(f))
+        assertEquals(listOf(original), f.repository.fileScores(listOf(original.input.path)))
+    }
 
     private suspend fun seed(f: ConcurrencyFixture): FileScore {
         f.repository.seedRoot(f.root)
@@ -175,8 +222,14 @@ class FileScorePersistenceTest {
     fun cancellationAfterActualFactorMutationRollsBackBeforeQueuedRead() = concurrencyTest { f ->
         val original = seed(f)
         assertTrue(f.repository.saveFileScore(original))
+        val before = storageCounts(f)
         f.driver.pauseAfter = { it.startsWith("INSERT INTO fileScoreFactor") }
-        val save = launch { f.repository.saveFileScore(original.copy(value = 0.9, createdAt = 500)) }
+        val save = launch {
+            f.repository.saveFileScore(original.copy(
+                identity = identity.copy(configurationId = "cancelled configuration"),
+                value = 0.9, createdAt = 500,
+                factors = listOf(ScoreFactor("new-key", 0.9, "Cancelled text"))))
+        }
         f.driver.entered.await()
         val count = f.driver.statements.size
         val read = async { f.repository.fileScores(listOf(original.input.path)) }
@@ -185,6 +238,7 @@ class FileScorePersistenceTest {
         assertEquals(count, f.driver.statements.size)
         save.cancelAndJoin()
         assertEquals(listOf(original), read.await())
+        assertEquals(before, storageCounts(f))
         assertNull(f.driver.currentTransaction())
     }
 

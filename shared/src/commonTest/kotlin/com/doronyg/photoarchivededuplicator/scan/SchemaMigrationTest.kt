@@ -39,7 +39,7 @@ class SchemaMigrationTest {
                     INSERT INTO scanFile VALUES
                     ('/archive/existing.jpg', '/archive', 'existing.jpg', 'jpg', 42, 456, 789)
                 """.trimIndent(), 0).await()
-                assertEquals(7L, FilesDatabase.Schema.version)
+                assertEquals(8L, FilesDatabase.Schema.version)
                 guarded.execute(null, "PRAGMA user_version = 1", 0).await()
             }
             // Uses the same schema constructor as production desktop. Android's driver
@@ -143,8 +143,8 @@ class SchemaMigrationTest {
         val root = "/archive".toPath()
         try {
             withContext(io) {
-                FilesDatabase.Schema.create(guarded).await()
-                guarded.execute(null, "DROP TABLE directoryAiClassification", 0).await()
+                for (statement in historicalVersionOneSchema) guarded.execute(null, statement, 0).await()
+                FilesDatabase.Schema.migrate(guarded, 1, 6).await()
                 guarded.execute(null, "PRAGMA user_version = 6", 0).await()
             }
             val repository = DirectoryRepository(createFilesDatabase(guarded), io)
@@ -156,11 +156,26 @@ class SchemaMigrationTest {
             repository.checkpointScanSession(ScanSessionRecord(root, 12_345, finished = true))
             repository.saveUiChoices(allUiChoices)
             val file = repository.allFiles().single()
-            val exif = ExifRecord(ExifInput.from(file), ExifReadResult(ExifStatus.NO_EXIF), 800)
+            val exif = ExifRecord(ExifInput.from(file), ExifReadResult(ExifStatus.NO_EXIF), 800,
+                readerId = "historical", readerVersion = "1")
             val score = FileScore(FileScoreInput.from(file), ScoreIdentity("retention", "rules", "1", "default"),
                 0.5, listOf(ScoreFactor("metadata", 0.5, "Preserved")), 801)
-            assertTrue(repository.saveFileExif(exif))
-            assertTrue(repository.saveFileScore(score))
+            withContext(io) {
+                guarded.execute(null, """
+                    INSERT INTO fileExif (
+                        filePath, directoryPath, inputSizeBytes, inputModifiedAt, inputCreatedAt,
+                        status, extractedAt, readerId, readerVersion
+                    ) VALUES ('/archive/雪.jpg', '/archive', 42, 456, 100,
+                        'NO_EXIF', 800, 'historical', '1')
+                """.trimIndent(), 0).await()
+                guarded.execute(null, """
+                    INSERT INTO fileScore VALUES
+                    (17, '/archive/雪.jpg', '/archive', 42, 456, 100,
+                        'retention', 'rules', '1', 'default', 0.5, 801)
+                """.trimIndent(), 0).await()
+                guarded.execute(null,
+                    "INSERT INTO fileScoreFactor VALUES (17, 0, 'metadata', 0.5, 'Preserved')", 0).await()
+            }
             val directories = repository.allDirectories()
             val files = repository.allFiles()
             val exclusions = repository.exclusions()
@@ -168,7 +183,7 @@ class SchemaMigrationTest {
             val reopenedDriver = withContext(io) { createMigrationTestDriver(migrate = true) }
             try {
                 val reopened = DirectoryRepository(createFilesDatabase(IoGuardedDriver(reopenedDriver, io)), io)
-                assertEquals(7L, FilesDatabase.Schema.version)
+                assertEquals(8L, FilesDatabase.Schema.version)
                 assertEquals(directories, reopened.allDirectories())
                 assertEquals(files, reopened.allFiles())
                 assertEquals(exclusions, reopened.exclusions())
@@ -189,19 +204,19 @@ class SchemaMigrationTest {
             driver.close()
         }
     }
-
-    private val historicalVersionOneSchema = listOf(
-        """CREATE TABLE scanDirectory (
-            path TEXT NOT NULL PRIMARY KEY, parentPath TEXT, status TEXT NOT NULL,
-            retryCount INTEGER NOT NULL DEFAULT 0, fileCount INTEGER NOT NULL DEFAULT 0,
-            modifiedAt INTEGER, lastScanned INTEGER
-        )""",
-        "CREATE INDEX scanDirectoryStatusIndex ON scanDirectory(status)",
-        "CREATE INDEX scanDirectoryParentIndex ON scanDirectory(parentPath)",
-        """CREATE TABLE scanFile (
-            path TEXT NOT NULL PRIMARY KEY, directoryPath TEXT NOT NULL, name TEXT NOT NULL,
-            extension TEXT, sizeBytes INTEGER NOT NULL, modifiedAt INTEGER, lastScanned INTEGER NOT NULL
-        )""",
-        "CREATE INDEX scanFileDirectoryIndex ON scanFile(directoryPath)",
-    )
 }
+
+internal val historicalVersionOneSchema = listOf(
+    """CREATE TABLE scanDirectory (
+        path TEXT NOT NULL PRIMARY KEY, parentPath TEXT, status TEXT NOT NULL,
+        retryCount INTEGER NOT NULL DEFAULT 0, fileCount INTEGER NOT NULL DEFAULT 0,
+        modifiedAt INTEGER, lastScanned INTEGER
+    )""",
+    "CREATE INDEX scanDirectoryStatusIndex ON scanDirectory(status)",
+    "CREATE INDEX scanDirectoryParentIndex ON scanDirectory(parentPath)",
+    """CREATE TABLE scanFile (
+        path TEXT NOT NULL PRIMARY KEY, directoryPath TEXT NOT NULL, name TEXT NOT NULL,
+        extension TEXT, sizeBytes INTEGER NOT NULL, modifiedAt INTEGER, lastScanned INTEGER NOT NULL
+    )""",
+    "CREATE INDEX scanFileDirectoryIndex ON scanFile(directoryPath)",
+)

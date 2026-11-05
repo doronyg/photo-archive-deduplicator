@@ -31,9 +31,23 @@ class FileExifRestartTest {
         val tables = mapOf("scanDirectory" to 7, "scanFile" to 8, "directoryExclusion" to 2,
             "scanSession" to 4, "uiPreference" to 2, "fileScore" to 12, "fileScoreFactor" to 5) +
             (if (fromVersion == 5L) mapOf("fileExif" to 18) else emptyMap())
-        suspend fun snapshot(driver: SqlDriver): Map<String, List<List<String?>>> = withContext(io) {
+        suspend fun snapshot(driver: SqlDriver, normalized: Boolean = false): Map<String, List<List<String?>>> = withContext(io) {
             tables.mapValues { (table, columns) ->
-                driver.executeQuery(null, "SELECT * FROM $table ORDER BY 1, 2", { cursor ->
+                val query = when {
+                    normalized && table == "fileScore" -> """
+                        SELECT s.id, s.filePath, s.directoryPath, s.inputSizeBytes, s.inputModifiedAt,
+                            s.inputCreatedAt, p.scoreType, p.algorithmId, p.algorithmVersion,
+                            p.configurationId, s.value, s.createdAt
+                        FROM fileScore s JOIN scoreProfile p ON p.id = s.profileId ORDER BY s.id
+                    """.trimIndent()
+                    normalized && table == "fileScoreFactor" -> """
+                        SELECT f.scoreId, f.ordinal, d.factorKey, f.contribution, d.explanation
+                        FROM fileScoreFactor f JOIN factorDefinition d ON d.id = f.definitionId
+                        ORDER BY f.scoreId, f.ordinal
+                    """.trimIndent()
+                    else -> "SELECT * FROM $table ORDER BY 1, 2"
+                }
+                driver.executeQuery(null, query, { cursor ->
                     val rows = mutableListOf<List<String?>>()
                     while (cursor.next().value) rows += (0 until columns).map { cursor.getString(it) }
                     QueryResult.Value(rows.toList())
@@ -63,8 +77,8 @@ class FileExifRestartTest {
             }
             val upgraded = withContext(io) { JdbcSqliteDriver(url, schema = FilesDatabase.Schema.synchronous()) }
             try {
-                assertEquals(7L, FilesDatabase.Schema.version)
-                assertEquals(before, snapshot(upgraded))
+                assertEquals(8L, FilesDatabase.Schema.version)
+                assertEquals(before, snapshot(upgraded, normalized = true))
                 withContext(io) {
                     val columns = upgraded.executeQuery(null, "PRAGMA index_info(scanFileSizeIndex)", { cursor ->
                         val names = mutableListOf<String?>()
@@ -77,7 +91,7 @@ class FileExifRestartTest {
                 assertEquals(if (fromVersion == 5L) listOf(record) else emptyList(),
                     repository.fileExif(listOf(record.input.path)))
                 assertTrue(repository.saveFileExif(record))
-                assertEquals(before, snapshot(upgraded))
+                assertEquals(before, snapshot(upgraded, normalized = true))
             } finally {
                 withContext(io) { upgraded.close() }
             }
@@ -85,7 +99,7 @@ class FileExifRestartTest {
             try {
                 val repository = DirectoryRepository(createFilesDatabase(IoGuardedDriver(reopened, io)), io)
                 assertEquals(listOf(record), repository.fileExif(listOf(record.input.path)))
-                assertEquals(before, snapshot(reopened))
+                assertEquals(before, snapshot(reopened, normalized = true))
                 assertEquals(1, repository.duplicateCandidates("/archive".toPath()).size)
                 assertEquals(2, repository.directory("/archive/retry".toPath())!!.retryCount)
                 assertEquals(DirectoryStatus.PENDING, repository.directory("/archive/retry".toPath())!!.status)

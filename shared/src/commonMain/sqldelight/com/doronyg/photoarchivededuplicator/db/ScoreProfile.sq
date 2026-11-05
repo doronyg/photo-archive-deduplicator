@@ -1,0 +1,17 @@
+CREATE TABLE scoreProfile (
+    id INTEGER NOT NULL PRIMARY KEY,
+    scoreType TEXT NOT NULL,
+    algorithmId TEXT NOT NULL,
+    algorithmVersion TEXT NOT NULL,
+    configurationId TEXT NOT NULL,
+    UNIQUE(scoreType, algorithmId, algorithmVersion, configurationId)
+);
+
+insertIfAbsent:
+INSERT OR IGNORE INTO scoreProfile(scoreType, algorithmId, algorithmVersion, configurationId)
+VALUES (:scoreType, :algorithmId, :algorithmVersion, :configurationId);
+
+selectId:
+SELECT id FROM scoreProfile
+WHERE scoreType = :scoreType AND algorithmId = :algorithmId
+AND algorithmVersion = :algorithmVersion AND configurationId = :configurationId;

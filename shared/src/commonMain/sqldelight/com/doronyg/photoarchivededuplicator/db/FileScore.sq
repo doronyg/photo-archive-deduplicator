@@ -5,52 +5,52 @@ CREATE TABLE fileScore (
     inputSizeBytes INTEGER NOT NULL,
     inputModifiedAt INTEGER,
     inputCreatedAt INTEGER,
-    scoreType TEXT NOT NULL,
-    algorithmId TEXT NOT NULL,
-    algorithmVersion TEXT NOT NULL,
-    configurationId TEXT NOT NULL,
+    profileId INTEGER NOT NULL REFERENCES scoreProfile(id),
     value REAL NOT NULL,
     createdAt INTEGER NOT NULL,
-    UNIQUE(filePath, scoreType, algorithmId, algorithmVersion, configurationId)
+    UNIQUE(filePath, profileId)
 );
 
 selectForPaths:
-SELECT * FROM fileScore
-WHERE filePath IN :paths
-AND (:scoreType IS NULL OR scoreType = :scoreType)
-AND (:algorithmVersion IS NULL OR algorithmVersion = :algorithmVersion)
+SELECT s.id, s.filePath, s.directoryPath, s.inputSizeBytes, s.inputModifiedAt, s.inputCreatedAt,
+       p.scoreType, p.algorithmId, p.algorithmVersion, p.configurationId, s.value, s.createdAt
+FROM fileScore s JOIN scoreProfile p ON p.id = s.profileId
+WHERE s.filePath IN :paths
+AND (:scoreType IS NULL OR p.scoreType = :scoreType)
+AND (:algorithmVersion IS NULL OR p.algorithmVersion = :algorithmVersion)
 AND (:currentOnly = 0 OR EXISTS (
     SELECT 1 FROM scanFile f
-    WHERE f.path = fileScore.filePath AND f.directoryPath = fileScore.directoryPath
-    AND f.sizeBytes = fileScore.inputSizeBytes
-    AND f.modifiedAt IS fileScore.inputModifiedAt AND f.createdAt IS fileScore.inputCreatedAt
+    WHERE f.path = s.filePath AND f.directoryPath = s.directoryPath
+    AND f.sizeBytes = s.inputSizeBytes
+    AND f.modifiedAt IS s.inputModifiedAt AND f.createdAt IS s.inputCreatedAt
 ))
-ORDER BY id;
+ORDER BY s.id;
 
 selectForPathsAndIdentity:
-SELECT * FROM fileScore
-WHERE filePath IN :paths AND scoreType = :scoreType AND algorithmId = :algorithmId
-AND algorithmVersion = :algorithmVersion AND configurationId = :configurationId
+SELECT s.id, s.filePath, s.directoryPath, s.inputSizeBytes, s.inputModifiedAt, s.inputCreatedAt,
+       p.scoreType, p.algorithmId, p.algorithmVersion, p.configurationId, s.value, s.createdAt
+FROM fileScore s JOIN scoreProfile p ON p.id = s.profileId
+WHERE s.filePath IN :paths AND p.scoreType = :scoreType AND p.algorithmId = :algorithmId
+AND p.algorithmVersion = :algorithmVersion AND p.configurationId = :configurationId
 AND (:currentOnly = 0 OR EXISTS (
     SELECT 1 FROM scanFile f
-    WHERE f.path = fileScore.filePath AND f.directoryPath = fileScore.directoryPath
-    AND f.sizeBytes = fileScore.inputSizeBytes
-    AND f.modifiedAt IS fileScore.inputModifiedAt AND f.createdAt IS fileScore.inputCreatedAt
+    WHERE f.path = s.filePath AND f.directoryPath = s.directoryPath
+    AND f.sizeBytes = s.inputSizeBytes
+    AND f.modifiedAt IS s.inputModifiedAt AND f.createdAt IS s.inputCreatedAt
 ))
-ORDER BY id;
+ORDER BY s.id;
 
 selectIdentityId:
 SELECT id FROM fileScore
-WHERE filePath = :filePath AND scoreType = :scoreType AND algorithmId = :algorithmId
-AND algorithmVersion = :algorithmVersion AND configurationId = :configurationId;
+WHERE filePath = :filePath AND profileId = :profileId;
 
 insertIfAbsent:
 INSERT OR IGNORE INTO fileScore(
     filePath, directoryPath, inputSizeBytes, inputModifiedAt, inputCreatedAt,
-    scoreType, algorithmId, algorithmVersion, configurationId, value, createdAt
+    profileId, value, createdAt
 ) VALUES (
     :filePath, :directoryPath, :inputSizeBytes, :inputModifiedAt, :inputCreatedAt,
-    :scoreType, :algorithmId, :algorithmVersion, :configurationId, :value, :createdAt
+    :profileId, :value, :createdAt
 );
 
 updateScore:

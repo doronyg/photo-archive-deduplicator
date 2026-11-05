@@ -371,6 +371,17 @@ inventories upgrade in place without rescanning. Keep earlier migration files,
 and prioritize populated current-to-next migration regression coverage while the
 schema is evolving.
 
+Schema v8 (`7.sqm`) normalizes the two largest sources of repeated score data.
+`scoreProfile` stores each exact type/algorithm/version/configuration identity once;
+`factorDefinition` stores each exact factor key/explanation pair once. Assessments
+and ordered contributions use integer references, while the repository reconstructs
+unchanged domain models through batched joins. All historical assessments, score
+IDs, input fingerprints, values, timestamps, factor ordering and explanation text
+survive. Contributions remain per assessment, and failed/cancelled saves roll back
+new dictionary entries too. This does not normalize AI profiles or file paths,
+rescore files, prune history or automatically compact the database. Freed pages
+are reusable; reclaiming disk space requires separate backup-and-shutdown maintenance.
+
 For each group, report:
 - Number of candidates.
 - All candidate paths.

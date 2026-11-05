@@ -1,0 +1,13 @@
+CREATE TABLE factorDefinition (
+    id INTEGER NOT NULL PRIMARY KEY,
+    factorKey TEXT NOT NULL,
+    explanation TEXT NOT NULL,
+    UNIQUE(factorKey, explanation)
+);
+
+insertIfAbsent:
+INSERT OR IGNORE INTO factorDefinition(factorKey, explanation)
+VALUES (:factorKey, :explanation);
+
+selectId:
+SELECT id FROM factorDefinition WHERE factorKey = :factorKey AND explanation = :explanation;

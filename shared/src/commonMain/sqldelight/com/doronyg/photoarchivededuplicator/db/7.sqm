@@ -1,0 +1,60 @@
+CREATE TABLE scoreProfile (
+    id INTEGER NOT NULL PRIMARY KEY,
+    scoreType TEXT NOT NULL,
+    algorithmId TEXT NOT NULL,
+    algorithmVersion TEXT NOT NULL,
+    configurationId TEXT NOT NULL,
+    UNIQUE(scoreType, algorithmId, algorithmVersion, configurationId)
+);
+
+INSERT INTO scoreProfile(scoreType, algorithmId, algorithmVersion, configurationId)
+SELECT DISTINCT scoreType, algorithmId, algorithmVersion, configurationId FROM fileScore;
+
+CREATE TABLE factorDefinition (
+    id INTEGER NOT NULL PRIMARY KEY,
+    factorKey TEXT NOT NULL,
+    explanation TEXT NOT NULL,
+    UNIQUE(factorKey, explanation)
+);
+
+INSERT INTO factorDefinition(factorKey, explanation)
+SELECT DISTINCT factorKey, explanation FROM fileScoreFactor;
+
+CREATE TABLE fileScoreNormalized (
+    id INTEGER NOT NULL PRIMARY KEY,
+    filePath TEXT NOT NULL,
+    directoryPath TEXT NOT NULL,
+    inputSizeBytes INTEGER NOT NULL,
+    inputModifiedAt INTEGER,
+    inputCreatedAt INTEGER,
+    profileId INTEGER NOT NULL REFERENCES scoreProfile(id),
+    value REAL NOT NULL,
+    createdAt INTEGER NOT NULL,
+    UNIQUE(filePath, profileId)
+);
+
+INSERT INTO fileScoreNormalized(
+    id, filePath, directoryPath, inputSizeBytes, inputModifiedAt, inputCreatedAt, profileId, value, createdAt
+)
+SELECT s.id, s.filePath, s.directoryPath, s.inputSizeBytes, s.inputModifiedAt, s.inputCreatedAt, p.id, s.value, s.createdAt
+FROM fileScore s JOIN scoreProfile p
+ON p.scoreType = s.scoreType AND p.algorithmId = s.algorithmId
+AND p.algorithmVersion = s.algorithmVersion AND p.configurationId = s.configurationId;
+
+CREATE TABLE fileScoreFactorNormalized (
+    scoreId INTEGER NOT NULL REFERENCES fileScoreNormalized(id),
+    ordinal INTEGER NOT NULL,
+    definitionId INTEGER NOT NULL REFERENCES factorDefinition(id),
+    contribution REAL NOT NULL,
+    PRIMARY KEY(scoreId, ordinal)
+);
+
+INSERT INTO fileScoreFactorNormalized(scoreId, ordinal, definitionId, contribution)
+SELECT f.scoreId, f.ordinal, d.id, f.contribution
+FROM fileScoreFactor f JOIN factorDefinition d
+ON d.factorKey = f.factorKey AND d.explanation = f.explanation;
+
+DROP TABLE fileScoreFactor;
+DROP TABLE fileScore;
+ALTER TABLE fileScoreNormalized RENAME TO fileScore;
+ALTER TABLE fileScoreFactorNormalized RENAME TO fileScoreFactor;

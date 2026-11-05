@@ -16,6 +16,7 @@ import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificati
 import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificationContext
 import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificationRecord
 import com.doronyg.photoarchivededuplicator.db.FilesDatabase
+import com.doronyg.photoarchivededuplicator.db.SelectForPaths
 import com.doronyg.photoarchivededuplicator.db.DirectoryAiClassification
 import com.doronyg.photoarchivededuplicator.db.ScanDirectory
 import com.doronyg.photoarchivededuplicator.db.ScanFile
@@ -547,6 +548,7 @@ class DirectoryRepository internal constructor(
                         algorithmVersion = identity.algorithmVersion,
                         configurationId = identity.configurationId,
                         currentOnly = if (currentOnly) 1L else 0L,
+                        mapper = ::SelectForPaths,
                     ).awaitAsList()
                 }
             }
@@ -581,6 +583,8 @@ class DirectoryRepository internal constructor(
         }
         if (scores.isEmpty()) return@io emptySet()
         database.transactionWithResult {
+            val profileIds = mutableMapOf<ScoreIdentity, Long>()
+            val definitionIds = mutableMapOf<Pair<String, String>, Long>()
             val currentExif = expectedExif?.let {
                 fileExifInLane(scores.map { it.input.path }, currentOnly = true).associateBy { it.input.path }
             }
@@ -590,13 +594,17 @@ class DirectoryRepository internal constructor(
                         Diagnostics.logger.w(LogTags.DATABASE, "Discarding score after EXIF changed: ${score.input.path}")
                         continue
                     }
-                    if (saveFileScoreInLane(score)) add(score.input.path)
+                    if (saveFileScoreInLane(score, profileIds, definitionIds)) add(score.input.path)
                 }
             }
         }
     }
 
-    private suspend fun saveFileScoreInLane(score: FileScore): Boolean {
+    private suspend fun saveFileScoreInLane(
+        score: FileScore,
+        profileIds: MutableMap<ScoreIdentity, Long>,
+        definitionIds: MutableMap<Pair<String, String>, Long>,
+    ): Boolean {
         val input = score.input
         val current = files.selectByPath(input.path.toString()).awaitAsOneOrNull()?.toRecord()
         if (current == null || FileScoreInput.from(current) != input) {
@@ -605,25 +613,24 @@ class DirectoryRepository internal constructor(
         }
         val queries = database.fileScoreQueries
         val identity = score.identity
+        val profileId = profileIds.getOrPut(identity) {
+            val profiles = database.scoreProfileQueries
+            profiles.insertIfAbsent(identity.type, identity.algorithmId, identity.algorithmVersion, identity.configurationId)
+            profiles.selectId(identity.type, identity.algorithmId, identity.algorithmVersion, identity.configurationId).awaitAsOne()
+        }
         queries.insertIfAbsent(
             filePath = input.path.toString(),
             directoryPath = input.directoryPath.toString(),
             inputSizeBytes = input.sizeBytes,
             inputModifiedAt = input.modifiedAt,
             inputCreatedAt = input.createdAt,
-            scoreType = identity.type,
-            algorithmId = identity.algorithmId,
-            algorithmVersion = identity.algorithmVersion,
-            configurationId = identity.configurationId,
+            profileId = profileId,
             value = score.value,
             createdAt = score.createdAt,
         )
         val id = queries.selectIdentityId(
             filePath = input.path.toString(),
-            scoreType = identity.type,
-            algorithmId = identity.algorithmId,
-            algorithmVersion = identity.algorithmVersion,
-            configurationId = identity.configurationId,
+            profileId = profileId,
         ).awaitAsOne()
         queries.updateScore(
             directoryPath = input.directoryPath.toString(),
@@ -636,12 +643,16 @@ class DirectoryRepository internal constructor(
         )
         database.fileScoreFactorQueries.deleteForScore(id)
         score.factors.forEachIndexed { index, factor ->
+            val definitionId = definitionIds.getOrPut(factor.key to factor.explanation) {
+                val definitions = database.factorDefinitionQueries
+                definitions.insertIfAbsent(factor.key, factor.explanation)
+                definitions.selectId(factor.key, factor.explanation).awaitAsOne()
+            }
             database.fileScoreFactorQueries.insertFactor(
                 scoreId = id,
                 ordinal = index.toLong(),
-                factorKey = factor.key,
+                definitionId = definitionId,
                 contribution = factor.contribution,
-                explanation = factor.explanation,
             )
         }
         return true

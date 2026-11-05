@@ -31,8 +31,10 @@ the header comment, to see that a file lives under `build/`.
 | `db/DirectoryExclusion.kt`, `db/DirectoryExclusionQueries.kt` | `DirectoryExclusion.sq` | User-entered excluded roots and optional reasons, independent of inventory |
 | `db/ScanSession.kt`, `db/ScanSessionQueries.kt` | `ScanSession.sq` | Active elapsed time and last-selected logical scan root |
 | `db/UiPreference.kt`, `db/UiPreferenceQueries.kt` | `UiPreference.sq` | Local UI choices stored as key/value entries |
-| `db/FileScore.kt`, `db/FileScoreQueries.kt` | `FileScore.sq` | Independent, versioned algorithm/model assessments and their input metadata |
-| `db/FileScoreFactor.kt`, `db/FileScoreFactorQueries.kt` | `FileScoreFactor.sq` | Ordered numeric contributions and human-readable explanations |
+| `db/FileScore.kt`, `db/FileScoreQueries.kt` | `FileScore.sq` | Independent assessments and input metadata; reads join their shared scoring profile |
+| `db/ScoreProfile.kt`, `db/ScoreProfileQueries.kt` | `ScoreProfile.sq` | Exact score type, algorithm/version and configuration shared across assessments |
+| `db/FileScoreFactor.kt`, `db/FileScoreFactorQueries.kt` | `FileScoreFactor.sq` | Ordered numeric contributions referencing shared factor definitions |
+| `db/FactorDefinition.kt`, `db/FactorDefinitionQueries.kt` | `FactorDefinition.sq` | Exact factor keys and explanation text shared across contributions |
 | `db/FileExif.kt`, `db/FileExifQueries.kt` | `FileExif.sq` | Sparse latest EXIF results, reader identity, and input metadata |
 | `db/FilesDatabase.kt` | All `.sq` files + Gradle config | Database interface, `Schema`, factory |
 | `db/shared/FilesDatabaseImpl.kt` | All `.sq` files + Gradle config | Implementation, `CREATE TABLE`/`INDEX` statements |
@@ -151,6 +153,27 @@ The v4-to-current regression automatically upgrades a populated on-disk JDBC dat
 compares every pre-existing table, then stores EXIF and closes/reopens it again.
 The populated v5-to-v6 regression also preserves existing EXIF rows and verifies
 the size-leading index before and after reopening.
+
+### Lossless score normalization (version 8)
+
+Migration `7.sqm` replaces repeated score identities/configurations with integer
+references to `scoreProfile`, and repeated factor keys/explanations with references
+to `factorDefinition`. It preserves score IDs, every historical identity and input
+fingerprint, numeric values, assessment times, factor ordering and exact explanation
+strings. Contributions stay on individual factor rows, not their shared definitions.
+Nothing is rescored, pruned, translated or regenerated. Inventory, EXIF, AI
+classifications, exclusions, sessions and preferences are unchanged.
+
+The repository reconstructs the existing domain models through joined batch queries.
+New dictionary IDs are cached only within the save transaction, so cancellation or
+failure rolls back dictionary entries together with scores and contributions.
+
+Normalization frees SQLite pages for reuse but does not automatically shrink the
+database file. Compaction is a separate maintenance operation: after a verified
+backup and clean application shutdown, `sqlite3 /path/to/inventory.db 'VACUUM;'`
+can reclaim free space. Do not run it during a scan or inside a schema migration.
+The upgrade needs temporary disk space for the replacement score/factor tables;
+compaction also needs space for a rebuilt database.
 
 ## Suspected duplicates
 
