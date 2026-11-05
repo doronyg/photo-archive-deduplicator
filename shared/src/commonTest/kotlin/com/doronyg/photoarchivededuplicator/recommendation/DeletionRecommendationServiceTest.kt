@@ -10,6 +10,42 @@ import kotlin.test.*
 
 class DeletionRecommendationServiceTest {
     @Test
+    fun fullConfidenceRegularCategoryUsesSavedDecisionsWithoutReadingFilesOrWritingScores() = concurrencyTest { f ->
+        val keeperDirectory = f.root / "Photos" / "2018-08-26"
+        val backupDirectory = f.root / "Backup" / "2018-08-26"
+        for (directory in listOf(keeperDirectory, backupDirectory)) {
+            f.repository.seedRoot(directory)
+            f.repository.recordListing(directory, DirectoryListing(emptyList(),
+                listOf(DirectoryListing.Entry(directory / "DSC08256.JPG", 80_000, 1, 2))), 3)
+            val file = f.repository.filesIn(directory).single()
+            f.repository.saveFileExif(ExifRecord(ExifInput.from(file), ExifReadResult(ExifStatus.EXTRACTED,
+                ExifMetadata(capturedAt = "2018:08:26 12:00:00", make = "Canon", model = "Camera",
+                    width = 4000, height = 3000)), 4))
+        }
+        val retention = RetentionScoreService(f.repository, dispatcher = f.dispatcher)
+        val source = f.repository.duplicateCandidates()
+        retention.assess(source)
+        val before = retention.stored(source)
+        val service = DeletionRecommendationService(f.repository, retention, f.dispatcher)
+        val statements = f.driver.statements.size
+        f.fs.onBlockingCall = { error("Review screen must not access files") }
+
+        val report = service.load()
+        val category = report.categories.single { it.category.id == "regular-duplicates-full-confidence" }
+        val group = category.groups.single()
+        assertEquals(100, group.recommendation.duplicateConfidence.score)
+        assertEquals(keeperDirectory / "DSC08256.JPG", group.survivors.single().advice.file.path)
+        assertEquals(backupDirectory / "DSC08256.JPG", group.candidates.single().advice.file.path)
+        assertEquals(FileStatistics(1, 80_000), category.summary.candidates)
+        assertTrue(f.driver.statements.drop(statements).all { it.startsWith("SELECT") || it.startsWith("WITH") })
+        assertEquals(before, retention.stored(source))
+
+        val candidate = f.repository.fileExif(listOf(backupDirectory / "DSC08256.JPG")).single()
+        f.repository.saveFileExif(candidate.copy(readerVersion = "old-reader"))
+        assertTrue(service.load().categories.single { it.category.id == category.category.id }.groups.isEmpty())
+    }
+
+    @Test
     fun crossDirectoryMembersAreNotHiddenAndStaleExifWithdrawsEarlierCandidates() = concurrencyTest { f ->
         val retention = RetentionScoreService(f.repository, dispatcher = f.dispatcher)
         val service = DeletionRecommendationService(f.repository, retention, f.dispatcher)

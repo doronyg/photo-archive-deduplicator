@@ -710,6 +710,16 @@ directory date, EXIF capture date and explicit match/mismatch comparison alongsi
 the unchanged retention explanation/confidence. These remain unverified review
 candidates, not proof of identical contents.
 
+The **Regular duplicates (100/100)** category uses complete regular groups with
+exactly equal filenames and sizes, current saved EXIF/retention evidence, and an
+existing group duplicate confidence of exactly 100/100 without contradictions.
+Confidence alone does not choose a survivor or make a file redundant: only safe
+KEEP_ONE/KEEP_MULTIPLE decisions with actual redundant candidates qualify.
+Display every engine-designated survivor and candidate with the original
+explanations and replacement dependencies. Protected files cannot be candidates;
+protected retained copies remain preserved. A 100/100 metadata score is not byte
+verification. This category has no suspected-image size threshold.
+
 The database-only service derives advice from saved evidence with the existing
 engine, not a second decision policy. It never extracts EXIF, recomputes/saves
 retention scores or contacts Ollama. Only labels matching current saved settings
