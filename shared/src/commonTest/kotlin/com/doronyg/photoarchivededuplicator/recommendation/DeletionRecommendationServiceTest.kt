@@ -69,7 +69,7 @@ class DeletionRecommendationServiceTest {
         val statements = f.driver.statements.size
         f.fs.onBlockingCall = { error("Review screen must not access files") }
         val report = DeletionRecommendationService(f.repository, retention, f.dispatcher, profile).load()
-        val group = report.categories.single().groups.single()
+        val group = report.categories.single { it.category.id == "same-directory-metadata" }.groups.single()
         assertEquals(family / "IMG.jpg", group.survivors.single().advice.file.path)
         assertEquals(family / "IMG-001.jpg", group.candidates.single().advice.file.path)
         assertEquals(DirectoryClassification.PROTECTED, group.survivors.single().directoryClassification?.classification)

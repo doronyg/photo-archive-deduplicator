@@ -236,6 +236,9 @@ private fun DeletionReviewFileCard(file: DeletionReviewFile, retained: Boolean, 
             FilePathLinks(file.advice.file, pathActions)
             Text("${file.advice.file.sizeBytes} bytes (${formatBytes(file.advice.file.sizeBytes)})",
                 style = MaterialTheme.typography.bodySmall)
+            file.evidence.forEach { (label, value) ->
+                Text("$label: $value", style = MaterialTheme.typography.bodyMedium)
+            }
             FileRecommendationLine(file.advice.file.path, file.advice, file.directoryClassification)
             ExifMetadataLine(file.advice.file.path, file.exif)
             RetentionScoreLine(file.advice.file.path, file.retention)

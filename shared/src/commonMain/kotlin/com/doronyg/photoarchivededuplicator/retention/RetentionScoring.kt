@@ -242,7 +242,7 @@ class RetentionScorer(config: RetentionConfig = RetentionConfig()) {
             "Usable stored EXIF capture date $date; compared as a camera-local calendar date, without timezone conversion.")
     }
 
-    private fun usableExifDate(file: FileRecord, record: ExifRecord?): String? {
+    internal fun usableExifDate(file: FileRecord, record: ExifRecord?): String? {
         if (record == null || record.input != ExifInput.from(file) || record.result.status != ExifStatus.EXTRACTED) return null
         return validatedExifTimestamp(record.result.metadata.capturedAt)
             ?.substringBefore(' ')?.replace(':', '-')

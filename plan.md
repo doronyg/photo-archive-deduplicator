@@ -663,6 +663,25 @@ exactly one retained preferred copy with every other member a high-confidence
 redundant candidate explicitly depending on that survivor. Missing, outdated,
 contradictory or weak evidence does not qualify.
 
+The **EXIF and folder date mismatch** category consumes complete regular duplicate
+groups, without imposing the suspected-image size threshold. Require current
+successful EXIF with equal camera-local capture dates and recognized complete
+directory dates for every member, using the scorer's existing date recognition
+and comparison helpers. The existing decision must designate the matching-folder
+copy as preferred and explicitly connect mismatching-folder redundant candidates
+to it. Only those mismatching-folder candidates are shown in this category; the
+complete original decision and evidence remain available. Do not infer a new
+keeper, score files again, require differing AI classifications, or add camera,
+dimension or filesystem-timestamp eligibility rules. The existing engine's safety
+and confidence decisions remain authoritative.
+
+Any current-profile PROTECTED directory on any member excludes the entire group
+from this category, including protection on a retained or otherwise unshown copy.
+Both directories may be PREFERRED. Each displayed file includes the recognized
+directory date, EXIF capture date and explicit match/mismatch comparison alongside
+the unchanged retention explanation/confidence. These remain unverified review
+candidates, not proof of identical contents.
+
 The database-only service derives advice from saved evidence with the existing
 engine, not a second decision policy. It never extracts EXIF, recomputes/saves
 retention scores or contacts Ollama. Only labels matching current saved settings
@@ -672,8 +691,10 @@ results; reload on completion/revision changes, with explicit manual refresh.
 Providers registered in the service own category eligibility and return generic
 review groups; the UI does not switch on category IDs. Additional providers can
 use different rules, explanations and multiple survivors without changing the
-presentation. Extend the service's input datasets when a future category needs
-evidence beyond stored suspected groups.
+presentation. Providers select regular or suspected duplicate evidence; the service
+loads only requested sources and keeps their complete group decisions separate.
+Provider-supplied file evidence is rendered generically without category-specific
+UI branches. Extend the input datasets only when a future category requires it.
 
 Lazy group summaries show survivors and proposed counts/bytes. Expanding reveals
 distinct retained/candidate cards with file/folder links, sizes, saved capture and

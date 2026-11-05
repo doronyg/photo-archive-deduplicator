@@ -19,12 +19,15 @@ internal data class DeletionRecommendationCategory(val id: String, val name: Str
     }
 }
 
+internal enum class DeletionRecommendationSource { REGULAR, SUSPECTED }
+
 internal data class DeletionAnalysisSnapshot(
     val files: List<FileRecord>,
     val recommendation: DuplicateGroupRecommendation,
     val exif: Map<Path, ExifRecord>,
     val retention: Map<Path, RetentionPresentation>,
     val directoryClassifications: Map<Path, DirectoryClassificationRecord>,
+    val source: DeletionRecommendationSource = DeletionRecommendationSource.SUSPECTED,
 )
 
 internal data class DeletionReviewFile(
@@ -32,6 +35,7 @@ internal data class DeletionReviewFile(
     val exif: ExifRecord?,
     val retention: RetentionPresentation?,
     val directoryClassification: DirectoryClassificationRecord?,
+    val evidence: List<Pair<String, String>> = emptyList(),
 )
 
 internal data class DeletionRecommendationGroup(
@@ -44,6 +48,7 @@ internal data class DeletionRecommendationGroup(
 
 internal interface DeletionRecommendationProvider {
     val category: DeletionRecommendationCategory
+    val source: DeletionRecommendationSource get() = DeletionRecommendationSource.SUSPECTED
     suspend fun recommendations(snapshots: List<DeletionAnalysisSnapshot>): List<DeletionRecommendationGroup>
 }
 
@@ -155,7 +160,7 @@ internal suspend fun buildDeletionRecommendationReport(
     }
     val categories = providers.map { provider ->
         task.ensureActive()
-        val groups = provider.recommendations(snapshots)
+        val groups = provider.recommendations(snapshots.filter { it.source == provider.source })
         require(groups.map { it.id }.distinct().size == groups.size && groups.all { it.id.isNotBlank() }) {
             "Deletion recommendation group IDs must be nonempty and unique within their category."
         }

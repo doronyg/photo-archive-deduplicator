@@ -13,22 +13,35 @@ internal class DeletionRecommendationService(
     private val retention: RetentionScoreService,
     private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
     private val classificationContext: DirectoryClassificationContext? = null,
-    private val providers: List<DeletionRecommendationProvider> = listOf(SameDirectoryMetadataProvider()),
+    private val providers: List<DeletionRecommendationProvider> =
+        listOf(SameDirectoryMetadataProvider(), ExifFolderDateMismatchProvider()),
 ) {
     suspend fun load(): DeletionRecommendationReport = withContext(dispatcher) {
-        val source = repository.suspectedDuplicates()
-        val files = source.flatMap { it.files }
-        val scores = retention.storedSuspected(source)
+        val snapshots = providers.map { it.source }.distinct().flatMap { snapshots(it) }
+        buildDeletionRecommendationReport(snapshots, providers, dispatcher)
+    }
+
+    private suspend fun snapshots(source: DeletionRecommendationSource): List<DeletionAnalysisSnapshot> {
+        val (groups, scores) = when (source) {
+            DeletionRecommendationSource.REGULAR -> {
+                val records = repository.duplicateCandidates()
+                records.map { it.files } to retention.stored(records).files
+            }
+            DeletionRecommendationSource.SUSPECTED -> {
+                val records = repository.suspectedDuplicates()
+                records.map { it.files } to retention.storedSuspected(records).files
+            }
+        }
+        val files = groups.flatten()
         val exif = repository.fileExif(files.map { it.path }, currentOnly = true).associateBy { it.input.path }
         val classifications = classificationContext?.let {
             repository.directoryClassifications(files.map { file -> file.directoryPath }.distinct(), it)
                 .associateBy { record -> record.directoryPath }
         }.orEmpty()
-        val recommendations = recommendDuplicateGroups(source.map { it.files }, exif, scores.files,
+        val recommendations = recommendDuplicateGroups(groups, exif, scores,
             dispatcher = dispatcher, directoryClassifications = classifications)
-        val snapshots = source.map { group ->
-            DeletionAnalysisSnapshot(group.files, recommendations.getValue(group.files.first().path), exif, scores.files, classifications)
+        return groups.map { group ->
+            DeletionAnalysisSnapshot(group, recommendations.getValue(group.first().path), exif, scores, classifications, source)
         }
-        buildDeletionRecommendationReport(snapshots, providers, dispatcher)
     }
 }
