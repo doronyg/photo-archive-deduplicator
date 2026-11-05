@@ -99,6 +99,16 @@ internal object AnalysisStrings {
     fun exportMatches(matches: Boolean) = "Matches current saved settings: $matches"
 
     const val statisticsTitle = "Recommendation statistics"
+    const val inventoryTitle = "Inventory files"
+    const val inventoryDuplicateDefinition =
+        "Possible duplicates count each file once across regular and suspected groups, including retained copies."
+    const val invalidInventoryCounts = "Inventory file counts must be nonnegative."
+    const val inconsistentInventory = "Possible duplicate counts exceed the inventory. Refresh statistics."
+    fun changedInventoryFile(path: String) = "Inventory changed while loading $path. Refresh statistics."
+    fun inventoryRow(label: String, total: Long, duplicates: Long, percentage: String) =
+        "$label: $total ${if (total == 1L) "file" else "files"} | " +
+            "$duplicates ${if (duplicates == 1L) "possible duplicate" else "possible duplicates"} ($percentage)"
+    fun percentage(whole: Int, fraction: Int) = "$whole.${fraction.toString().padStart(2, '0')}%"
     const val statisticsScope = "All stored roots except excluded folders; independent of duplicate-tab filters."
     const val statisticsBlocked = "Statistics available when scanning and EXIF processing finish."
     const val statisticsUnits = "MB = 1,000,000 bytes. Sizes include every listed file, not estimated reclaimable space."

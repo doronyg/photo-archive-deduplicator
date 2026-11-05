@@ -52,6 +52,21 @@ ORDER BY path COLLATE BINARY;
 selectTotals:
 SELECT count(*) AS fileCount, coalesce(sum(sizeBytes), 0) AS totalBytes FROM scanFile;
 
+selectEligibleCountsByExtension:
+SELECT coalesce(lower(CASE WHEN f.extension IS NULL AND substr(f.name, 1, 1) = '.'
+    THEN substr(f.name, 2) ELSE f.extension END), '') AS fileExtension,
+    count(*) AS fileCount
+FROM scanFile f
+WHERE NOT EXISTS (
+    SELECT 1 FROM directoryExclusion e
+    WHERE f.path = e.path OR (
+        substr(f.path, 1, length(e.path)) = e.path
+        AND (substr(e.path, -1) IN ('/', '\') OR substr(f.path, length(e.path) + 1, 1) IN ('/', '\'))
+    )
+)
+GROUP BY fileExtension
+ORDER BY fileExtension;
+
 -- Literal prefix and separator checks, not LIKE: user paths may contain % or _.
 selectDuplicateCandidates:
 WITH eligible AS (

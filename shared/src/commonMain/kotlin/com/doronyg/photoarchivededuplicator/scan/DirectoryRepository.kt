@@ -410,6 +410,12 @@ class DirectoryRepository internal constructor(
         files.selectAll().awaitAsList().map { it.toRecord() }
     }
 
+    /** Counts stored files without loading their paths or metadata, respecting exclusions. */
+    suspend fun eligibleFileCountsByExtension(): Map<String?, Long> = io("eligibleFileCountsByExtension") {
+        files.selectEligibleCountsByExtension().awaitAsList()
+            .associate { it.fileExtension.takeIf { extension -> extension.isNotEmpty() } to it.fileCount }
+    }
+
     suspend fun directoryClassifications(
         paths: List<Path>,
         context: DirectoryClassificationContext,

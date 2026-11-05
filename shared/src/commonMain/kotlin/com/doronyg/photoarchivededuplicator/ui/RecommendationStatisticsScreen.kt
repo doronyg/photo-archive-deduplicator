@@ -29,6 +29,7 @@ import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificati
 import com.doronyg.photoarchivededuplicator.classification.DirectoryClassification
 import com.doronyg.photoarchivededuplicator.recommendation.FileRecommendationRole
 import com.doronyg.photoarchivededuplicator.recommendation.FileStatistics
+import com.doronyg.photoarchivededuplicator.recommendation.InventoryFileCounts
 import com.doronyg.photoarchivededuplicator.recommendation.RecommendationAction
 import com.doronyg.photoarchivededuplicator.recommendation.RecommendationStatistics
 import com.doronyg.photoarchivededuplicator.recommendation.RecommendationStatisticsBucket
@@ -40,6 +41,7 @@ import com.doronyg.photoarchivededuplicator.scan.DirectoryRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlin.math.roundToInt
 
 internal fun formatStatisticsMegabytes(sizeBytes: Long): String {
     require(sizeBytes >= 0) { AppStrings.analysis.negativeSize }
@@ -48,8 +50,23 @@ internal fun formatStatisticsMegabytes(sizeBytes: Long): String {
     return AppStrings.analysis.megabytes(whole, fraction % 100)
 }
 
+internal fun formatInventoryDuplicatePercentage(counts: InventoryFileCounts): String {
+    val hundredths = if (counts.totalFiles == 0L) 0 else
+        (counts.possibleDuplicateFiles.toDouble() / counts.totalFiles.toDouble() * 10_000).roundToInt()
+    return AppStrings.analysis.percentage(hundredths / 100, hundredths % 100)
+}
+
 internal fun formatRecommendationStatistics(report: RecommendationStatisticsReport): String = buildString {
     val strings = AppStrings.analysis
+    fun inventoryRow(label: String, counts: InventoryFileCounts) =
+        strings.inventoryRow(label, counts.totalFiles, counts.possibleDuplicateFiles, formatInventoryDuplicatePercentage(counts))
+    appendLine(strings.inventoryTitle)
+    appendLine(inventoryRow(AppStrings.duplicates.all, report.inventory.all))
+    for (type in StatisticsFileType.entries) {
+        appendLine(inventoryRow(strings.typeLabel(type), report.inventory.byFileType.getValue(type)))
+    }
+    appendLine(strings.inventoryDuplicateDefinition)
+    appendLine()
     appendLine(strings.statisticsUnits)
     appendLine(strings.cohortOverlap)
     appendLine(strings.suspectedScope)

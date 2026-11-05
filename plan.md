@@ -620,6 +620,18 @@ roots and excluding excluded folders, independent of the duplicate-tab filters.
 Regular grouping must span roots rather than combining per-root query results,
 so copies in different roots still form a single filename/size group.
 
+Start with inventory totals for All and each registered file category (Images,
+Videos, Documents and Other). Show total files, possible duplicate files and the
+percentage within that category, including zero-valued categories. Possible
+duplicates are distinct paths in the union of regular and stored suspected groups,
+including retained copies, not only deletion candidates. Count overlapping
+members once. Inventory totals use the same exclusions as duplicate datasets.
+Aggregate total counts by stored extension in SQL rather than loading every file;
+use the existing extension classification rules, including dot-file handling.
+The category registry drives all rows so additional registered types need no new
+presentation or aggregation branches. Use only database records, not scans,
+EXIF extraction, score calculation or server requests.
+
 For each section show group count, file count, and total MB; break down file counts
 and bytes both by the whole group's recommendation and by each file's individual
 role. A Keep one group's totals include all members, not just its preferred copy.

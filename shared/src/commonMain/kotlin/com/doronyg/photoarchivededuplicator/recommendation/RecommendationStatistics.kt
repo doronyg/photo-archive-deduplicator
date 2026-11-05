@@ -8,7 +8,17 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import okio.Path
 
-internal enum class StatisticsFileType { IMAGES, VIDEOS, DOCUMENTS, OTHER }
+internal enum class StatisticsFileType(private val filter: DuplicateFileType?) {
+    IMAGES(DuplicateFileType.IMAGES),
+    VIDEOS(DuplicateFileType.VIDEOS),
+    DOCUMENTS(DuplicateFileType.DOCUMENTS),
+    OTHER(null);
+
+    companion object {
+        fun forFilename(name: String): StatisticsFileType =
+            entries.firstOrNull { it.filter?.matches(name) == true } ?: OTHER
+    }
+}
 
 internal data class FileStatistics(val fileCount: Long = 0, val sizeBytes: Long = 0)
 
@@ -49,12 +59,7 @@ internal suspend fun aggregateRecommendationStatistics(
             val file = recommendation.file
             require(file.sizeBytes >= 0) { "File size must not be negative: ${file.path}" }
             require(paths.add(file.path)) { "Repeated file path in recommendation groups: ${file.path}" }
-            val type = when {
-                DuplicateFileType.IMAGES.matches(file.name) -> StatisticsFileType.IMAGES
-                DuplicateFileType.VIDEOS.matches(file.name) -> StatisticsFileType.VIDEOS
-                DuplicateFileType.DOCUMENTS.matches(file.name) -> StatisticsFileType.DOCUMENTS
-                else -> StatisticsFileType.OTHER
-            }
+            val type = StatisticsFileType.forFilename(file.name)
             totals.add(type, file.sizeBytes)
             byAction.getValue(group.action).add(type, file.sizeBytes)
             byRole.getValue(recommendation.role).add(type, file.sizeBytes)

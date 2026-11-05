@@ -13,6 +13,7 @@ internal data class RecommendationStatisticsReport(
     val regular: RecommendationStatistics,
     val suspected: RecommendationStatistics,
     val classificationContext: DirectoryClassificationContext? = null,
+    val inventory: InventoryStatistics = InventoryStatistics(),
 )
 
 /** Database-only snapshot; never extracts EXIF or computes/saves retention assessments. */
@@ -23,17 +24,16 @@ internal class RecommendationStatisticsService(
     private val classificationContext: DirectoryClassificationContext? = null,
 ) {
     suspend fun load(): RecommendationStatisticsReport = withContext(dispatcher) {
-        RecommendationStatisticsReport(regularStatistics(), suspectedStatistics(), classificationContext)
-    }
-
-    private suspend fun regularStatistics(): RecommendationStatistics {
-        val groups = repository.duplicateCandidates()
-        return summarize(groups.map { it.files }, retention.stored(groups))
-    }
-
-    private suspend fun suspectedStatistics(): RecommendationStatistics {
-        val groups = repository.suspectedDuplicates()
-        return summarize(groups.map { it.files }, retention.storedSuspected(groups))
+        val regular = repository.duplicateCandidates()
+        val suspected = repository.suspectedDuplicates()
+        val inventory = aggregateInventoryStatistics(repository.eligibleFileCountsByExtension(),
+            regular.map { it.files }, suspected.map { it.files }, dispatcher)
+        RecommendationStatisticsReport(
+            summarize(regular.map { it.files }, retention.stored(regular)),
+            summarize(suspected.map { it.files }, retention.storedSuspected(suspected)),
+            classificationContext,
+            inventory,
+        )
     }
 
     private suspend fun summarize(
