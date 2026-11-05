@@ -614,6 +614,23 @@ Show zero-valued categories too. MB uses decimal 1,000,000-byte units and two
 rounded decimal places; figures represent file sizes, not reclaimable space.
 The cohorts can overlap, so their totals must not be added together.
 
+For each dataset, show AI coverage using only exact-directory classifications
+matching the current saved server, model and prompt version. Count unique
+classified/missing directories and their member-file counts/bytes, with separate
+PREFERRED, BACKUP, PROTECTED and UNKNOWN buckets. UNKNOWN is classified evidence,
+not missing. Report fully classified, partially classified and unclassified groups.
+Excluded/out-of-dataset directories and historical profiles must not enter totals.
+
+Compare current cached-AI recommendations with a deterministic-only run using the
+same groups, EXIF and saved retention assessments. Count changed groups, changed
+group actions, changed file roles/replacement dependencies, action/role transitions,
+new and withdrawn redundant candidates and before/after candidate counts/bytes.
+Changing only explanations or confidence does not count as a decision change.
+Replacement changes between still-redundant candidates are reported separately.
+Candidate bytes are advisory, not verified reclaimable space. No AI settings or
+no matching labels means zero coverage/impact and unchanged deterministic results.
+Show the active server/model/prompt so the comparison's profile is explicit.
+
 Build a cancellable, background, database-only snapshot using stored EXIF,
 stored current-profile retention scores, and the same recommendation engine.
 Missing or stale evidence stays Review; opening or refreshing statistics never

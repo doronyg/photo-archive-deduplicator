@@ -24,6 +24,7 @@ internal data class RecommendationStatistics(
     val byRole: Map<FileRecommendationRole, RecommendationStatisticsBucket>,
     val byFileType: Map<StatisticsFileType, FileStatistics>,
     val groupCounts: Map<RecommendationAction, Long>,
+    val ai: AiRecommendationStatistics? = null,
 )
 
 /** Accepts one recommendation per group within a single, non-overlapping cohort. */
@@ -81,10 +82,10 @@ private class StatisticsAccumulator {
     fun snapshot() = RecommendationStatisticsBucket(totals, byFileType.toMap())
 }
 
-private fun FileStatistics.addFile(sizeBytes: Long) =
+internal fun FileStatistics.addFile(sizeBytes: Long) =
     FileStatistics(checkedAdd(fileCount, 1), checkedAdd(this.sizeBytes, sizeBytes))
 
-private fun checkedAdd(left: Long, right: Long): Long {
+internal fun checkedAdd(left: Long, right: Long): Long {
     if (left > Long.MAX_VALUE - right) throw ArithmeticException("Recommendation statistics overflow")
     return left + right
 }

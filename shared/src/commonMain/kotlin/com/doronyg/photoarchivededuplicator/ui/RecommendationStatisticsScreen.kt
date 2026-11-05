@@ -25,6 +25,7 @@ import com.doronyg.photoarchivededuplicator.exif.ExifQueueController
 import com.doronyg.photoarchivededuplicator.UiPreferences
 import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificationController
 import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificationJobState
+import com.doronyg.photoarchivededuplicator.classification.DirectoryClassification
 import com.doronyg.photoarchivededuplicator.recommendation.FileRecommendationRole
 import com.doronyg.photoarchivededuplicator.recommendation.FileStatistics
 import com.doronyg.photoarchivededuplicator.recommendation.RecommendationAction
@@ -52,7 +53,23 @@ internal fun formatRecommendationStatistics(report: RecommendationStatisticsRepo
     appendLine("Suspected totals include stored EXIF matches, not the unanalyzed same-size inspection queue.")
     appendLine("Missing/stale scores or capture evidence count as Review. No files are content-verified or changed.")
     appendLine("Statistics do not extract EXIF or recompute retention scores.")
+    report.classificationContext?.let {
+        appendLine("AI profile: ${quoteResultText(it.baseUrl)} | model ${quoteResultText(it.model)} | prompt v${it.promptVersion}")
+        appendLine("Only exact-directory cached labels matching this profile are included.")
+    } ?: appendLine("AI is not configured. No saved labels are applied; recommendations use deterministic rules only.")
     fun totals(value: FileStatistics) = "${value.fileCount} files | ${formatStatisticsMegabytes(value.sizeBytes)}"
+    fun actionLabel(action: RecommendationAction) = when (action) {
+        RecommendationAction.KEEP_ONE -> "Keep one"
+        RecommendationAction.KEEP_MULTIPLE -> "Keep multiple"
+        RecommendationAction.REVIEW -> "Review"
+        RecommendationAction.PROTECTED -> "Protected"
+    }
+    fun roleLabel(role: FileRecommendationRole) = when (role) {
+        FileRecommendationRole.PREFERRED -> "Preferred"
+        FileRecommendationRole.REDUNDANT_CANDIDATE -> "Likely redundant"
+        FileRecommendationRole.PRESERVE -> "Preserve"
+        FileRecommendationRole.REVIEW -> "Review"
+    }
     fun typeLabel(type: StatisticsFileType) = when (type) {
         StatisticsFileType.IMAGES -> "Images"
         StatisticsFileType.VIDEOS -> "Videos"
@@ -69,27 +86,56 @@ internal fun formatRecommendationStatistics(report: RecommendationStatisticsRepo
         appendLine()
         appendLine(label)
         appendLine("${statistics.groupCount} groups | ${totals(statistics.totals)}")
+        statistics.ai?.let { ai ->
+            appendLine()
+            appendLine("AI classification coverage")
+            appendLine("Classified: ${ai.classifiedDirectories} / ${ai.directoryCount} directories | ${totals(ai.classifiedFiles)}")
+            for (classification in DirectoryClassification.entries) {
+                val value = ai.byClassification.getValue(classification)
+                appendLine("${classification.name}: ${value.directoryCount} directories | ${totals(value.files)}")
+            }
+            appendLine("Missing classification: ${ai.missing.directoryCount} directories | ${totals(ai.missing.files)}")
+            appendLine("UNKNOWN is a saved classification, not missing evidence.")
+            appendLine("Group coverage: ${ai.fullyClassifiedGroups} fully classified | " +
+                "${ai.partiallyClassifiedGroups} partially classified | ${ai.unclassifiedGroups} without classifications")
+            appendLine("Directories are unique within this dataset; file sizes count only members of its duplicate groups.")
+            appendLine()
+            appendLine("AI recommendation impact")
+            appendLine("Compared against deterministic-only recommendations using the same stored evidence.")
+            appendLine("Changed groups (action, file role or retained replacement): ${ai.changedGroups} / ${statistics.groupCount}")
+            appendLine("Changed group actions: ${ai.changedActionGroups}")
+            appendLine("Changed file decisions (role or replacement): ${totals(ai.changedFiles)}")
+            appendLine("Changed retained replacement (still a candidate): ${totals(ai.changedReplacements)}")
+            appendLine("Likely redundant - Deterministic-only: ${totals(ai.baselineRedundantCandidates)}")
+            appendLine("Likely redundant - With cached AI: ${totals(ai.currentRedundantCandidates)}")
+            appendLine("New redundant candidates: ${totals(ai.addedRedundantCandidates)}")
+            appendLine("Withdrawn redundant candidates (now preserved/review): ${totals(ai.withdrawnRedundantCandidates)}")
+            appendLine("Candidate sizes are advisory, not verified reclaimable space. No deletion is authorized.")
+            appendLine("Explanation/wording and confidence-only changes are not counted as decision changes.")
+            appendLine("Group action changes (deterministic-only -> with cached AI):")
+            if (ai.actionTransitions.isEmpty()) appendLine("  None")
+            for (before in RecommendationAction.entries) for (after in RecommendationAction.entries) {
+                ai.actionTransitions[before to after]?.let {
+                    appendLine("  ${actionLabel(before)} -> ${actionLabel(after)}: $it groups")
+                }
+            }
+            appendLine("File role changes (deterministic-only -> with cached AI):")
+            if (ai.roleTransitions.isEmpty()) appendLine("  None")
+            for (before in FileRecommendationRole.entries) for (after in FileRecommendationRole.entries) {
+                ai.roleTransitions[before to after]?.let {
+                    appendLine("  ${roleLabel(before)} -> ${roleLabel(after)}: $it files")
+                }
+            }
+        }
         appendLine()
         appendLine("By group recommendation (all files in each group)")
         for (action in RecommendationAction.entries) {
-            val name = when (action) {
-                RecommendationAction.KEEP_ONE -> "Keep one"
-                RecommendationAction.KEEP_MULTIPLE -> "Keep multiple"
-                RecommendationAction.REVIEW -> "Review"
-                RecommendationAction.PROTECTED -> "Protected"
-            }
-            bucket(name, statistics.byAction.getValue(action))
+            bucket("${actionLabel(action)} (${statistics.groupCounts.getValue(action)} groups)", statistics.byAction.getValue(action))
         }
         appendLine()
         appendLine("By file role")
         for (role in FileRecommendationRole.entries) {
-            val name = when (role) {
-                FileRecommendationRole.PREFERRED -> "Preferred"
-                FileRecommendationRole.REDUNDANT_CANDIDATE -> "Likely redundant"
-                FileRecommendationRole.PRESERVE -> "Preserve"
-                FileRecommendationRole.REVIEW -> "Review"
-            }
-            bucket(name, statistics.byRole.getValue(role))
+            bucket(roleLabel(role), statistics.byRole.getValue(role))
         }
         appendLine()
         appendLine("By file type (section total)")

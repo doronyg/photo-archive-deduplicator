@@ -12,6 +12,7 @@ import kotlinx.coroutines.withContext
 internal data class RecommendationStatisticsReport(
     val regular: RecommendationStatistics,
     val suspected: RecommendationStatistics,
+    val classificationContext: DirectoryClassificationContext? = null,
 )
 
 /** Database-only snapshot; never extracts EXIF or computes/saves retention assessments. */
@@ -22,7 +23,7 @@ internal class RecommendationStatisticsService(
     private val classificationContext: DirectoryClassificationContext? = null,
 ) {
     suspend fun load(): RecommendationStatisticsReport = withContext(dispatcher) {
-        RecommendationStatisticsReport(regularStatistics(), suspectedStatistics())
+        RecommendationStatisticsReport(regularStatistics(), suspectedStatistics(), classificationContext)
     }
 
     private suspend fun regularStatistics(): RecommendationStatistics {
@@ -46,6 +47,11 @@ internal class RecommendationStatisticsService(
         }.orEmpty()
         val recommendations = recommendDuplicateGroups(groups, exif, assessment.files, dispatcher = dispatcher,
             directoryClassifications = classifications)
-        return aggregateRecommendationStatistics(groups.map { recommendations.getValue(it.first().path) }, dispatcher)
+        val baseline = if (classifications.isEmpty()) recommendations else
+            recommendDuplicateGroups(groups, exif, assessment.files, dispatcher = dispatcher)
+        val currentGroups = groups.map { recommendations.getValue(it.first().path) }
+        val baselineGroups = groups.map { baseline.getValue(it.first().path) }
+        return aggregateRecommendationStatistics(currentGroups, dispatcher).copy(
+            ai = aggregateAiRecommendationStatistics(baselineGroups, currentGroups, classifications, dispatcher))
     }
 }
