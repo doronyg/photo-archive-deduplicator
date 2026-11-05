@@ -35,6 +35,7 @@ import com.doronyg.photoarchivededuplicator.scan.DirectoryRepository
 import com.doronyg.photoarchivededuplicator.scan.DirectoryStatus
 import com.doronyg.photoarchivededuplicator.scan.FileRecord
 import com.doronyg.photoarchivededuplicator.scan.InventorySummary
+import com.doronyg.photoarchivededuplicator.strings.AppStrings
 import okio.Path
 import okio.Path.Companion.toPath
 import kotlinx.coroutines.CancellationException
@@ -76,14 +77,14 @@ fun BrowseScreen(repository: DirectoryRepository, pathActions: PathActions, pref
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            error = "Could not load inventory: ${e.message}"
+            error = AppStrings.inventory.loadInventoryFailed(e.message)
         }
     }
 
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             content?.summary?.let { SummaryLine(it, Modifier.weight(1f)) }
-            OutlinedButton(onClick = { refreshCount++ }) { Text("Refresh") }
+            OutlinedButton(onClick = { refreshCount++ }) { Text(AppStrings.refresh) }
         }
         Breadcrumbs(stack, onNavigate = { depth -> preferences.update { it.copy(browseStack = it.browseStack.take(depth)) } })
         OutlinedButton(enabled = !copying && content != null, onClick = {
@@ -96,23 +97,23 @@ fun BrowseScreen(repository: DirectoryRepository, pathActions: PathActions, pref
                     val paths = repository.filePathsUnder(selected)
                     val text = formatInventoryFilePaths(paths)
                     clipboard.setText(AnnotatedString(text))
-                    copyStatus = "Copied ${paths.size} file paths from ${selected ?: "all roots"}, including subfolders."
+                    copyStatus = AppStrings.inventory.copiedFilePaths(paths.size, selected?.toString())
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
-                    error = "Could not copy file paths from ${selected ?: "all roots"}: ${e.message}"
+                    error = AppStrings.inventory.copyFilePathsFailed(selected?.toString(), e.message)
                 } finally {
                     copying = false
                 }
             }
-        }) { Text(if (copying) "Copying..." else "Copy file paths") }
-        Text("Copy file paths includes all stored files in this folder and its subfolders, one full path per line. All roots copies the entire inventory.",
+        }) { Text(if (copying) AppStrings.inventory.copying else AppStrings.inventory.copyFilePaths) }
+        Text(AppStrings.inventory.copyFilePathsHelp,
             style = MaterialTheme.typography.bodySmall)
         copyStatus?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
         current?.let { folder ->
-            PathLink("Open folder in file manager: $folder", action = { pathActions.openFolder(folder) })
+            PathLink(AppStrings.inventory.openFolderInFileManager(folder.toString()), action = { pathActions.openFolder(folder) })
             if (excluded) {
-                Text("Excluded tree: retained inventory only. Scans and candidate searches skip this path.")
+                Text(AppStrings.inventory.excludedTreeNotice)
             } else {
                 OutlinedButton(enabled = !scanning && !editing, onClick = {
                     scope.launch {
@@ -124,12 +125,12 @@ fun BrowseScreen(repository: DirectoryRepository, pathActions: PathActions, pref
                         } catch (e: CancellationException) {
                             throw e
                         } catch (e: Exception) {
-                            error = "Could not exclude folder: ${e.message}"
+                            error = AppStrings.inventory.excludeFolderFailed(e.message)
                         } finally {
                             editing = false
                         }
                     }
-                }) { Text("Exclude this folder tree") }
+                }) { Text(AppStrings.inventory.excludeFolderTree) }
             }
         }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
@@ -137,14 +138,14 @@ fun BrowseScreen(repository: DirectoryRepository, pathActions: PathActions, pref
         content?.let { browse ->
             LazyColumn(modifier = Modifier.fillMaxWidth()) {
                 if (browse.directories.isEmpty() && browse.files.isEmpty()) {
-                    item { Text(if (current == null) "Nothing scanned yet." else "Empty folder.") }
+                    item { Text(if (current == null) AppStrings.inventory.nothingScanned else AppStrings.inventory.emptyFolder) }
                 }
                 items(browse.directories, key = { it.directory.path.toString() }) { overview ->
                     Column {
                         DirectoryRow(overview, onOpen = {
                             preferences.update { it.copy(browseStack = it.browseStack + overview.directory.path.toString()) }
                         })
-                        PathLink("Open in file manager", action = { pathActions.openFolder(overview.directory.path) })
+                        PathLink(AppStrings.inventory.openInFileManager, action = { pathActions.openFolder(overview.directory.path) })
                     }
                 }
                 items(browse.files, key = { it.path.toString() }) { FileRow(it, pathActions) }
@@ -156,10 +157,10 @@ fun BrowseScreen(repository: DirectoryRepository, pathActions: PathActions, pref
 @Composable
 private fun SummaryLine(summary: InventorySummary, modifier: Modifier) {
     val statuses = DirectoryStatus.entries
-        .mapNotNull { status -> summary.directoriesByStatus[status]?.let { "${status.name.lowercase()}: $it" } }
+        .mapNotNull { status -> summary.directoriesByStatus[status]?.let { AppStrings.inventory.directoryStatusCount(status.name.lowercase(), it) } }
         .joinToString()
     Text(
-        "${summary.directoryCount} folders ($statuses) · ${summary.fileCount} files · ${formatBytes(summary.totalBytes)}",
+        AppStrings.inventory.summary(summary.directoryCount, statuses, summary.fileCount, formatBytes(summary.totalBytes)),
         style = MaterialTheme.typography.bodyMedium,
         modifier = modifier,
     )
@@ -168,9 +169,9 @@ private fun SummaryLine(summary: InventorySummary, modifier: Modifier) {
 @Composable
 private fun Breadcrumbs(stack: List<Path>, onNavigate: (depth: Int) -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        TextButton(onClick = { onNavigate(0) }) { Text("All roots") }
+        TextButton(onClick = { onNavigate(0) }) { Text(AppStrings.inventory.allRoots) }
         stack.forEachIndexed { index, path ->
-            Text("›")
+            Text(AppStrings.inventory.breadcrumbSeparator)
             // Full path for the root, folder names below it
             TextButton(onClick = { onNavigate(index + 1) }) { Text(if (index == 0) path.toString() else path.name) }
         }
@@ -181,11 +182,12 @@ private fun Breadcrumbs(stack: List<Path>, onNavigate: (depth: Int) -> Unit) {
 private fun DirectoryRow(overview: DirectoryOverview, onOpen: () -> Unit) {
     val dir = overview.directory
     ListRow(
-        icon = "▸",
+        icon = AppStrings.inventory.directoryIcon,
         name = if (dir.parentPath == null) dir.path.toString() else dir.path.name,
-        details = "${dir.status.name.lowercase()} · ${dir.fileCount} files · ${formatBytes(overview.fileBytes)}" +
-            " · scanned ${formatEpochMillis(dir.lastScanned)}" +
-            if (dir.retryCount > 0) " · ${dir.retryCount} retries" else "",
+        details = AppStrings.inventory.directoryDetails(
+            dir.status.name.lowercase(), dir.fileCount, formatBytes(overview.fileBytes),
+            formatEpochMillis(dir.lastScanned), dir.retryCount,
+        ),
         modifier = Modifier.clickable(onClick = onOpen),
     )
 }
@@ -194,7 +196,7 @@ private fun DirectoryRow(overview: DirectoryOverview, onOpen: () -> Unit) {
 private fun FileRow(file: FileRecord, actions: PathActions) {
     Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
         FilePathLinks(file, actions)
-        Text("${formatBytes(file.sizeBytes)} · created ${formatEpochMillis(file.createdAt)} · modified ${formatEpochMillis(file.modifiedAt)}",
+        Text(AppStrings.inventory.fileDetails(formatBytes(file.sizeBytes), formatEpochMillis(file.createdAt), formatEpochMillis(file.modifiedAt)),
             style = MaterialTheme.typography.bodySmall)
     }
 }

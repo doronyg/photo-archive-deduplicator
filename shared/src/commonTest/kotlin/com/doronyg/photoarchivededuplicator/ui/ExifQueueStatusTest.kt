@@ -15,7 +15,7 @@ class ExifQueueStatusTest {
     fun suspectedAnalysisHasDifferentEligibilityAndDoesNotClaimAmbiguityFiltering() {
         val state = ExifQueueState(purpose = ExifQueuePurpose.SUSPECTED_DUPLICATES)
         val preparing = presentExifQueue(state.copy(phase = ExifQueuePhase.SCORING)).orEmpty()
-        assertTrue("same-size images" in preparing)
+        assertTrue("matching image sizes" in preparing)
         val empty = presentExifQueue(state.copy(phase = ExifQueuePhase.COMPLETED)).orEmpty()
         assertTrue("different filenames" in empty)
         assertFalse("ambiguous" in empty)
@@ -43,30 +43,30 @@ class ExifQueueStatusTest {
     @Test
     fun idleAndPreparationPhasesAreExplicit() {
         assertNull(presentExifQueue(ExifQueueState()))
-        assertEquals("EXIF queue: checking scores and eligibility…", status(ExifQueuePhase.SCORING))
-        assertTrue("updating final retention scores" in status(ExifQueuePhase.REASSESSING))
+        assertEquals("EXIF: checking eligible groups...", status(ExifQueuePhase.SCORING))
+        assertTrue("updating scores" in status(ExifQueuePhase.REASSESSING))
     }
 
     @Test
     fun progressCountsVisitsIncludingCacheRatherThanReads() {
         val text = status(ExifQueuePhase.EXTRACTING)
         assertTrue("1/2 groups" in text)
-        assertTrue("3/6 files visited" in text)
-        assertTrue("includes cached results, not file reads" in text)
+        assertTrue("3/6 files" in text)
+        assertFalse("includes cached results" in text)
     }
 
     @Test
     fun completionDistinguishesNoEligibleGroups() {
-        assertTrue("completed" in status(ExifQueuePhase.COMPLETED))
-        assertTrue("no eligible ambiguous groups with a complete folder date" in status(ExifQueuePhase.COMPLETED, groups = 0))
-        assertFalse("no eligible" in status(ExifQueuePhase.COMPLETED))
+        assertTrue("complete" in status(ExifQueuePhase.COMPLETED))
+        assertTrue("No eligible groups" in status(ExifQueuePhase.COMPLETED, groups = 0))
+        assertFalse("No eligible" in status(ExifQueuePhase.COMPLETED))
     }
 
     @Test
     fun cancellationPreservesCacheWithoutClaimingCompletedScoring() {
         val text = status(ExifQueuePhase.CANCELLED)
         assertTrue("cancelled" in text)
-        assertTrue("Stored EXIF is preserved; processing stopped" in text)
+        assertFalse("Stored EXIF is preserved" in text)
         assertFalse("completed" in text)
     }
 
@@ -75,6 +75,6 @@ class ExifQueueStatusTest {
         val text = status(ExifQueuePhase.FAILED, error = "Database unavailable")
         assertTrue("Database unavailable" in text)
         assertTrue("1/2 groups" in text)
-        assertTrue("Unknown error" in status(ExifQueuePhase.FAILED))
+        assertTrue("Unknown" in status(ExifQueuePhase.FAILED))
     }
 }

@@ -51,7 +51,7 @@ class ExifFolderDateMismatchProviderTest {
             "Date comparison" to "Matches"), result.survivors.single().evidence)
         assertEquals(listOf("Directory date" to "2018-08-09", "EXIF capture date" to "2018-08-26",
             "Date comparison" to "Does not match"), result.candidates.single().evidence)
-        assertTrue("not byte-verified" in result.evidenceSummary)
+        assertTrue("Shared capture date: 2018-08-26" in result.evidenceSummary)
     }
 
     @Test

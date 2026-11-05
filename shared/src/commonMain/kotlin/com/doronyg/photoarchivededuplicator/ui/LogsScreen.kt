@@ -21,6 +21,7 @@ import com.doronyg.photoarchivededuplicator.LogLevel
 import com.doronyg.photoarchivededuplicator.LogEntry
 import com.doronyg.photoarchivededuplicator.formatLog
 import com.doronyg.photoarchivededuplicator.formatLogs
+import com.doronyg.photoarchivededuplicator.strings.AppStrings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.currentCoroutineContext
@@ -67,34 +68,34 @@ fun LogsScreen(pathActions: PathActions, modifier: Modifier = Modifier, preferen
         if (follow && visible.isNotEmpty()) list.scrollToItem(visible.lastIndex)
     }
     Column(modifier) {
-        Text("Local diagnostics • epoch milliseconds • ${visible.size} retained/visible")
-        Text("Dropped: ${snapshot.dropped} • native sink dropped: ${snapshot.sinkDropped} • sink failures: ${snapshot.sinkFailures}")
+        Text(AppStrings.inventory.logSummary(visible.size))
+        Text(AppStrings.inventory.logSinkStatus(snapshot.dropped, snapshot.sinkDropped, snapshot.sinkFailures))
         logDirectory.getOrNull()?.let { directory ->
-            PathLink("Open local log folder: $directory", action = { pathActions.openFolder(directory.toPath()) })
-            Text("Files: 5 × 5 MiB maximum • file queue dropped: ${snapshot.fileDropped} • file failures: ${snapshot.fileFailures}")
-            Text("Flushed per entry; queued logs may be lost on force-kill. Clear affects only this view.")
-            snapshot.fileError?.let { Text("Last file error: $it", color = MaterialTheme.colorScheme.error) }
+            PathLink(AppStrings.inventory.openLogFolder(directory), action = { pathActions.openFolder(directory.toPath()) })
+            Text(AppStrings.inventory.logFileStatus(snapshot.fileDropped, snapshot.fileFailures))
+            Text(AppStrings.inventory.logPersistenceNotice)
+            snapshot.fileError?.let { Text(AppStrings.inventory.lastLogFileError(it), color = MaterialTheme.colorScheme.error) }
         }
         logDirectory.exceptionOrNull()?.let {
-            Text("Could not resolve log folder: ${it.message}", color = MaterialTheme.colorScheme.error)
+            Text(AppStrings.inventory.resolveLogFolderFailed(it.message), color = MaterialTheme.colorScheme.error)
         }
-        OutlinedTextField(filter, { value -> updateChoices { it.copy(logFilter = value) } }, label = { Text("Filter tag, message or thread") },
+        OutlinedTextField(filter, { value -> updateChoices { it.copy(logFilter = value) } }, label = { Text(AppStrings.inventory.logFilter) },
             singleLine = true, modifier = Modifier.fillMaxWidth())
         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             LogLevel.entries.forEach { level ->
-                FilterChip(selected = minimum == level, onClick = { updateChoices { it.copy(logMinimum = level) } }, label = { Text("${level.name}+") })
+                FilterChip(selected = minimum == level, onClick = { updateChoices { it.copy(logMinimum = level) } }, label = { Text(AppStrings.inventory.minimumLogLevel(level.name)) })
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            TextButton(onClick = { Diagnostics.logger.clear() }) { Text("Clear") }
+            TextButton(onClick = { Diagnostics.logger.clear() }) { Text(AppStrings.inventory.clearLogs) }
             TextButton(onClick = {
                 val captured = visible
                 scope.launch {
                     val text = withContext(Dispatchers.Default) { formatLogs(captured) }
                     clipboard.setText(AnnotatedString(text))
                 }
-            }) { Text("Copy all visible") }
-            TextButton(onClick = { updateChoices { it.copy(logFollow = !it.logFollow) } }) { Text(if (follow) "Pause scroll" else "Follow") }
+            }) { Text(AppStrings.inventory.copyVisibleLogs) }
+            TextButton(onClick = { updateChoices { it.copy(logFollow = !it.logFollow) } }) { Text(if (follow) AppStrings.inventory.pauseScroll else AppStrings.inventory.followLogs) }
         }
         SelectionContainer(Modifier.weight(1f)) {
             LazyColumn(state = list, modifier = Modifier.fillMaxSize()) {

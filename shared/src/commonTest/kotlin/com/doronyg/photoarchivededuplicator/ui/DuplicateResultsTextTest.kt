@@ -42,10 +42,10 @@ class DuplicateResultsTextTest {
             listOf(DuplicateCandidateGroup("image.jpg", files.first().sizeBytes, files)),
             StandardTestDispatcher(testScheduler), recommendations = files.associate { it.path to recommendation })
         assertTrue("Duplicate confidence: 100/100 (Very high)" in report)
-        assertFalse("Retention-decision confidence:" in report.substringBefore("  Path:"))
+        assertFalse("Retention confidence:" in report.substringBefore("  Path:"))
         assertConfidencePresentationDetails(report, includesSummary = true)
         assertFileDecisionPresentationDetails(report)
-        assertEquals(3, report.lineSequence().count { "Retention-decision confidence:" in it })
+        assertEquals(3, report.lineSequence().count { "Retention confidence:" in it })
         val fileSections = report.substringAfter("  Path:")
         assertTrue(fileSections.indexOf(quoteResultText(files[1].path.toString())) <
             fileSections.indexOf(quoteResultText(files[2].path.toString())))
@@ -64,8 +64,8 @@ class DuplicateResultsTextTest {
             ExifMetadata(capturedAt = "2024:07:08 09:10:11", make = "A\n\"B\"")), 1000)
         val report = formatDuplicateResults("/archive", DuplicateCandidateFilter(), defaultDuplicateSortRules(),
             listOf(group), worker, retention = scores, exif = mapOf(file.path to record))
-        assertTrue("Original capture datetime: \"2024:07:08 09:10:11\"" in report)
-        assertTrue("Original offset: \"unknown (timezone unknown)\"" in report)
+        assertTrue("Capture date and time: \"2024:07:08 09:10:11\"" in report)
+        assertTrue("Timezone offset: \"Timezone unknown\"" in report)
         assertTrue("Camera make: \"A\\n\\\"B\\\"\"" in report)
         assertTrue("EXIF: Not extracted" in report)
         assertEquals(plain.lineSequence().filter { "Retention" in it || "Path:" in it }.toList(),
@@ -83,7 +83,7 @@ class DuplicateResultsTextTest {
                 listOf(group), worker, exif = mapOf(file.path to record))
             assertTrue(presentExif(record).summary.let(::quoteResultText) in report)
             assertTrue("Error: \"bad\\n\\\"input\\\"\"" in report)
-            assertTrue("Reader: \"kim 0.48.0\"" in report)
+            assertFalse("Reader:" in report)
         }
     }
 
@@ -107,7 +107,8 @@ class DuplicateResultsTextTest {
             listOf(group("IMG_1.jpg")),
             StandardTestDispatcher(testScheduler),
         )
-        assertTrue("not verified duplicates" in report)
+        assertTrue(report.startsWith("Duplicate candidates"))
+        assertFalse("not verified duplicates" in report)
         assertTrue("Root: \"/archive\"" in report)
         assertTrue("Type: IMAGES" in report)
         assertTrue("Wildcard (case-insensitive): \"IMG*.jpg\"" in report)
@@ -119,8 +120,8 @@ class DuplicateResultsTextTest {
         assertTrue("Path: \"/archive/b/IMG_1.jpg\"" in report)
         assertTrue("Created: 1970-01-01 00:00:00 UTC" in report)
         assertTrue("Modified: 1970-01-01 00:00:01 UTC" in report)
-        assertTrue("Created: unknown" in report)
-        assertTrue("Modified: unknown" in report)
+        assertTrue("Created: Unknown" in report)
+        assertTrue("Modified: Unknown" in report)
     }
 
     @Test
@@ -138,8 +139,7 @@ class DuplicateResultsTextTest {
             listOf(DuplicateSortRule(DuplicateSortCriterion.RECOMMENDATION, direction = SortDirection.DESCENDING)),
             listOf(group("z.jpg"), group("a.jpg")), StandardTestDispatcher(testScheduler))
         assertTrue("Sort priority: RECOMMENDATION DESCENDING" in report)
-        assertTrue("KEEP_ONE, KEEP_MULTIPLE, REVIEW, PROTECTED" in report)
-        assertTrue("unavailable results stay last" in report)
+        assertTrue("Recommendation order: Keep one, Keep multiple, Review, Protected" in report)
         assertTrue(report.indexOf("Group 1: \"z.jpg\"") < report.indexOf("Group 2: \"a.jpg\""))
     }
 
@@ -158,7 +158,7 @@ class DuplicateResultsTextTest {
             defaultDuplicateSortRules().map { it.copy(enabled = false) }, emptyList(),
             StandardTestDispatcher(testScheduler))
         assertTrue("Candidate groups: 0" in report)
-        assertTrue("Sort priority: none (search order)" in report)
+        assertTrue("Sort priority: Search order" in report)
         assertTrue("Wildcard (case-insensitive): \"*\"" in report)
         assertFalse("Group 1:" in report)
     }
@@ -216,7 +216,7 @@ class DuplicateResultsTextTest {
         assertTrue("Retention: Not scored" in report)
         assertTrue("directory-retention v6" in report)
         assertTrue("Assessed: 1970-01-01 00:00:01 UTC" in report)
-        assertTrue("not probabilities or deletion instructions" in report)
+        assertFalse("not probabilities or deletion instructions" in report)
         val stale = formatDuplicateResults("/archive", DuplicateCandidateFilter(), defaultDuplicateSortRules(),
             listOf(group), worker, retention = mapOf(file.path to RetentionPresentation(score, RetentionRank.STALE)))
         assertTrue("Retention: 100 - Outdated score" in stale)

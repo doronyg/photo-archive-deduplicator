@@ -10,6 +10,7 @@ import com.doronyg.photoarchivededuplicator.exif.ExifRecord
 import com.doronyg.photoarchivededuplicator.recommendation.DuplicateGroupRecommendation
 import com.doronyg.photoarchivededuplicator.recommendation.FileRecommendation
 import com.doronyg.photoarchivededuplicator.scan.FileRecord
+import com.doronyg.photoarchivededuplicator.strings.AppStrings
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
@@ -30,21 +31,19 @@ internal suspend fun formatDuplicateResults(
 ): String = withContext(dispatcher) {
     val context = currentCoroutineContext()
     buildString {
-        appendLine("Duplicate candidates - not verified duplicates")
-        appendLine("Matched by exact case-sensitive filename and byte size; contents have not been compared.")
-        appendLine("Stored inventory snapshot. No files have been changed.")
-        appendLine("Retention scores are advisory location/metadata heuristics, not probabilities or deletion instructions.")
-        appendLine("Root: ${quoteResultText(root)}")
-        appendLine("Type: ${filter.fileType.name}")
-        appendLine("Wildcard (case-insensitive): ${quoteResultText(filter.filenamePattern.trim().ifEmpty { "*" })}")
+        appendLine(AppStrings.duplicates.title)
+        appendLine(AppStrings.duplicates.exportMatch)
+        appendLine(AppStrings.duplicates.exportRoot(quoteResultText(root)))
+        appendLine(AppStrings.duplicates.exportType(filter.fileType.name))
+        appendLine(AppStrings.duplicates.exportWildcard(quoteResultText(filter.filenamePattern.trim().ifEmpty { "*" })))
         appendDuplicateSortContext(rules)
-        appendLine("Candidate groups: ${groups.size}")
+        appendLine(AppStrings.duplicates.exportGroupCount(groups.size))
         groups.forEachIndexed { index, group ->
             context.ensureActive()
             appendLine()
-            appendLine("Group ${index + 1}: ${quoteResultText(group.name)}")
-            appendLine("Size per file: ${group.sizeBytes} bytes (${formatBytes(group.sizeBytes)})")
-            appendLine("Copies: ${group.files.size}")
+            appendLine(AppStrings.duplicates.exportGroup(index + 1, quoteResultText(group.name)))
+            appendLine(AppStrings.duplicates.exportSize(group.sizeBytes, formatBytes(group.sizeBytes)))
+            appendLine(AppStrings.duplicates.exportCopies(group.files.size))
             val recommendation = group.files.firstOrNull()?.let { recommendations[it.path] }
             appendGroupRecommendation(recommendation)
             group.files.forEach { file ->
@@ -56,18 +55,18 @@ internal suspend fun formatDuplicateResults(
 
 internal fun StringBuilder.appendDuplicateSortContext(rules: List<DuplicateSortRule>) {
     val priority = rules.filter { it.enabled }.joinToString(" > ") { "${it.criterion.name} ${it.direction.name}" }
-    appendLine("Sort priority: ${priority.ifEmpty { "none (search order)" }}")
+    appendLine(AppStrings.duplicates.exportSort(priority.ifEmpty { AppStrings.duplicates.searchOrder }))
     if (rules.any { it.enabled && it.criterion == DuplicateSortCriterion.RECOMMENDATION }) {
-        appendLine("Recommendation ascending: KEEP_ONE, KEEP_MULTIPLE, REVIEW, PROTECTED; unavailable results stay last.")
+        appendLine(AppStrings.duplicates.exportRecommendationSort)
     }
-    appendLine("Creation sorting uses the earliest known date per group; unknown dates sort last.")
+    appendLine(AppStrings.duplicates.exportCreationSort)
 }
 
 internal fun StringBuilder.appendGroupRecommendation(recommendation: DuplicateGroupRecommendation?) {
     if (recommendation != null) {
-        appendLine("Group recommendation: ${recommendation.action.name}")
-        appendLine("Recommendation explanation: ${quoteResultText(recommendation.explanation)}")
-        appendLine("Recommendation reasons: ${recommendation.reasonCodes.joinToString { it.name }}")
+        appendLine(AppStrings.duplicates.exportGroupRecommendation(recommendation.action.name))
+        appendLine(AppStrings.duplicates.exportExplanation(quoteResultText(recommendation.explanation)))
+        appendLine(AppStrings.duplicates.exportReasons(recommendation.reasonCodes.joinToString { it.name }))
         appendLine(groupConfidenceSummaryText(recommendation))
         appendLine(groupConfidenceDetailsText(recommendation))
     }
@@ -81,31 +80,31 @@ internal suspend fun StringBuilder.appendDuplicateFileResult(
 ) {
     val context = currentCoroutineContext()
     context.ensureActive()
-    appendLine("  Path: ${quoteResultText(file.path.toString())}")
-    appendLine("  Created: ${file.createdAt?.let { "${formatEpochMillis(it)} UTC" } ?: "unknown"}")
-    appendLine("  Modified: ${file.modifiedAt?.let { "${formatEpochMillis(it)} UTC" } ?: "unknown"}")
+    appendLine(AppStrings.duplicates.exportPath(quoteResultText(file.path.toString())))
+    appendLine(AppStrings.duplicates.exportCreated(file.createdAt?.let { AppStrings.utc(formatEpochMillis(it)) } ?: AppStrings.unknown))
+    appendLine(AppStrings.duplicates.exportModified(file.modifiedAt?.let { AppStrings.utc(formatEpochMillis(it)) } ?: AppStrings.unknown))
     if (advice != null) {
-        appendLine("  File recommendation: ${advice.role.name}")
-        appendLine("  Recommendation explanation: ${quoteResultText(advice.explanation)}")
-        appendLine("  Normalized filename: ${quoteResultText(advice.normalizedFilename)}")
-        appendLine("  Recommendation reasons: ${advice.reasonCodes.joinToString { it.name }}")
+        appendLine(AppStrings.duplicates.exportFileRecommendation(advice.role.name))
+        appendLine("  ${AppStrings.duplicates.exportExplanation(quoteResultText(advice.explanation))}")
+        appendLine("  ${AppStrings.duplicates.normalizedFilename(quoteResultText(advice.normalizedFilename))}")
+        appendLine("  ${AppStrings.duplicates.exportReasons(advice.reasonCodes.joinToString { it.name })}")
         appendLine("  ${fileDecisionConfidenceSummaryText(advice)}")
         fileDecisionConfidenceDetailsText(advice).lineSequence().forEach { appendLine("  $it") }
     }
     val metadata = presentExif(exif)
     appendLine("  ${quoteResultText(metadata.summary)}")
-    metadata.details.forEach { (label, value) -> appendLine("    $label: ${quoteResultText(value)}") }
+    metadata.details.forEach { (label, value) -> appendLine("    ${AppStrings.field(label, quoteResultText(value))}") }
     val score = assessment?.score
-    if (score == null) appendLine("  Retention: ${assessment?.label ?: "Not scored"}")
+    if (score == null) appendLine("  ${AppStrings.duplicates.retention(assessment?.label ?: AppStrings.duplicates.notScored)}")
     else {
-        appendLine("  Retention: ${assessment.scoreText} - ${assessment.label}")
-        appendLine("  Retention explanation: ${quoteResultText(assessment.mainReason)}")
-        appendLine("  Score algorithm: ${score.identity.algorithmId} v${score.identity.algorithmVersion}")
-        appendLine("  Assessed: ${formatEpochMillis(score.createdAt)} UTC")
+        appendLine("  ${AppStrings.duplicates.retention("${assessment.scoreText} - ${assessment.label}")}")
+        appendLine(AppStrings.duplicates.exportRetentionExplanation(quoteResultText(assessment.mainReason)))
+        appendLine(AppStrings.duplicates.exportAlgorithm(score.identity.algorithmId, score.identity.algorithmVersion))
+        appendLine(AppStrings.duplicates.exportAssessed(formatEpochMillis(score.createdAt)))
         score.factors.forEach { factor ->
             context.ensureActive()
             val value = formatScoreValue(factor.contribution)
-            appendLine("    ${if (factor.contribution > 0) "+" else ""}$value: ${quoteResultText(factor.explanation)}")
+            appendLine("    ${AppStrings.duplicates.contribution("${if (factor.contribution > 0) "+" else ""}$value", quoteResultText(factor.explanation))}")
         }
     }
 }

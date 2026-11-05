@@ -33,6 +33,13 @@ class DuplicateConfidenceTest {
         assertEquals(100, pair.evidence.sumOf { it.points })
         assertTrue(pair.evidence.all { it.explanation.isNotBlank() })
         assertTrue(ConfidenceReason.EVIDENCE_UNAVAILABLE in result.assessment.reasonCodes)
+        assertTrue(result.assessment.explanation.contains("Weakest member ${b.path} compared with ${a.path} scores 100/100."))
+        assertTrue(result.assessment.explanation.endsWith("Group confidence is 100/100."))
+        assertEquals("${b.path} versus ${a.path}: 100/100 from cached metadata.", pair.assessment.explanation)
+        assertEquals(
+            "Camera-local capture timestamp (seconds; no timezone conversion) agrees (2023:02:18 12:44:25): +30.",
+            pair.evidence.single { it.reasonCode == ConfidenceReason.CAPTURE_TIMESTAMP_MATCH }.explanation,
+        )
     }
 
     @Test fun supportedSuffixesAndOnlyExtensionCaseAreNormalized() {
@@ -78,6 +85,8 @@ class DuplicateConfidenceTest {
             val pair = result.comparisons.getValue(b.path)
             assertTrue(pair.evidence.any { it.points < 0 })
             assertEquals(result.score, pair.evidence.sumOf { it.points })
+            assertTrue(pair.assessment.explanation.endsWith("Known EXIF contradictions prevent an exact-duplicate recommendation."))
+            assertTrue(result.assessment.explanation.contains("Whole-group EXIF contradictions block recommendation"))
         }
     }
 

@@ -14,6 +14,7 @@ import com.doronyg.photoarchivededuplicator.retention.RetentionRank
 import com.doronyg.photoarchivededuplicator.retention.RetentionScorer
 import com.doronyg.photoarchivededuplicator.retention.filenameEvidence
 import com.doronyg.photoarchivededuplicator.scan.FileRecord
+import com.doronyg.photoarchivededuplicator.strings.AppStrings
 import okio.Path
 
 internal fun normalizedRecommendationFilename(name: String): String {
@@ -64,11 +65,11 @@ class DuplicateConfidenceCalculator(
         fun unavailable(reason: ConfidenceReason, explanation: String) =
             DuplicateConfidenceAssessment(null, ConfidenceAssessment(0, setOf(reason), explanation), emptyMap())
         if (files.size < 2) return unavailable(ConfidenceReason.INSUFFICIENT_FILES,
-            "At least two distinct files are needed; no duplicate confidence is inferred.")
+            AppStrings.recommendations.insufficientConfidenceFiles)
         if (files.map { it.path }.distinct().size != files.size) return unavailable(ConfidenceReason.REPEATED_FILE_PATH,
-            "A repeated path is not a second file; no duplicate confidence is inferred.")
+            AppStrings.recommendations.repeatedConfidencePath)
         if (files.map { it.sizeBytes }.distinct().size != 1) return unavailable(ConfidenceReason.SIZE_MISMATCH,
-            "Different sizes contradict exact duplication. Equal sizes would earn no points.")
+            AppStrings.recommendations.confidenceSizeMismatch)
 
         val ordered = files.sortedBy { it.path.toString() }
         val scored = ordered.mapNotNull { file ->
@@ -78,8 +79,8 @@ class DuplicateConfidenceCalculator(
         val referenceReason = if (scored.isEmpty()) ConfidenceReason.DETERMINISTIC_REFERENCE_FALLBACK
             else ConfidenceReason.HIGHEST_CURRENT_RETENTION_REFERENCE
         val referenceExplanation = if (scored.isEmpty())
-            "No current valid retention score is available; ${reference.path} is a deterministic path-order reference, not a retention preference."
-        else "${reference.path} is the highest current retention-score reference; equal scores use path order."
+            AppStrings.recommendations.fallbackReference(reference.path)
+        else AppStrings.recommendations.highestScoreReference(reference.path)
         val comparisons = ordered.filter { it.path != reference.path }.associate { file ->
             file.path to compare(file, reference, exif)
         }
@@ -94,15 +95,13 @@ class DuplicateConfidenceCalculator(
             (if (groupConflicts.isNotEmpty()) setOf(ConfidenceReason.CONFLICTING_EXIF_METADATA) else emptySet()) +
             (if (score < weakest.assessment.score) setOf(ConfidenceReason.CONTRADICTION_CAP) else emptySet())
         val conflictExplanation = if (groupConflicts.isEmpty()) "" else
-            " Whole-group EXIF contradictions block recommendation regardless of the reference's missing fields: " +
-                groupConflicts.joinToString(" ") { it.explanation } +
+            AppStrings.recommendations.groupExifContradictions(groupConflicts.joinToString(" ") { it.explanation }) + " " +
                 if (score < weakest.assessment.score)
-                    " Group confidence is capped from ${weakest.assessment.score} to $score (adjustment ${score - weakest.assessment.score})."
-                else " Group confidence remains $score, at or below the contradiction cap."
+                    AppStrings.recommendations.cappedGroupConfidence(weakest.assessment.score, score)
+                else AppStrings.recommendations.uncappedGroupConfidence(score)
         return DuplicateConfidenceAssessment(reference, ConfidenceAssessment(score, reasons,
-            "$referenceExplanation Weakest member ${weakest.file.path} compared with ${reference.path} scores ${weakest.assessment.score}/100." +
-                conflictExplanation + " Group confidence is $score/100. " +
-                "Metadata confidence is not byte verification."), comparisons)
+            AppStrings.recommendations.groupConfidence(referenceExplanation, weakest.file.path, reference.path,
+                weakest.assessment.score, conflictExplanation, score)), comparisons)
     }
 
     private fun groupConflicts(files: List<FileRecord>, exif: Map<Path, ExifRecord>): List<ConfidenceEvidence> {
@@ -119,17 +118,17 @@ class DuplicateConfidenceCalculator(
                 } else if (first.first != value) {
                     conflicted += label
                     conflicts += ConfidenceEvidence(reason, 0,
-                        "$label differs between ${first.second} (${first.first}) and ${file.path} ($value).")
+                        AppStrings.recommendations.groupFieldConflict(label, first.second, first.first, file.path, value))
                 }
             }
-            check("Camera-local capture timestamp", validatedExifTimestamp(metadata.capturedAt), ConfidenceReason.CAPTURE_TIMESTAMP_CONFLICT)
-            check("Camera make", cameraComponent(metadata.make), ConfidenceReason.CAMERA_MAKE_CONFLICT)
-            check("Camera model", cameraComponent(metadata.model), ConfidenceReason.CAMERA_MODEL_CONFLICT)
-            check("Positive width", metadata.width?.takeIf { it > 0 }, ConfidenceReason.DIMENSIONS_CONFLICT)
-            check("Positive height", metadata.height?.takeIf { it > 0 }, ConfidenceReason.DIMENSIONS_CONFLICT)
-            check("Original capture offset", validOffset(metadata.offsetOriginal), ConfidenceReason.CAPTURE_OFFSET_CONFLICT)
-            check("Original capture subseconds", validSubsecond(metadata.subsecondOriginal), ConfidenceReason.CAPTURE_SUBSECOND_CONFLICT)
-            check("EXIF orientation", metadata.orientation?.takeIf { it in 1..8 }, ConfidenceReason.ORIENTATION_CONFLICT)
+            check(AppStrings.recommendations.captureTimestamp, validatedExifTimestamp(metadata.capturedAt), ConfidenceReason.CAPTURE_TIMESTAMP_CONFLICT)
+            check(AppStrings.recommendations.cameraMake, cameraComponent(metadata.make), ConfidenceReason.CAMERA_MAKE_CONFLICT)
+            check(AppStrings.recommendations.cameraModel, cameraComponent(metadata.model), ConfidenceReason.CAMERA_MODEL_CONFLICT)
+            check(AppStrings.recommendations.positiveWidth, metadata.width?.takeIf { it > 0 }, ConfidenceReason.DIMENSIONS_CONFLICT)
+            check(AppStrings.recommendations.positiveHeight, metadata.height?.takeIf { it > 0 }, ConfidenceReason.DIMENSIONS_CONFLICT)
+            check(AppStrings.recommendations.captureOffset, validOffset(metadata.offsetOriginal), ConfidenceReason.CAPTURE_OFFSET_CONFLICT)
+            check(AppStrings.recommendations.captureSubseconds, validSubsecond(metadata.subsecondOriginal), ConfidenceReason.CAPTURE_SUBSECOND_CONFLICT)
+            check(AppStrings.recommendations.orientation, metadata.orientation?.takeIf { it in 1..8 }, ConfidenceReason.ORIENTATION_CONFLICT)
         }
         return conflicts
     }
@@ -146,38 +145,36 @@ class DuplicateConfidenceCalculator(
         ) {
             when {
                 left == null || right == null -> add(ConfidenceReason.EVIDENCE_UNAVAILABLE, 0,
-                    "$label unavailable or invalid for one or both files: +0/$weight; missing evidence is not a conflict.")
-                left == right -> add(match, weight, "$label agrees ($left): +$weight.")
+                    AppStrings.recommendations.unavailableField(label, weight))
+                left == right -> add(match, weight, AppStrings.recommendations.matchingField(label, left, weight))
                 else -> {
                     if (semantic) contradictions = true
-                    add(mismatch, 0, "$label differs ($left versus $right): +0/$weight. " +
-                        if (semantic) "Known EXIF disagreement contradicts exact duplication."
-                        else "Supporting evidence is absent; this is not a content contradiction.")
+                    add(mismatch, 0, AppStrings.recommendations.differingField(label, left, right, weight, semantic))
                 }
             }
         }
 
-        add(ConfidenceReason.SIZE_NOT_SCORED, 0, "Equal stored sizes are a prerequisite only: +0.")
-        field("Normalized filename", normalizedRecommendationFilename(file.name), normalizedRecommendationFilename(reference.name),
+        add(ConfidenceReason.SIZE_NOT_SCORED, 0, AppStrings.recommendations.equalSizePrerequisite)
+        field(AppStrings.recommendations.normalizedFilename, normalizedRecommendationFilename(file.name), normalizedRecommendationFilename(reference.name),
             config.filenameWeight, ConfidenceReason.NORMALIZED_FILENAME_MATCH, ConfidenceReason.NORMALIZED_FILENAME_DIFFERS, false)
-        field("Exact stored modifiedAt milliseconds", file.modifiedAt, reference.modifiedAt, config.modifiedWeight,
+        field(AppStrings.recommendations.storedModifiedTimestamp, file.modifiedAt, reference.modifiedAt, config.modifiedWeight,
             ConfidenceReason.MODIFIED_TIMESTAMP_MATCH, ConfidenceReason.MODIFIED_TIMESTAMP_DIFFERS, false)
         fun metadata(member: FileRecord): ExifMetadata? {
             val stored = exif[member.path]
             val current = currentRecommendationExif(member, stored)
             if (current == null) add(ConfidenceReason.EVIDENCE_UNAVAILABLE, 0,
-                "EXIF for ${member.path} is absent, failed, stale, or from a noncurrent reader; cached fields are unavailable.")
+                AppStrings.recommendations.unavailableExif(member.path))
             return current?.result?.metadata
         }
         val left = metadata(file)
         val right = metadata(reference)
-        field("Camera-local capture timestamp (seconds; no timezone conversion)",
+        field(AppStrings.recommendations.captureTimestampSeconds,
             validatedExifTimestamp(left?.capturedAt), validatedExifTimestamp(right?.capturedAt),
             config.captureWeight, ConfidenceReason.CAPTURE_TIMESTAMP_MATCH, ConfidenceReason.CAPTURE_TIMESTAMP_CONFLICT)
-        field("Camera make", cameraComponent(left?.make),
+        field(AppStrings.recommendations.cameraMake, cameraComponent(left?.make),
             cameraComponent(right?.make), config.cameraMakeWeight,
             ConfidenceReason.CAMERA_MAKE_MATCH, ConfidenceReason.CAMERA_MAKE_CONFLICT)
-        field("Camera model", cameraComponent(left?.model),
+        field(AppStrings.recommendations.cameraModel, cameraComponent(left?.model),
             cameraComponent(right?.model), config.cameraModelWeight,
             ConfidenceReason.CAMERA_MODEL_MATCH, ConfidenceReason.CAMERA_MODEL_CONFLICT)
 
@@ -188,33 +185,31 @@ class DuplicateConfidenceCalculator(
         if ((lw != null && rw != null && lw != rw) || (lh != null && rh != null && lh != rh)) {
             contradictions = true
             add(ConfidenceReason.DIMENSIONS_CONFLICT, 0,
-                "Known positive dimensions conflict (${lw}x$lh versus ${rw}x$rh): +0/${config.dimensionsWeight}; exact duplication is contradicted even if another dimension is unavailable.")
+                AppStrings.recommendations.conflictingDimensions(lw, lh, rw, rh, config.dimensionsWeight))
         } else if (lw != null && lh != null && rw != null && rh != null) {
             add(ConfidenceReason.DIMENSIONS_MATCH, config.dimensionsWeight,
-                "Complete positive dimensions agree (${lw}x$lh): +${config.dimensionsWeight}.")
+                AppStrings.recommendations.matchingDimensions(lw, lh, config.dimensionsWeight))
         } else {
             add(ConfidenceReason.EVIDENCE_UNAVAILABLE, 0,
-                "Complete positive dimensions unavailable: +0/${config.dimensionsWeight}; no conflict is inferred from missing fields.")
+                AppStrings.recommendations.unavailableDimensions(config.dimensionsWeight))
         }
-        field("Original capture offset (no correlated extra points)", validOffset(left?.offsetOriginal), validOffset(right?.offsetOriginal),
+        field(AppStrings.recommendations.captureOffsetNoPoints, validOffset(left?.offsetOriginal), validOffset(right?.offsetOriginal),
             0, ConfidenceReason.CAPTURE_OFFSET_MATCH, ConfidenceReason.CAPTURE_OFFSET_CONFLICT)
-        field("Original capture subseconds (numeric fraction; no correlated extra points)",
+        field(AppStrings.recommendations.captureSubsecondsNoPoints,
             validSubsecond(left?.subsecondOriginal), validSubsecond(right?.subsecondOriginal), 0,
             ConfidenceReason.CAPTURE_SUBSECOND_MATCH, ConfidenceReason.CAPTURE_SUBSECOND_CONFLICT)
-        field("EXIF orientation (no correlated extra points)", left?.orientation?.takeIf { it in 1..8 },
+        field(AppStrings.recommendations.orientationNoPoints, left?.orientation?.takeIf { it in 1..8 },
             right?.orientation?.takeIf { it in 1..8 }, 0, ConfidenceReason.ORIENTATION_MATCH, ConfidenceReason.ORIENTATION_CONFLICT)
         val rawScore = evidence.sumOf { it.points }
         if (contradictions) {
             add(ConfidenceReason.CONFLICTING_EXIF_METADATA, 0,
-                "Known reliable EXIF metadata contradicts exact duplication; recommendations must be blocked regardless of score.")
+                AppStrings.recommendations.exifBlocksRecommendation)
             if (rawScore > config.contradictionCap) add(ConfidenceReason.CONTRADICTION_CAP,
                 config.contradictionCap - rawScore,
-                "EXIF contradictions cap raw confidence $rawScore at ${config.contradictionCap}: ${config.contradictionCap - rawScore} points.")
+                AppStrings.recommendations.contradictionCap(rawScore, config.contradictionCap))
         }
         val score = evidence.sumOf { it.points }
         return FileDuplicateConfidence(file, reference, ConfidenceAssessment(score, evidence.map { it.reasonCode }.toSet(),
-            "${file.path} versus ${reference.path}: $score/100 from cached metadata only. " +
-                if (contradictions) "Known EXIF contradictions prevent an exact-duplicate recommendation."
-                else "Matching metadata does not verify identical bytes."), evidence, contradictions)
+            AppStrings.recommendations.fileConfidence(file.path, reference.path, score, contradictions)), evidence, contradictions)
     }
 }

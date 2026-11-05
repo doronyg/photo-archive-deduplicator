@@ -41,20 +41,20 @@ class DuplicateRecommendationPresentationTest {
 
     @Test
     fun summaryAndPerFileLabelsDistinguishRecommendationsFromConfirmedDuplicates() {
-        assertEquals("Recommendation: Review - no automatic action", groupRecommendationText(recommendation))
+        assertEquals("Review", groupRecommendationText(recommendation))
         assertTrue(fileRecommendationText(recommendation.files.getValue(original.path)).contains("Preserve for review"))
         assertTrue(fileRecommendationText(recommendation.files.getValue(copy.path)).contains("Preserve for review"))
         assertEquals(60, recommendation.duplicateConfidence.score)
         recommendation.files.values.forEach {
             assertEquals(0, it.retentionDecisionConfidence.score)
             assertEquals(null, it.retainedReplacementPath)
-            assertEquals("Retention-decision confidence: 0/100 (Very low)", fileDecisionConfidenceSummaryText(it))
+            assertEquals("Retention confidence: 0/100 (Very low)", fileDecisionConfidenceSummaryText(it))
         }
         assertTrue(recommendation.redundantCandidates.isEmpty())
         assertTrue("Duplicate confidence: 60/100 (Medium)" in groupConfidenceSummaryText(recommendation))
         assertFalse("Retention" in groupConfidenceSummaryText(recommendation))
-        assertEquals("Recommendation: Loading stored evidence...", groupRecommendationText(null))
-        assertEquals("Recommendation: Loading stored evidence...", fileRecommendationText(null))
+        assertEquals("Loading recommendation...", groupRecommendationText(null))
+        assertEquals("Loading recommendation...", fileRecommendationText(null))
     }
 
     @Test
@@ -67,12 +67,12 @@ class DuplicateRecommendationPresentationTest {
         assertFalse("100" in groupRecommendationText(recommendation))
         assertFalse("%" in groupConfidenceSummaryText(recommendation))
         val details = groupConfidenceDetailsText(recommendation)
-        assertTrue("Heuristic scores, not probabilities; even 100/100 is not content-verified." in details)
+        assertFalse("Heuristic scores, not probabilities" in details)
         assertFalse("100%" in details)
         assertFalse("Retention" in details)
         val files = recommendation.files.values.toList()
-        assertEquals("Retention-decision confidence: 95/100 (Very high)", fileDecisionConfidenceSummaryText(files[0]))
-        assertEquals("Retention-decision confidence: 75/100 (High)", fileDecisionConfidenceSummaryText(files[1]))
+        assertEquals("Retention confidence: 95/100 (Very high)", fileDecisionConfidenceSummaryText(files[0]))
+        assertEquals("Retention confidence: 75/100 (High)", fileDecisionConfidenceSummaryText(files[1]))
         assertFileDecisionPresentationDetails(
             files.joinToString("\n") { fileDecisionConfidenceSummaryText(it) + "\n" + fileDecisionConfidenceDetailsText(it) },
         )
@@ -89,8 +89,8 @@ class DuplicateRecommendationPresentationTest {
         val details = groupConfidenceDetailsText(recommendation.copy(
             duplicateConfidence = recommendation.duplicateConfidence.copy(referenceFile = null, comparisons = emptyMap()),
         ))
-        assertTrue("Duplicate-confidence reference: unavailable" in details)
-        assertTrue("Duplicate-confidence comparisons: none" in details)
+        assertTrue("Reference: Unavailable" in details)
+        assertTrue("No comparisons available." in details)
         assertFalse("Retention-confidence explanation:" in details)
     }
 
@@ -104,13 +104,13 @@ class DuplicateRecommendationPresentationTest {
         assertTrue("DUPLICATE_CONFIDENCE_TOO_LOW" in text)
         assertTrue("File recommendation: REVIEW" in text)
         assertFalse("File recommendation: REDUNDANT_CANDIDATE" in text)
-        assertEquals(2, text.lineSequence().count { "Retention-decision confidence: 0/100 (Very low)" in it })
+        assertEquals(2, text.lineSequence().count { "Retention confidence: 0/100 (Very low)" in it })
         assertFalse("Retained replacement: \"" in text)
         assertTrue("Normalized filename: \"IMG_1234.jpg\"" in text)
         assertTrue(text.indexOf(quoteResultText(copy.path.toString())) < text.indexOf("  Path: ${quoteResultText(original.path.toString())}"))
         assertTrue(RecommendationReason.NUMBERED_COPY_SUFFIX.name in text)
-        assertTrue("not content-verified" in text)
-        assertTrue("No files have been changed" in text)
+        assertFalse("not content-verified" in text)
+        assertFalse("No files have been changed" in text)
     }
 
 }
@@ -150,10 +150,10 @@ internal fun confidencePresentationFixture(): DuplicateGroupRecommendation {
 
 internal fun assertConfidencePresentationDetails(text: String, includesSummary: Boolean = false) {
     val recommendation = confidencePresentationFixture()
-    assertTrue("Duplicate-confidence reference: ${quoteResultText(recommendation.duplicateConfidence.referenceFile!!.path.toString())}" in text)
-    assertTrue("Duplicate-confidence explanation: \"Duplicate\\n\\\"evidence\\\"\\t\\u0001\"" in text)
+    assertTrue("Reference: ${quoteResultText(recommendation.duplicateConfidence.referenceFile!!.path.toString())}" in text)
+    assertTrue("\"Duplicate\\n\\\"evidence\\\"\\t\\u0001\"" in text)
     assertFalse(recommendation.duplicateConfidence.assessment.explanation in text)
-    assertTrue("Duplicate-confidence reasons: WEAKEST_MEMBER" in text)
+    assertFalse("Duplicate-confidence reasons:" in text)
     val comparisons = recommendation.duplicateConfidence.comparisons.values.toList()
     comparisons.forEach { comparison ->
         assertTrue("Comparison: ${quoteResultText(comparison.file.path.toString())}" in text)
@@ -166,23 +166,24 @@ internal fun assertConfidencePresentationDetails(text: String, includesSummary: 
         text.indexOf("Comparison: ${quoteResultText(comparisons[1].file.path.toString())}"))
     assertEquals(if (includesSummary) 3 else 2,
         text.lineSequence().count { "Duplicate confidence: 100/100 (Very high)" in it })
-    assertEquals(2, text.lineSequence().count { "Comparison explanation: \"Compared\\n\\\"file\\\"\"" in it })
-    assertEquals(2, text.lineSequence().count { "Comparison reasons: NORMALIZED_FILENAME_MATCH" in it })
-    assertEquals(2, text.lineSequence().count { "+30 points [NORMALIZED_FILENAME_MATCH]: \"Name\\n\\\"match\\\"\"" in it })
-    assertEquals(2, text.lineSequence().count { "0 points [SIZE_NOT_SCORED]: \"Size is a prerequisite\\t only\"" in it })
-    assertTrue("Heuristic scores, not probabilities; even 100/100 is not content-verified." in text)
+    assertEquals(2, text.lineSequence().count { "\"Compared\\n\\\"file\\\"\"" in it })
+    assertFalse("Comparison reasons:" in text)
+    assertEquals(2, text.lineSequence().count { "+30 points: \"Name\\n\\\"match\\\"\"" in it })
+    assertEquals(2, text.lineSequence().count { "0 points: \"Size is a prerequisite\\t only\"" in it })
+    assertFalse("Heuristic scores, not probabilities" in text)
 }
 
 internal fun assertFileDecisionPresentationDetails(text: String) {
     val files = confidencePresentationFixture().files.values.toList()
     files.forEach { advice ->
         assertTrue(fileDecisionConfidenceSummaryText(advice) in text)
-        assertTrue("Retention-confidence explanation: ${quoteResultText(advice.retentionDecisionConfidence.explanation)}" in text)
+        assertTrue(quoteResultText(advice.retentionDecisionConfidence.explanation) in text)
+        assertTrue(quoteResultText(advice.explanation) in text)
         assertFalse(advice.retentionDecisionConfidence.explanation in text)
-        assertTrue("Retention-confidence reasons: SAME_DIRECTORY" in text)
+        assertFalse("Retention-confidence reasons:" in text)
     }
     val candidate = files.single { it.role == FileRecommendationRole.REDUNDANT_CANDIDATE }
     assertTrue("Retained replacement: ${quoteResultText(candidate.retainedReplacementPath.toString())}" in text)
     assertFalse(candidate.retainedReplacementPath.toString() in text)
-    assertTrue("Heuristic scores, not probabilities; even 100/100 is not content-verified." in text)
+    assertFalse("Heuristic scores, not probabilities" in text)
 }

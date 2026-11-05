@@ -2,6 +2,7 @@ package com.doronyg.photoarchivededuplicator.retention
 
 import com.doronyg.photoarchivededuplicator.scan.DuplicateCandidateGroup
 import com.doronyg.photoarchivededuplicator.scan.FileRecord
+import com.doronyg.photoarchivededuplicator.strings.AppStrings
 import okio.Path
 import kotlin.math.abs
 
@@ -9,19 +10,19 @@ enum class RetentionRank { HIGHEST, TIED, CLOSE, LOWER, MISSING, STALE, INCOMPLE
 
 data class RetentionPresentation(val score: FileScore?, val rank: RetentionRank) {
     val label: String get() = when (rank) {
-        RetentionRank.HIGHEST -> "Highest retention score"
-        RetentionRank.TIED -> "Tied - ambiguous"
-        RetentionRank.CLOSE -> "Close scores - ambiguous"
-        RetentionRank.LOWER -> "Lower retention score"
-        RetentionRank.MISSING -> "Not scored"
-        RetentionRank.STALE -> "Outdated score"
-        RetentionRank.INCOMPLETE -> "Incomplete group - no recommendation"
+        RetentionRank.HIGHEST -> AppStrings.recommendations.highestRetentionScore
+        RetentionRank.TIED -> AppStrings.recommendations.tiedRetentionScores
+        RetentionRank.CLOSE -> AppStrings.recommendations.closeRetentionScores
+        RetentionRank.LOWER -> AppStrings.recommendations.lowerRetentionScore
+        RetentionRank.MISSING -> AppStrings.recommendations.notScored
+        RetentionRank.STALE -> AppStrings.recommendations.outdatedScore
+        RetentionRank.INCOMPLETE -> AppStrings.recommendations.incompleteRetentionGroup
     }
 
-    val scoreText: String get() = score?.value?.let(::formatScoreValue) ?: "-"
+    val scoreText: String get() = score?.value?.let(::formatScoreValue) ?: AppStrings.recommendations.missingScore
     val mainReason: String get() = score?.factors?.filter { it.contribution != 0.0 }
         ?.sortedByDescending { abs(it.contribution) }?.take(2)?.joinToString("; ") { it.explanation }
-        ?.takeIf { it.isNotBlank() } ?: "No positive or negative retention evidence"
+        ?.takeIf { it.isNotBlank() } ?: AppStrings.recommendations.noRetentionEvidence
 }
 
 internal fun formatScoreValue(value: Double): String =

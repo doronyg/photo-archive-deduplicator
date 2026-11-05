@@ -49,7 +49,7 @@ class ExifPresentationTest {
         val labels = mapOf(
             ExifStatus.EXTRACTED to "Extracted", ExifStatus.NO_EXIF to "No EXIF",
             ExifStatus.UNSUPPORTED to "Unsupported", ExifStatus.ERROR to "Error",
-            ExifStatus.STALE to "Stale", ExifStatus.LIMIT_EXCEEDED to "Limit exceeded",
+            ExifStatus.STALE to "Outdated", ExifStatus.LIMIT_EXCEEDED to "Size limit exceeded",
         )
         labels.forEach { (status, label) ->
             assertTrue(presentExif(record(status)).summary.startsWith("EXIF: $label"))
@@ -61,24 +61,24 @@ class ExifPresentationTest {
         val presentation = presentExif(record(ExifStatus.EXTRACTED,
             ExifMetadata(capturedAt = "2024:07:08 09:10:11", subsecondOriginal = "023")))
         assertTrue("2024:07:08 09:10:11" in presentation.summary)
-        assertTrue("timezone unknown" in presentation.summary)
+        assertTrue("Timezone unknown" in presentation.summary)
         assertFalse("UTC" in presentation.summary)
-        assertEquals("023", presentation.details.toMap()["Original subseconds"])
-        assertEquals("unknown (timezone unknown)", presentation.details.toMap()["Original offset"])
-        assertEquals("unknown", presentation.details.toMap()["Camera make"])
+        assertEquals("023", presentation.details.toMap()["Subseconds"])
+        assertEquals("Timezone unknown", presentation.details.toMap()["Timezone offset"])
+        assertEquals("Unknown", presentation.details.toMap()["Camera make"])
     }
 
     @Test
-    fun preservesOffsetCameraDimensionsAndStoredReaderProvenance() {
+    fun preservesOffsetCameraDimensionsWithoutReaderImplementationDetails() {
         val presentation = presentExif(record(ExifStatus.EXTRACTED,
             ExifMetadata("2024:07:08 09:10:11", "+05:30", "1", "Maker", "Model", 6, 300, 200)))
         assertTrue("+05:30" in presentation.summary)
         assertFalse("timezone unknown" in presentation.summary)
         assertTrue("Maker Model" in presentation.summary)
-        assertTrue("300 × 200" in presentation.summary)
+        assertTrue("300 x 200" in presentation.summary)
         assertEquals("6", presentation.details.toMap()["Orientation"])
         assertEquals("1970-01-01 00:00:01 UTC", presentation.details.toMap()["Extracted"])
-        assertEquals("kim 0.48.0", presentation.details.toMap()["Reader"])
+        assertFalse("Reader" in presentation.details.toMap())
     }
 
     @Test
@@ -86,6 +86,6 @@ class ExifPresentationTest {
         val presentation = presentExif(record(ExifStatus.ERROR, error = "Cannot read\n\"file\""))
         assertEquals("Cannot read\n\"file\"", presentation.details.toMap()["Error"])
         assertTrue("Error" in presentation.summary)
-        assertEquals("unknown", presentation.details.toMap()["Original capture datetime"])
+        assertEquals("Unknown", presentation.details.toMap()["Capture date and time"])
     }
 }

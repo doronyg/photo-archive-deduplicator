@@ -35,10 +35,10 @@ class SuspectedDuplicateResultsTextTest {
             listOf(SuspectedDuplicateGroup(files.first().sizeBytes, "2023:02:18 12:44:25", null, files)),
             StandardTestDispatcher(testScheduler), recommendations = files.associate { it.path to recommendation })
         assertTrue("Duplicate confidence: 100/100 (Very high)" in report)
-        assertFalse("Retention-decision confidence:" in report.substringBefore("  Path:"))
+        assertFalse("Retention confidence:" in report.substringBefore("  Path:"))
         assertConfidencePresentationDetails(report, includesSummary = true)
         assertFileDecisionPresentationDetails(report)
-        assertEquals(3, report.lineSequence().count { "Retention-decision confidence:" in it })
+        assertEquals(3, report.lineSequence().count { "Retention confidence:" in it })
         val fileSections = report.substringAfter("  Path:")
         assertTrue(fileSections.indexOf(quoteResultText(files[1].path.toString())) <
             fileSections.indexOf(quoteResultText(files[2].path.toString())))
@@ -64,29 +64,31 @@ class SuspectedDuplicateResultsTextTest {
             StandardTestDispatcher(testScheduler), retention, exif,
             group.files.associate { it.path to recommendation })
         for (text in listOf(
-            "Suspected duplicates - not content-verified", "120000 bytes", "Copies: 2",
-            "2023:02:18 12:44:25", "timezone unknown", "Folder filter: \"/Photos\"",
+            "Suspected duplicates", "120000 bytes", "Copies: 2",
+            "2023:02:18 12:44:25", "Timezone unknown", "Folder filter: \"/Photos\"",
             "Wildcard (case-insensitive): \"IMG*.jpg\"", "Recommendation filter: KEEP_ONE",
             "RECOMMENDATION ASCENDING", "Group recommendation: KEEP_ONE", "File recommendation: REDUNDANT_CANDIDATE",
             "File recommendation: PREFERRED", "Normalized filename: \"IMG_1234.jpg\"",
             "Retention: 90", "directory-retention v6", "Created: 1970-01-01 00:00:02 UTC",
             "Modified: 1970-01-01 00:00:01 UTC", "Camera make: \"A\\n\\\"B\\\"\"",
             quoteResultText(copy.path.toString()), quoteResultText(original.path.toString()),
-            "outside the folder filter", "No files have been changed",
+            "All copies in each matching group are included.",
         )) assertTrue(text in report, "Missing $text")
         assertTrue(report.indexOf("  Path: ${quoteResultText(copy.path.toString())}") <
             report.indexOf("  Path: ${quoteResultText(original.path.toString())}"),
             "Export must preserve displayed member order, not sort by score or filename again")
         assertFalse("Matched by exact case-sensitive filename" in report)
+        assertFalse("No files have been changed" in report)
+        assertFalse("not content-verified" in report)
     }
 
     @Test
     fun emptyUnfilteredExportAndDisabledSortingAreExplicit() = runTest {
         val report = formatSuspectedDuplicateResults(SuspectedDuplicateFilter(), emptyList(), emptyList(),
             StandardTestDispatcher(testScheduler))
-        assertTrue("Folder filter: all stored roots" in report)
-        assertTrue("Recommendation filter: ALL" in report)
-        assertTrue("Sort priority: none (search order)" in report)
+        assertTrue("Folder filter: All scanned folders" in report)
+        assertTrue("Recommendation filter: All" in report)
+        assertTrue("Sort priority: Search order" in report)
         assertTrue("Candidate groups: 0" in report)
     }
 

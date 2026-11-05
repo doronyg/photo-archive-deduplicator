@@ -2,6 +2,7 @@ package com.doronyg.photoarchivededuplicator.recommendation
 
 import com.doronyg.photoarchivededuplicator.classification.DirectoryClassification
 import com.doronyg.photoarchivededuplicator.retention.RetentionScorer
+import com.doronyg.photoarchivededuplicator.strings.AppStrings
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import okio.Path
@@ -9,9 +10,8 @@ import okio.Path
 internal class ExifFolderDateMismatchProvider : DeletionRecommendationProvider {
     override val category = DeletionRecommendationCategory(
         "exif-folder-date-mismatch",
-        "EXIF and folder date mismatch",
-        "Matching stored EXIF capture dates, but different chronological folder dates. " +
-            "The existing decision retains the correctly located copy. Groups containing a PROTECTED directory are excluded.",
+        AppStrings.review.folderMismatchName,
+        AppStrings.review.folderMismatchDescription,
     )
     override val source = DeletionRecommendationSource.REGULAR
     private val scorer = RetentionScorer()
@@ -56,16 +56,14 @@ internal class ExifFolderDateMismatchProvider : DeletionRecommendationProvider {
             val folderDate = folders.getValue(advice.file.path)
             return DeletionReviewFile(advice, snapshot.exif[advice.file.path], snapshot.retention[advice.file.path],
                 snapshot.directoryClassifications[advice.file.directoryPath], evidence = listOf(
-                    "Directory date" to folderDate,
-                    "EXIF capture date" to captureDate,
-                    "Date comparison" to if (folderDate == captureDate) "Matches" else "Does not match",
+                    AppStrings.review.directoryDate to folderDate,
+                    AppStrings.review.captureDate to captureDate,
+                    AppStrings.review.dateComparison to if (folderDate == captureDate) AppStrings.review.datesMatch else AppStrings.review.datesDiffer,
                 ))
         }
         return DeletionRecommendationGroup(
             id = survivor.path.toString(),
-            evidenceSummary = "All copies share the EXIF capture date $captureDate. The retained copy's recognized folder date " +
-                "agrees; the proposed copies' folder dates disagree. Only mismatching-folder candidates from the existing " +
-                "decision are included in this category. Metadata-supported, not byte-verified; no files are changed.",
+            evidenceSummary = AppStrings.review.folderMismatchEvidence(captureDate),
             survivors = listOf(present(safe.files.getValue(survivor.path))),
             candidates = candidates.map(::present),
             recommendation = safe,

@@ -14,6 +14,7 @@ import androidx.compose.ui.semantics.Role
 import com.doronyg.photoarchivededuplicator.exif.ExifRecord
 import com.doronyg.photoarchivededuplicator.exif.ExifStatus
 import com.doronyg.photoarchivededuplicator.scan.DuplicateCandidateGroup
+import com.doronyg.photoarchivededuplicator.strings.AppStrings
 import okio.Path
 
 internal data class ExifPresentation(val summary: String, val details: List<Pair<String, String>>)
@@ -28,39 +29,38 @@ internal class ExifSnapshotToken {
 }
 
 internal fun presentExif(record: ExifRecord?): ExifPresentation {
-    if (record == null) return ExifPresentation("EXIF: Not extracted", emptyList())
+    if (record == null) return ExifPresentation(AppStrings.duplicates.exifNotExtracted, emptyList())
     val result = record.result
     val metadata = result.metadata
     val status = when (result.status) {
-        ExifStatus.EXTRACTED -> "Extracted"
-        ExifStatus.NO_EXIF -> "No EXIF"
-        ExifStatus.UNSUPPORTED -> "Unsupported"
-        ExifStatus.ERROR -> "Error"
-        ExifStatus.STALE -> "Stale"
-        ExifStatus.LIMIT_EXCEEDED -> "Limit exceeded"
+        ExifStatus.EXTRACTED -> AppStrings.duplicates.extracted
+        ExifStatus.NO_EXIF -> AppStrings.duplicates.noExif
+        ExifStatus.UNSUPPORTED -> AppStrings.duplicates.unsupported
+        ExifStatus.ERROR -> AppStrings.duplicates.error
+        ExifStatus.STALE -> AppStrings.duplicates.stale
+        ExifStatus.LIMIT_EXCEEDED -> AppStrings.duplicates.limitExceeded
     }
     val offset = metadata.offsetOriginal?.takeIf { it.isNotBlank() }
     val summary = buildList {
-        add("EXIF: $status")
-        metadata.capturedAt?.let { add("$it (${offset ?: "timezone unknown"})") }
+        add(AppStrings.duplicates.exifStatus(status))
+        metadata.capturedAt?.let { add(AppStrings.duplicates.captured(it, offset ?: AppStrings.duplicates.timezoneUnknown)) }
         listOfNotNull(metadata.make, metadata.model).joinToString(" ").takeIf { it.isNotBlank() }?.let(::add)
         if (metadata.width != null || metadata.height != null) {
-            add("${metadata.width ?: "?"} × ${metadata.height ?: "?"}")
+            add(AppStrings.duplicates.dimensions(metadata.width, metadata.height))
         }
     }.joinToString(" · ")
     return ExifPresentation(summary, buildList {
-        add("Status" to result.status.name)
-        add("Original capture datetime" to (metadata.capturedAt ?: "unknown"))
-        add("Original offset" to (offset ?: "unknown (timezone unknown)"))
-        add("Original subseconds" to (metadata.subsecondOriginal ?: "unknown"))
-        add("Camera make" to (metadata.make ?: "unknown"))
-        add("Camera model" to (metadata.model ?: "unknown"))
-        add("Orientation" to (metadata.orientation?.toString() ?: "unknown"))
-        add("Width" to (metadata.width?.toString() ?: "unknown"))
-        add("Height" to (metadata.height?.toString() ?: "unknown"))
-        result.error?.let { add("Error" to it) }
-        add("Extracted" to "${formatEpochMillis(record.extractedAt)} UTC")
-        add("Reader" to "${record.readerId} ${record.readerVersion}")
+        add(AppStrings.duplicates.status to status)
+        add(AppStrings.duplicates.captureDatetime to (metadata.capturedAt ?: AppStrings.unknown))
+        add(AppStrings.duplicates.originalOffset to (offset ?: AppStrings.duplicates.timezoneUnknown))
+        add(AppStrings.duplicates.originalSubseconds to (metadata.subsecondOriginal ?: AppStrings.unknown))
+        add(AppStrings.duplicates.cameraMake to (metadata.make ?: AppStrings.unknown))
+        add(AppStrings.duplicates.cameraModel to (metadata.model ?: AppStrings.unknown))
+        add(AppStrings.duplicates.orientation to (metadata.orientation?.toString() ?: AppStrings.unknown))
+        add(AppStrings.duplicates.width to (metadata.width?.toString() ?: AppStrings.unknown))
+        add(AppStrings.duplicates.height to (metadata.height?.toString() ?: AppStrings.unknown))
+        result.error?.let { add(AppStrings.duplicates.error to it) }
+        add(AppStrings.duplicates.extracted to AppStrings.utc(formatEpochMillis(record.extractedAt)))
     })
 }
 
@@ -72,7 +72,7 @@ internal fun ExifMetadataLine(path: Path, record: ExifRecord?) {
         Text(presentation.summary, style = MaterialTheme.typography.bodySmall,
             modifier = Modifier.clickable(enabled = record != null, role = Role.Button) { expanded = !expanded })
         if (expanded) presentation.details.forEach { (label, value) ->
-            Text("$label: $value", style = MaterialTheme.typography.bodySmall)
+            Text(AppStrings.field(label, value), style = MaterialTheme.typography.bodySmall)
         }
     }
 }

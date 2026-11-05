@@ -23,6 +23,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.doronyg.photoarchivededuplicator.exif.ExifQueueController
 import com.doronyg.photoarchivededuplicator.UiPreferences
+import com.doronyg.photoarchivededuplicator.strings.AppStrings
 import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificationController
 import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificationJobState
 import com.doronyg.photoarchivededuplicator.classification.DirectoryClassification
@@ -41,110 +42,92 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 internal fun formatStatisticsMegabytes(sizeBytes: Long): String {
-    require(sizeBytes >= 0) { "Statistics byte size must be nonnegative" }
+    require(sizeBytes >= 0) { AppStrings.analysis.negativeSize }
     val fraction = (sizeBytes % 1_000_000 + 5_000) / 10_000
     val whole = sizeBytes / 1_000_000 + fraction / 100
-    return "$whole.${(fraction % 100).toString().padStart(2, '0')} MB"
+    return AppStrings.analysis.megabytes(whole, fraction % 100)
 }
 
 internal fun formatRecommendationStatistics(report: RecommendationStatisticsReport): String = buildString {
-    appendLine("MB = 1,000,000 bytes. Sizes include every listed file, not estimated reclaimable space.")
-    appendLine("Regular and suspected sections can overlap; do not add their totals together.")
-    appendLine("Suspected totals include stored EXIF matches, not the unanalyzed same-size inspection queue.")
-    appendLine("Missing/stale scores or capture evidence count as Review. No files are content-verified or changed.")
-    appendLine("Statistics do not extract EXIF or recompute retention scores.")
-    report.classificationContext?.let {
-        appendLine("AI profile: ${quoteResultText(it.baseUrl)} | model ${quoteResultText(it.model)} | prompt v${it.promptVersion}")
-        appendLine("Only exact-directory cached labels matching this profile are included.")
-    } ?: appendLine("AI is not configured. No saved labels are applied; recommendations use deterministic rules only.")
-    fun totals(value: FileStatistics) = "${value.fileCount} files | ${formatStatisticsMegabytes(value.sizeBytes)}"
-    fun actionLabel(action: RecommendationAction) = when (action) {
-        RecommendationAction.KEEP_ONE -> "Keep one"
-        RecommendationAction.KEEP_MULTIPLE -> "Keep multiple"
-        RecommendationAction.REVIEW -> "Review"
-        RecommendationAction.PROTECTED -> "Protected"
+    val strings = AppStrings.analysis
+    appendLine(strings.statisticsUnits)
+    appendLine(strings.cohortOverlap)
+    appendLine(strings.suspectedScope)
+    appendLine(strings.reviewDefinition)
+    appendLine(if (report.classificationContext != null) strings.cachedLabels else strings.aiUnconfigured)
+    if (report.regular.ai != null || report.suspected.ai != null) {
+        appendLine(strings.unknownDefinition)
+        appendLine(strings.directoryCountDefinition)
+        appendLine(strings.impactDefinition)
+        appendLine(strings.decisionDefinition)
     }
-    fun roleLabel(role: FileRecommendationRole) = when (role) {
-        FileRecommendationRole.PREFERRED -> "Preferred"
-        FileRecommendationRole.REDUNDANT_CANDIDATE -> "Likely redundant"
-        FileRecommendationRole.PRESERVE -> "Preserve"
-        FileRecommendationRole.REVIEW -> "Review"
-    }
-    fun typeLabel(type: StatisticsFileType) = when (type) {
-        StatisticsFileType.IMAGES -> "Images"
-        StatisticsFileType.VIDEOS -> "Videos"
-        StatisticsFileType.DOCUMENTS -> "Documents"
-        StatisticsFileType.OTHER -> "Other"
-    }
+    fun totals(value: FileStatistics) = strings.fileTotals(value.fileCount, formatStatisticsMegabytes(value.sizeBytes))
+    fun actionLabel(action: RecommendationAction) = strings.actionLabel(action)
+    fun roleLabel(role: FileRecommendationRole) = strings.roleLabel(role)
+    fun typeLabel(type: StatisticsFileType) = strings.typeLabel(type)
     fun bucket(label: String, value: RecommendationStatisticsBucket) {
-        appendLine("$label: ${totals(value.totals)}")
+        appendLine(strings.bucket(label, totals(value.totals)))
         for (type in StatisticsFileType.entries) {
-            appendLine("  ${typeLabel(type)}: ${totals(value.byFileType.getValue(type))}")
+            appendLine(strings.typeBucket(typeLabel(type), totals(value.byFileType.getValue(type))))
         }
     }
     fun section(label: String, statistics: RecommendationStatistics) {
         appendLine()
         appendLine(label)
-        appendLine("${statistics.groupCount} groups | ${totals(statistics.totals)}")
+        appendLine(strings.groupTotals(statistics.groupCount, totals(statistics.totals)))
         statistics.ai?.let { ai ->
             appendLine()
-            appendLine("AI classification coverage")
-            appendLine("Classified: ${ai.classifiedDirectories} / ${ai.directoryCount} directories | ${totals(ai.classifiedFiles)}")
+            appendLine(strings.coverageTitle)
+            appendLine(strings.classified(ai.classifiedDirectories, ai.directoryCount, totals(ai.classifiedFiles)))
             for (classification in DirectoryClassification.entries) {
                 val value = ai.byClassification.getValue(classification)
-                appendLine("${classification.name}: ${value.directoryCount} directories | ${totals(value.files)}")
+                appendLine(strings.classificationBucket(classification.name, value.directoryCount, totals(value.files)))
             }
-            appendLine("Missing classification: ${ai.missing.directoryCount} directories | ${totals(ai.missing.files)}")
-            appendLine("UNKNOWN is a saved classification, not missing evidence.")
-            appendLine("Group coverage: ${ai.fullyClassifiedGroups} fully classified | " +
-                "${ai.partiallyClassifiedGroups} partially classified | ${ai.unclassifiedGroups} without classifications")
-            appendLine("Directories are unique within this dataset; file sizes count only members of its duplicate groups.")
+            appendLine(strings.classificationBucket(strings.missingClassification, ai.missing.directoryCount, totals(ai.missing.files)))
+            appendLine(strings.groupCoverage(ai.fullyClassifiedGroups, ai.partiallyClassifiedGroups, ai.unclassifiedGroups))
             appendLine()
-            appendLine("AI recommendation impact")
-            appendLine("Compared against deterministic-only recommendations using the same stored evidence.")
-            appendLine("Changed groups (action, file role or retained replacement): ${ai.changedGroups} / ${statistics.groupCount}")
-            appendLine("Changed group actions: ${ai.changedActionGroups}")
-            appendLine("Changed file decisions (role or replacement): ${totals(ai.changedFiles)}")
-            appendLine("Changed retained replacement (still a candidate): ${totals(ai.changedReplacements)}")
-            appendLine("Likely redundant - Deterministic-only: ${totals(ai.baselineRedundantCandidates)}")
-            appendLine("Likely redundant - With cached AI: ${totals(ai.currentRedundantCandidates)}")
-            appendLine("New redundant candidates: ${totals(ai.addedRedundantCandidates)}")
-            appendLine("Withdrawn redundant candidates (now preserved/review): ${totals(ai.withdrawnRedundantCandidates)}")
-            appendLine("Candidate sizes are advisory, not verified reclaimable space. No deletion is authorized.")
-            appendLine("Explanation/wording and confidence-only changes are not counted as decision changes.")
-            appendLine("Group action changes (deterministic-only -> with cached AI):")
-            if (ai.actionTransitions.isEmpty()) appendLine("  None")
+            appendLine(strings.impactTitle)
+            appendLine(strings.changedGroups(ai.changedGroups, statistics.groupCount))
+            appendLine(strings.changedActions(ai.changedActionGroups))
+            appendLine(strings.changedFiles(totals(ai.changedFiles)))
+            appendLine(strings.changedReplacements(totals(ai.changedReplacements)))
+            appendLine(strings.baselineCandidates(totals(ai.baselineRedundantCandidates)))
+            appendLine(strings.currentCandidates(totals(ai.currentRedundantCandidates)))
+            appendLine(strings.addedCandidates(totals(ai.addedRedundantCandidates)))
+            appendLine(strings.withdrawnCandidates(totals(ai.withdrawnRedundantCandidates)))
+            appendLine(strings.actionTransitionsTitle)
+            if (ai.actionTransitions.isEmpty()) appendLine(strings.noTransitions)
             for (before in RecommendationAction.entries) for (after in RecommendationAction.entries) {
                 ai.actionTransitions[before to after]?.let {
-                    appendLine("  ${actionLabel(before)} -> ${actionLabel(after)}: $it groups")
+                    appendLine(strings.actionTransition(actionLabel(before), actionLabel(after), it))
                 }
             }
-            appendLine("File role changes (deterministic-only -> with cached AI):")
-            if (ai.roleTransitions.isEmpty()) appendLine("  None")
+            appendLine(strings.roleTransitionsTitle)
+            if (ai.roleTransitions.isEmpty()) appendLine(strings.noTransitions)
             for (before in FileRecommendationRole.entries) for (after in FileRecommendationRole.entries) {
                 ai.roleTransitions[before to after]?.let {
-                    appendLine("  ${roleLabel(before)} -> ${roleLabel(after)}: $it files")
+                    appendLine(strings.roleTransition(roleLabel(before), roleLabel(after), it))
                 }
             }
         }
         appendLine()
-        appendLine("By group recommendation (all files in each group)")
+        appendLine(strings.byGroup)
         for (action in RecommendationAction.entries) {
-            bucket("${actionLabel(action)} (${statistics.groupCounts.getValue(action)} groups)", statistics.byAction.getValue(action))
+            bucket(strings.actionBucket(actionLabel(action), statistics.groupCounts.getValue(action)), statistics.byAction.getValue(action))
         }
         appendLine()
-        appendLine("By file role")
+        appendLine(strings.byRole)
         for (role in FileRecommendationRole.entries) {
             bucket(roleLabel(role), statistics.byRole.getValue(role))
         }
         appendLine()
-        appendLine("By file type (section total)")
+        appendLine(strings.byType)
         for (type in StatisticsFileType.entries) {
-            appendLine("${typeLabel(type)}: ${totals(statistics.byFileType.getValue(type))}")
+            appendLine(strings.bucket(typeLabel(type), totals(statistics.byFileType.getValue(type))))
         }
     }
-    section("Regular duplicates", report.regular)
-    section("Suspected duplicates", report.suspected)
+    section(strings.regularDuplicates, report.regular)
+    section(strings.suspectedDuplicates, report.suspected)
 }
 
 @Composable
@@ -186,7 +169,7 @@ internal fun RecommendationStatisticsScreen(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                if (request == generation) error = "Could not load recommendation statistics: ${e.message}"
+                if (request == generation) error = AppStrings.analysis.statisticsError(e.message)
             } finally {
                 if (request == generation) loading = false
             }
@@ -194,15 +177,13 @@ internal fun RecommendationStatisticsScreen(
     }
 
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Recommendation statistics", style = MaterialTheme.typography.titleLarge)
-        Text("All stored roots, excluding excluded folders. Independent of duplicate-tab search filters.",
+        Text(AppStrings.analysis.statisticsTitle, style = MaterialTheme.typography.titleLarge)
+        Text(AppStrings.analysis.statisticsScope,
             style = MaterialTheme.typography.bodySmall)
-        Text("Uses cached AI classifications for the current Ollama settings only; never contacts the server.",
-            style = MaterialTheme.typography.bodySmall)
-        OutlinedButton(enabled = !blocked && !loading, onClick = { refresh++ }) { Text("Refresh statistics") }
+        OutlinedButton(enabled = !blocked && !loading, onClick = { refresh++ }) { Text(AppStrings.refresh) }
         when {
-            blocked -> Text("Statistics wait until scanning and EXIF processing stop, to avoid showing partial analysis.")
-            loading -> Text("Calculating statistics from stored metadata...")
+            blocked -> Text(AppStrings.analysis.statisticsBlocked)
+            loading -> Text(AppStrings.loading)
             error != null -> Text(error.orEmpty(), color = MaterialTheme.colorScheme.error)
             text != null -> SelectionContainer(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
                 Text(text.orEmpty(), fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)

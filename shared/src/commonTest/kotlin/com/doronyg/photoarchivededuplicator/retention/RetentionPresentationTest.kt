@@ -25,8 +25,12 @@ class RetentionPresentationTest {
         assertEquals(RetentionRank.HIGHEST, result.getValue(files[0].path).rank)
         assertEquals(RetentionRank.LOWER, result.getValue(files[1].path).rank)
         assertEquals("100", result.getValue(files[0].path).scoreText)
-        assertTrue(result.getValue(files[0].path).mainReason.isNotBlank())
-        assertTrue(result.getValue(files[0].path).label.contains("Highest"))
+        assertEquals(
+            "Preferred chronological folder yyyy-MM-dd or date-prefixed folder (2007-06-06).",
+            result.getValue(files[0].path).mainReason,
+        )
+        assertEquals("Highest retention score", result.getValue(files[0].path).label)
+        assertEquals("Lower retention score", result.getValue(files[1].path).label)
         assertTrue(result.getValue(files[0].path).score!!.factors.isNotEmpty())
     }
 
@@ -57,6 +61,9 @@ class RetentionPresentationTest {
         assertEquals(RetentionRank.INCOMPLETE, result.getValue(files[0].path).rank)
         assertEquals(RetentionRank.MISSING, result.getValue(files[1].path).rank)
         assertEquals("Not scored", result.getValue(files[1].path).label)
+        assertEquals("Incomplete group - no recommendation", result.getValue(files[0].path).label)
+        assertEquals("-", result.getValue(files[1].path).scoreText)
+        assertEquals("No positive or negative retention evidence", result.getValue(files[1].path).mainReason)
     }
 
     @Test

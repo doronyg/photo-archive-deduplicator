@@ -64,6 +64,7 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import okio.Path
+import com.doronyg.photoarchivededuplicator.strings.AppStrings
 import okio.Path.Companion.toPath
 
 private data class SortedSuspectedCandidates(
@@ -188,28 +189,27 @@ internal fun SuspectedDuplicatesScreen(
                 exif = storedExif
                 loadedRevision = revision
                 if (assessment.invalidatedFiles > 0) {
-                    error = "Inventory or EXIF changed since these matches were loaded. Refresh to reload the affected groups."
+                    error = AppStrings.duplicates.suspectedChanged
                 }
             }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            if (request == generation) error = "Could not load suspected duplicates or retention scores: ${e.message}"
+            if (request == generation) error = AppStrings.duplicates.suspectedError(e.message)
         } finally {
             if (request == generation) loading = false
         }
     }
 
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Suspected duplicates", style = MaterialTheme.typography.titleLarge)
+        Text(AppStrings.duplicates.suspectedTitle, style = MaterialTheme.typography.titleLarge)
         directoryClassifications?.let { controller ->
             DirectoryClassificationControls(controller, choices.ollama,
                 displayedSnapshot?.groups?.map { it.files }?.takeUnless { loading || scanning },
                 classificationCache, onReloadCache = { classificationCacheRefresh++ })
         }
         Text(
-            "Images larger than $SUSPECTED_IMAGE_MIN_SIZE_BYTES bytes across the stored inventory, excluding excluded folders. " +
-                "Only same-size buckets with different filenames are inspected. Unchanged EXIF attempts are reused.",
+            AppStrings.duplicates.suspectedScope(SUSPECTED_IMAGE_MIN_SIZE_BYTES),
             style = MaterialTheme.typography.bodySmall,
         )
         Row(
@@ -217,19 +217,19 @@ internal fun SuspectedDuplicatesScreen(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             OutlinedButton(onClick = { filtersExpanded = !filtersExpanded }) {
-                Text(if (filtersExpanded) "Hide filters" else if (filtersActive) "Filters (active)" else "Filters")
+                Text(if (filtersExpanded) AppStrings.duplicates.hideFilters else if (filtersActive) AppStrings.duplicates.activeFilters else AppStrings.duplicates.filters)
             }
             OutlinedButton(enabled = !scanning && !queueState.isRunning, onClick = {
                 error = null
-                if (!queue.startSuspected()) error = "Analysis could not start: a scan or EXIF queue is already running."
-            }) { Text("Analyze suspected duplicates") }
+                if (!queue.startSuspected()) error = AppStrings.duplicates.analysisBusy
+            }) { Text(AppStrings.duplicates.analyzeSuspected) }
             OutlinedButton(enabled = !loading && !queueState.isRunning, onClick = { refresh++ }) {
-                Text("Refresh stored matches")
+                Text(AppStrings.duplicates.refreshMatches)
             }
             OutlinedButton(enabled = !loading && !scanning && !queueState.isRunning && groups.isNotEmpty(), onClick = {
                 forceNextRefresh = true
                 refresh++
-            }) { Text("Recompute scores") }
+            }) { Text(AppStrings.duplicates.recomputeScores) }
             if (queueState.isRunning) {
                 TextButton(enabled = !cancelling, onClick = {
                     cancelling = true
@@ -239,12 +239,12 @@ internal fun SuspectedDuplicatesScreen(
                         } catch (e: CancellationException) {
                             throw e
                         } catch (e: Exception) {
-                            error = "Could not cancel EXIF analysis: ${e.message}"
+                            error = AppStrings.duplicates.cancellationError(e.message)
                         } finally {
                             cancelling = false
                         }
                     }
-                }) { Text(if (cancelling) "Cancelling..." else "Cancel EXIF queue") }
+                }) { Text(if (cancelling) AppStrings.duplicates.cancelling else AppStrings.duplicates.cancelExif) }
             }
         }
         if (filtersExpanded) {
@@ -255,58 +255,47 @@ internal fun SuspectedDuplicatesScreen(
                 OutlinedTextField(
                     value = choices.suspectedDuplicateRoot,
                     onValueChange = { value -> preferences.update { it.copy(suspectedDuplicateRoot = value) } },
-                    label = { Text("Absolute folder path (optional; all roots)") },
+                    label = { Text(AppStrings.duplicates.optionalFolderPath) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 OutlinedTextField(
                     value = choices.suspectedDuplicateFilenamePattern,
                     onValueChange = { value -> preferences.update { it.copy(suspectedDuplicateFilenamePattern = value) } },
-                    label = { Text("Filename wildcard (optional)") },
-                    supportingText = { Text("Case-insensitive, e.g. IMG*.jpg. * = any text, ? = one character; dot is literal.") },
+                    label = { Text(AppStrings.duplicates.filenameWildcard) },
+                    supportingText = { Text(AppStrings.duplicates.wildcardHelp) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(selected = choices.suspectedDuplicateRecommendation == null,
                         onClick = { preferences.update { it.copy(suspectedDuplicateRecommendation = null) } },
-                        label = { Text("All recommendations") })
+                        label = { Text(AppStrings.duplicates.allRecommendations) })
                     RecommendationAction.entries.forEach { action ->
                         FilterChip(selected = choices.suspectedDuplicateRecommendation == action,
                             onClick = { preferences.update { it.copy(suspectedDuplicateRecommendation = action) } },
                             label = { Text(recommendationActionLabel(action)) })
                     }
                 }
-                Text("Filters apply immediately to loaded groups. Folder and filename must match one member; all copies remain visible, including copies outside that folder. Analysis and score recomputation still cover all roots.",
+                Text(AppStrings.duplicates.suspectedFilterHelp,
                     style = MaterialTheme.typography.bodySmall)
                 TextButton(onClick = {
                     preferences.update { it.copy(suspectedDuplicateRoot = "", suspectedDuplicateFilenamePattern = "",
                         suspectedDuplicateRecommendation = null) }
-                }) { Text("Clear filters") }
+                }) { Text(AppStrings.duplicates.clearFilters) }
             }
         }
         presentExifQueue(queueState)?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
         DuplicateSortControls(choices.suspectedDuplicateSort, enabled = !loading, onChange = { transform ->
             preferences.update { it.copy(suspectedDuplicateSort = transform(it.suspectedDuplicateSort)) }
         })
-        Text(
-            "Matches require successful, current EXIF with the same original capture date/time to the second " +
-                "and compatible original offsets, plus identical byte sizes and at least two different filenames. " +
-                "These are suspected matches, not content-verified duplicates. No files are changed.",
-            style = MaterialTheme.typography.bodySmall,
-        )
-        Text(
-            "Highest retention scores appear first across the whole group, using stored metadata only. " +
-                "Tap a score for its factors. Ties and close scores remain ambiguous.",
-            style = MaterialTheme.typography.bodySmall,
-        )
         if (queueState.isRunning || scanning) {
-            Text("Stored matches may be incomplete while scanning or EXIF analysis is in progress.",
+            Text(AppStrings.duplicates.processing,
                 style = MaterialTheme.typography.bodySmall)
         }
 
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-        filterResult.exceptionOrNull()?.let { Text("Invalid folder filter: ${it.message}", color = MaterialTheme.colorScheme.error) }
+        filterResult.exceptionOrNull()?.let { Text(AppStrings.duplicates.filterError(it.message), color = MaterialTheme.colorScheme.error) }
         SelectionContainer(Modifier.weight(1f)) {
             Row(Modifier.fillMaxSize()) {
                 LazyColumn(
@@ -317,10 +306,10 @@ internal fun SuspectedDuplicatesScreen(
                     item {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(when {
-                                loading -> "Loading stored matches and scores..."
-                                filter == null -> "Correct the folder filter to display results."
-                                displayedSnapshot == null -> "Filtering/sorting stored matches..."
-                                else -> "${displayedSnapshot.groups.size} of ${groups.size} suspected duplicate groups."
+                                loading -> AppStrings.duplicates.loadingMatches
+                                filter == null -> AppStrings.duplicates.correctFilter
+                                displayedSnapshot == null -> AppStrings.duplicates.filtering
+                                else -> AppStrings.duplicates.matchCount(displayedSnapshot.groups.size, groups.size)
                             }, modifier = Modifier.weight(1f))
                             DisableSelection {
                                 TextButton(enabled = !copying && !loading && displayedSnapshot != null, onClick = {
@@ -337,43 +326,41 @@ internal fun SuspectedDuplicatesScreen(
                                                 displayed.groups, retention = reportScores, exif = reportExif,
                                                 recommendations = reportRecommendations)
                                             clipboard.setText(AnnotatedString(text))
-                                            copyStatus = "Copied ${displayed.groups.size} groups, including all member paths. Review before sharing."
+                                            copyStatus = AppStrings.duplicates.copied(displayed.groups.size)
                                         } catch (e: CancellationException) {
                                             throw e
                                         } catch (e: Exception) {
-                                            error = "Could not copy suspected results: ${e.message}"
+                                            error = AppStrings.duplicates.copyError(e.message)
                                         } finally {
                                             copying = false
                                         }
                                     }
-                                }) { Text(if (copying) "Copying..." else "Copy results") }
+                                }) { Text(if (copying) AppStrings.duplicates.copying else AppStrings.duplicates.copyResults) }
                             }
                         }
-                        if (filtersActive) Text("Display filters are active; matching groups retain all their files.",
-                            style = MaterialTheme.typography.bodySmall)
                         copyStatus?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                     }
                     if (!loading && groups.isEmpty()) {
-                        item { Text("No matching stored EXIF timestamps. Analyze inspects eligible images and reuses cached attempts; missing or failed EXIF is not a match.") }
+                        item { Text(AppStrings.duplicates.emptyMatches) }
                     }
                     if (!loading && groups.isNotEmpty() && displayedSnapshot?.groups?.isEmpty() == true) {
-                        item { Text("No suspected groups match these filters.") }
+                        item { Text(AppStrings.duplicates.emptyFilteredMatches) }
                     }
                     displayedSnapshot?.groups.orEmpty().forEach { group ->
                         item {
                             HorizontalDivider()
                             Text(
-                                "Captured ${group.capturedAt} (${group.offsetOriginal ?: "timezone unknown"})",
+                                AppStrings.duplicates.captured(group.capturedAt, group.offsetOriginal ?: AppStrings.duplicates.timezoneUnknown),
                                 style = MaterialTheme.typography.titleMedium,
                             )
-                            Text("${group.sizeBytes} bytes (${formatBytes(group.sizeBytes)}) · ${group.files.size} files")
+                            Text(AppStrings.duplicates.sizedGroup(group.sizeBytes, formatBytes(group.sizeBytes), group.files.size))
                             DuplicateRecommendationSummary(group.files.firstOrNull()?.let { recommendations?.get(it.path) })
                         }
                         items(group.files, key = { it.path.toString() }) { file ->
                             Column {
                                 FilePathLinks(file, pathActions)
                                 Text(
-                                    "Created ${formatEpochMillis(file.createdAt)} · modified ${formatEpochMillis(file.modifiedAt)}",
+                                    AppStrings.duplicates.timestamps(formatEpochMillis(file.createdAt), formatEpochMillis(file.modifiedAt)),
                                     style = MaterialTheme.typography.bodySmall,
                                 )
                                 RetentionScoreLine(file.path, scores[file.path])

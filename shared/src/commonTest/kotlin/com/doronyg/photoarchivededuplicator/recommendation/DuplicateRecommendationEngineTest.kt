@@ -58,7 +58,15 @@ class DuplicateRecommendationEngineTest {
         assertEquals(90, result.files.getValue(original.path).retentionDecisionConfidence.score)
         assertEquals(85, result.files.getValue(copy.path).retentionDecisionConfidence.score)
         assertEquals(original.path, result.files.getValue(copy.path).retainedReplacementPath)
-        assertTrue(result.explanation.contains("not content-verified"))
+        assertEquals(
+            "Retain the highest-scoring same-directory representative; equal scores use a stable path tie-break, not proof of a unique original.",
+            result.explanation,
+        )
+        val decisionExplanation = result.files.getValue(copy.path).retentionDecisionConfidence.explanation
+        assertTrue(decisionExplanation.contains("Candidate only while ${original.path} remains preserved."))
+        assertTrue(decisionExplanation.contains("direct replacement comparison (85/100) and group evidence (85/100)"))
+        assertTrue(decisionExplanation.contains("NORMALIZED_FILENAME_MATCH: Normalized filename agrees (20230218_124425.jpg): +30."))
+        assertFalse(decisionExplanation.contains("permission to delete"))
     }
 
     @Test

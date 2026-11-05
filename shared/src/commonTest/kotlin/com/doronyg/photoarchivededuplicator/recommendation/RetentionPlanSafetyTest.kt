@@ -13,6 +13,7 @@ import okio.Path
 import okio.Path.Companion.toPath
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -48,6 +49,8 @@ class RetentionPlanSafetyTest {
         assertTrue(result.files.values.all {
             it.retentionDecisionConfidence.score == 0 && it.retainedReplacementPath == null
         })
+        assertTrue(result.explanation.startsWith("Unsafe retention plan rejected; preserve every file for review."))
+        assertFalse(result.explanation.contains("no files are changed", ignoreCase = true))
     }
 
     @Test
@@ -58,7 +61,13 @@ class RetentionPlanSafetyTest {
             advice.copy(role = FileRecommendationRole.REDUNDANT_CANDIDATE,
                 retainedReplacementPath = files.first { it.path != path }.path)
         })
-        assertRejected(enforceRetentionPlanSafety(unsafe, files, setOf(files.first().directoryPath)), files)
+        val result = enforceRetentionPlanSafety(unsafe, files, setOf(files.first().directoryPath))
+        assertRejected(result, files)
+        assertTrue(result.explanation.contains("The plan would retain no copy."))
+        assertTrue(result.explanation.contains("Required collections lose their representatives: [${files.first().directoryPath}]."))
+        assertTrue(result.explanation.contains(
+            "Redundant candidate ${files.first().path} lacks a different, directly retained replacement in this group.",
+        ))
     }
 
     @Test

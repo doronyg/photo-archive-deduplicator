@@ -14,31 +14,29 @@ import androidx.compose.ui.semantics.Role
 import com.doronyg.photoarchivededuplicator.retention.RetentionPresentation
 import com.doronyg.photoarchivededuplicator.retention.RetentionRank
 import com.doronyg.photoarchivededuplicator.retention.formatScoreValue
+import com.doronyg.photoarchivededuplicator.strings.AppStrings
 import okio.Path
 
 @Composable
 internal fun RetentionScoreLine(path: Path, presentation: RetentionPresentation?) {
     val score = presentation?.score
     var expanded by remember(path, score) { mutableStateOf(false) }
-    val label = presentation?.label ?: "Not scored"
+    val label = presentation?.label ?: AppStrings.duplicates.notScored
     Column {
         Text(
-            if (score == null) "Retention: $label"
-            else "Retention ${presentation.scoreText} · $label · ${presentation.mainReason}",
+            if (score == null) AppStrings.duplicates.retention(label)
+            else AppStrings.duplicates.retentionScore(presentation.scoreText, label, presentation.mainReason),
             style = MaterialTheme.typography.bodySmall,
             color = if (presentation?.rank == RetentionRank.HIGHEST) MaterialTheme.colorScheme.primary
                 else MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.clickable(enabled = score != null, role = Role.Button) { expanded = !expanded },
         )
         if (expanded && score != null) {
-            Text("Advisory only; contents have not been compared.", style = MaterialTheme.typography.bodySmall)
             score.factors.forEach { factor ->
                 val value = formatScoreValue(factor.contribution)
-                Text("${if (factor.contribution > 0) "+" else ""}$value: ${factor.explanation}",
+                Text(AppStrings.duplicates.contribution("${if (factor.contribution > 0) "+" else ""}$value", factor.explanation),
                     style = MaterialTheme.typography.bodySmall)
             }
-            Text("${score.identity.algorithmId} v${score.identity.algorithmVersion} · assessed ${formatEpochMillis(score.createdAt)} UTC",
-                style = MaterialTheme.typography.bodySmall)
         }
     }
 }

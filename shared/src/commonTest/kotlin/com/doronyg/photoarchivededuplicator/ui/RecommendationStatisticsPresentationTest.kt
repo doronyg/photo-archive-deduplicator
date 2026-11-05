@@ -14,6 +14,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
+import kotlin.test.assertFalse
 
 class RecommendationStatisticsPresentationTest {
     @Test
@@ -46,7 +47,7 @@ class RecommendationStatisticsPresentationTest {
     }
 
     @Test
-    fun aiCoverageAndImpactShowZeroBucketsCurrentProfileAndAdvisoryScope() = runTest {
+    fun aiCoverageAndImpactKeepDefinitionsWithoutProfileOrRepeatedCaveats() = runTest {
         val ai = aggregateAiRecommendationStatistics(emptyList(), emptyList(), emptyMap())
         val empty = aggregateRecommendationStatistics(emptyList()).copy(ai = ai)
         val context = OllamaSettings("http://ollama.test", "selected-model").context()
@@ -55,10 +56,16 @@ class RecommendationStatisticsPresentationTest {
             "Missing classification", "0 / 0 directories", "AI recommendation impact",
             "Deterministic-only", "With cached AI", "New redundant candidates", "Withdrawn redundant candidates",
             "Changed group actions", "Changed file decisions", "Changed retained replacement",
-            "selected-model", "prompt v${context.promptVersion}", "not verified reclaimable space",
             "same stored evidence", "wording")) {
             assertTrue(label in text, "Missing $label")
         }
+        for (hidden in listOf("selected-model", "ollama.test", "prompt v", "advisory",
+            "No deletion is authorized", "No files", "content-verified")) {
+            assertFalse(hidden in text, "Unexpected $hidden")
+        }
+        assertEquals(1, Regex("UNKNOWN is").findAll(text).count())
+        assertEquals(1, Regex("Directories are unique").findAll(text).count())
+        assertTrue("not estimated reclaimable space" in text)
         val unconfigured = formatRecommendationStatistics(RecommendationStatisticsReport(empty, empty))
         assertTrue("AI is not configured" in unconfigured)
         assertTrue("No saved labels are applied" in unconfigured)

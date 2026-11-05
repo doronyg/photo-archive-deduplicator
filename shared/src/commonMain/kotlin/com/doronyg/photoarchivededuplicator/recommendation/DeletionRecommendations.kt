@@ -6,6 +6,7 @@ import com.doronyg.photoarchivededuplicator.exif.validatedExifTimestamp
 import com.doronyg.photoarchivededuplicator.retention.RetentionPresentation
 import com.doronyg.photoarchivededuplicator.retention.RetentionScorer
 import com.doronyg.photoarchivededuplicator.scan.FileRecord
+import com.doronyg.photoarchivededuplicator.strings.AppStrings
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
@@ -56,9 +57,8 @@ internal interface DeletionRecommendationProvider {
 internal class SameDirectoryMetadataProvider : DeletionRecommendationProvider {
     override val category = DeletionRecommendationCategory(
         "same-directory-metadata",
-        "Same-directory metadata matches",
-        "Different filenames in one directory with strong stored metadata/EXIF evidence and one retained copy. " +
-            "Unverified review candidates, not identical-data verification. Uses stored suspected image groups larger than 100,000 bytes.",
+        AppStrings.review.sameDirectoryName,
+        AppStrings.review.sameDirectoryDescription,
     )
     private val scorer = RetentionScorer()
 
@@ -99,9 +99,7 @@ internal class SameDirectoryMetadataProvider : DeletionRecommendationProvider {
             snapshot.directoryClassifications[advice.file.directoryPath])
         return DeletionRecommendationGroup(
             id = survivor.path.toString(),
-            evidenceSummary = "Same directory, different filenames, equal stored sizes and current capture metadata. " +
-                "The existing engine retains one copy and assigns each redundant candidate to it. " +
-                "Metadata-supported, not byte-verified; review before any future deletion.",
+            evidenceSummary = AppStrings.review.sameDirectoryEvidence,
             survivors = listOf(present(safe.files.getValue(survivor.path))),
             candidates = safe.files.values.filter { it.role == FileRecommendationRole.REDUNDANT_CANDIDATE }.map(::present),
             recommendation = safe,

@@ -27,10 +27,9 @@ class DeletionRecommendationPresentationTest {
 
     @Test
     fun summariesAreExplicitlyProposalsNotClaimedReclaimableBytes() {
-        assertEquals("2 groups | 3 proposed files | 1.05 MB", deletionSummaryText(first.summary))
-        assertEquals("0 groups | 0 proposed files | 0.00 MB", deletionSummaryText(empty.summary))
-        assertTrue("not verified reclaimable space" in DELETION_REVIEW_NOTICE)
-        assertTrue("No files are changed" in DELETION_REVIEW_NOTICE)
+        assertEquals("2 groups | 3 files | 1.05 MB", deletionSummaryText(first.summary))
+        assertEquals("0 groups | 0 files | 0.00 MB", deletionSummaryText(empty.summary))
+        assertEquals("Review before deleting: matching metadata does not prove identical file contents.", DELETION_REVIEW_NOTICE)
     }
 
     @Test
@@ -58,11 +57,11 @@ class DeletionRecommendationPresentationTest {
             DeletionAnalysisSnapshot(files, advice, exif, scores, emptyMap())))
         assertEquals(DeletionRecommendationSummary(1, FileStatistics(1, 120_000)), deletionGroupSummary(group))
         val candidate = group.candidates.single()
-        assertTrue(quoteResultText(candidate.advice.explanation) in fileRecommendationText(candidate.advice))
+        assertTrue(quoteResultText(candidate.advice.explanation) in fileDecisionConfidenceDetailsText(candidate.advice))
         assertTrue(files.first().path.toString() in fileDecisionConfidenceDetailsText(candidate.advice))
         assertTrue("2023" in presentExif(candidate.exif).summary)
         assertTrue("Canon" in presentExif(candidate.exif).summary)
-        assertTrue("not content-verified" in groupConfidenceDetailsText(group.recommendation))
-        assertTrue("not byte-verified" in group.evidenceSummary)
+        assertTrue("Duplicate confidence" in groupConfidenceSummaryText(group.recommendation))
+        assertTrue("matching capture metadata" in group.evidenceSummary)
     }
 }

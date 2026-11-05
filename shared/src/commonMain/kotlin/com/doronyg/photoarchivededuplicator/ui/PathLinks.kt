@@ -18,6 +18,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import com.doronyg.photoarchivededuplicator.PathActions
 import com.doronyg.photoarchivededuplicator.scan.FileRecord
+import com.doronyg.photoarchivededuplicator.strings.AppStrings
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
@@ -39,7 +40,7 @@ internal fun PathLink(label: String, action: suspend () -> Unit, modifier: Modif
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
-                        error = e.message ?: "Could not open this path."
+                        error = e.message ?: AppStrings.inventory.openPathFailed
                     } finally {
                         busy = false
                     }
@@ -55,6 +56,6 @@ internal fun PathLink(label: String, action: suspend () -> Unit, modifier: Modif
 internal fun FilePathLinks(file: FileRecord, actions: PathActions, modifier: Modifier = Modifier) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
         PathLink(file.name, action = { actions.openFile(file.path) })
-        PathLink("Folder: ${file.directoryPath}", action = { actions.openFolder(file.directoryPath) })
+        PathLink(AppStrings.inventory.folderPath(file.directoryPath.toString()), action = { actions.openFolder(file.directoryPath) })
     }
 }

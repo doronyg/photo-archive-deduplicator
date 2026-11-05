@@ -28,6 +28,14 @@ class FilenameDateRetentionTest {
         assertEquals(listOf(100.0, -40.0), first.factors.map { it.contribution })
         val mismatch = first.factors.single { it.key == "filename-date-mismatch" }
         assertTrue("2015-07-23" in mismatch.explanation && "2016-06-08" in mismatch.explanation)
+        assertEquals(
+            "Filename date 2015-07-23 disagrees with folder date 2016-06-08; filename dates are advisory, not verified capture dates.",
+            mismatch.explanation,
+        )
+        assertEquals(
+            "Preferred chronological folder yyyy-MM-dd or date-prefixed folder (2016-06-08).",
+            first.factors.single { it.key == "directory-date" }.explanation,
+        )
         assertFalse(first.factors.any { it.key.endsWith("-date-support") })
     }
 

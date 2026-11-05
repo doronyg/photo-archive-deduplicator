@@ -23,6 +23,7 @@ import com.doronyg.photoarchivededuplicator.scan.ScanController
 import com.doronyg.photoarchivededuplicator.scan.ScanProgress
 import com.doronyg.photoarchivededuplicator.scan.ScanState
 import com.doronyg.photoarchivededuplicator.UiPreferences
+import com.doronyg.photoarchivededuplicator.strings.AppStrings
 import okio.Path
 import okio.Path.Companion.toPath
 import kotlinx.coroutines.Dispatchers
@@ -62,12 +63,12 @@ fun ScanScreen(controller: ScanController, target: ScanTarget, preferences: UiPr
                 }, enabled = !running) {
                     Text(target.buttonLabel)
                 }
-                OutlinedButton(onClick = controller::pause, enabled = running) { Text("Pause") }
+                OutlinedButton(onClick = controller::pause, enabled = running) { Text(AppStrings.inventory.pause) }
                 OutlinedButton(onClick = {
                     scope.launch(Dispatchers.Main) {
                         target.requestAccess { scope.launch(Dispatchers.Main) { controller.resume() } }
                     }
-                }, enabled = !running) { Text("Resume") }
+                }, enabled = !running) { Text(AppStrings.inventory.resume) }
             }
         }
         ScanStatus(state)
@@ -85,7 +86,7 @@ private fun ChosenFolderControls(controller: ScanController, target: ScanTarget.
             OutlinedTextField(
                 value = rootText,
                 onValueChange = { value -> preferences.update { it.copy(scanRoot = value) } },
-                label = { Text("Folder to scan") },
+                label = { Text(AppStrings.inventory.folderToScan) },
                 singleLine = true,
                 enabled = !running,
                 modifier = Modifier.weight(1f),
@@ -98,25 +99,25 @@ private fun ChosenFolderControls(controller: ScanController, target: ScanTarget.
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
-                        pickerError = "Could not choose folder: ${e.message}"
+                        pickerError = AppStrings.inventory.chooseFolderFailed(e.message)
                     }
                 }
             }, enabled = !running) {
-                Text("Choose…")
+                Text(AppStrings.inventory.chooseFolder)
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(onClick = { scope.launch { controller.start(rootText.trim().toPath()) } }, enabled = !running && rootText.isNotBlank()) {
-                Text("Start scan")
+                Text(AppStrings.inventory.startScan)
             }
-            OutlinedButton(onClick = controller::pause, enabled = running) { Text("Pause") }
+            OutlinedButton(onClick = controller::pause, enabled = running) { Text(AppStrings.inventory.pause) }
             // Also continues a scan interrupted by quitting the app
             OutlinedButton(onClick = {
                 scope.launch { controller.resume(rootText.trim().takeIf { it.isNotEmpty() }?.toPath()) }
-            }, enabled = !running) { Text("Resume") }
+            }, enabled = !running) { Text(AppStrings.inventory.resume) }
         }
         pickerError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-        Text("Start rescans the entered root and resets its timer. Resume continues its saved queue, or the last selected scan when the field is empty.",
+        Text(AppStrings.inventory.scanControlsHelp,
             style = MaterialTheme.typography.bodySmall)
     }
 }
@@ -124,11 +125,11 @@ private fun ChosenFolderControls(controller: ScanController, target: ScanTarget.
 @Composable
 private fun ScanStatus(state: ScanState) {
     val (label, progress) = when (state) {
-        ScanState.Idle -> "Idle" to null
-        is ScanState.Running -> "Scanning…" to state.progress
-        is ScanState.Paused -> "Paused" to state.progress
-        is ScanState.Completed -> "Completed" to state.progress
-        is ScanState.Failed -> "Failed: ${state.message}" to state.progress
+        ScanState.Idle -> AppStrings.inventory.idle to null
+        is ScanState.Running -> AppStrings.inventory.scanning to state.progress
+        is ScanState.Paused -> AppStrings.inventory.paused to state.progress
+        is ScanState.Completed -> AppStrings.inventory.completed to state.progress
+        is ScanState.Failed -> AppStrings.inventory.scanFailed(state.message) to state.progress
     }
     Text(label, style = MaterialTheme.typography.titleMedium)
     progress?.let { ProgressDetails(it) }
@@ -137,15 +138,15 @@ private fun ScanStatus(state: ScanState) {
 @Composable
 private fun ProgressDetails(progress: ScanProgress) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.fillMaxWidth()) {
-        Text("Directories scanned: ${progress.scannedDirectories}")
-        Text("Directories pending: ${progress.pendingDirectories}")
-        Text("Directories failed: ${progress.failedDirectories}")
-        Text("Files found: ${progress.filesFound}")
-        progress.root?.let { Text("Scan root: $it") }
-        Text("This run: ${formatElapsed(progress.elapsedMillis)}")
-        Text("Total active: ${formatElapsed(progress.totalElapsedMillis)}")
+        Text(AppStrings.inventory.scannedDirectories(progress.scannedDirectories))
+        Text(AppStrings.inventory.pendingDirectories(progress.pendingDirectories))
+        Text(AppStrings.inventory.failedDirectories(progress.failedDirectories))
+        Text(AppStrings.inventory.filesFound(progress.filesFound))
+        progress.root?.let { Text(AppStrings.inventory.scanRoot(it.toString())) }
+        Text(AppStrings.inventory.currentRun(formatElapsed(progress.elapsedMillis)))
+        Text(AppStrings.inventory.totalActive(formatElapsed(progress.totalElapsedMillis)))
         progress.currentDirectory?.let {
-            Text("Current: $it", style = MaterialTheme.typography.bodySmall, maxLines = 1)
+            Text(AppStrings.inventory.currentDirectory(it.toString()), style = MaterialTheme.typography.bodySmall, maxLines = 1)
         }
     }
 }

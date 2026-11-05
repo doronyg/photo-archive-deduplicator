@@ -26,6 +26,17 @@ class DirectoryClassificationPresentationTest {
     }
 
     @Test
+    fun settingsPrivacyExplainsSentDataAndRequestBoundariesWithoutAdvisoryCaveats() {
+        for (detail in listOf("directory paths and names", "configured Ollama server",
+            "not filenames, file contents, EXIF, scores, or groups", "Fetch models",
+            "Viewing screens and saving settings make no server requests")) {
+            assertTrue(detail in DIRECTORY_CLASSIFICATION_PRIVACY, "Missing $detail")
+        }
+        assertFalse("advisory" in DIRECTORY_CLASSIFICATION_PRIVACY.lowercase())
+        assertFalse("content verification" in DIRECTORY_CLASSIFICATION_PRIVACY)
+    }
+
+    @Test
     fun selectedGroupsIncludeAllMembersAndOffscreenGroupsButNeverOtherGroups() {
         val selected = listOf(
             listOf(file("/visible/a.jpg"), file("/outside/b.jpg")),
@@ -64,13 +75,14 @@ class DirectoryClassificationPresentationTest {
     }
 
     @Test
-    fun cachedClassificationPresentationIsExplicitlyAdvisoryAndProfileScoped() {
+    fun cachedClassificationPresentationShowsOnlyTheLabel() {
         val record = DirectoryClassificationRecord("/写真".toPath(), "/写真", DirectoryClassification.PROTECTED, context, 2)
         val text = directoryClassificationRecordText(record)
         assertTrue("PROTECTED" in text)
-        assertTrue("cached" in text)
-        assertTrue("chosen-model" in text)
-        assertTrue("not content verification" in text)
+        assertEquals("AI classification: PROTECTED", text)
+        for (hidden in listOf("chosen-model", "example.test", "prompt", "Advisory", "content verification")) {
+            assertFalse(hidden in text)
+        }
     }
 
     @Test

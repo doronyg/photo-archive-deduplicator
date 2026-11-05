@@ -22,6 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.doronyg.photoarchivededuplicator.scan.DirectoryExclusion
 import com.doronyg.photoarchivededuplicator.scan.DirectoryRepository
+import com.doronyg.photoarchivededuplicator.strings.AppStrings
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import okio.Path.Companion.toPath
@@ -46,7 +47,7 @@ fun ExclusionsScreen(repository: DirectoryRepository, scanning: Boolean, modifie
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                error = "Could not update exclusions: ${e.message}"
+                error = AppStrings.inventory.updateExclusionsFailed(e.message)
             } finally {
                 busy = false
             }
@@ -58,19 +59,19 @@ fun ExclusionsScreen(repository: DirectoryRepository, scanning: Boolean, modifie
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            error = "Could not load exclusions: ${e.message}"
+            error = AppStrings.inventory.loadExclusionsFailed(e.message)
         }
     }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Excluded directory trees", style = MaterialTheme.typography.titleLarge)
-        Text("User-selected paths and all descendants are skipped during scans and candidate searches. Existing inventory is retained. Paths need not exist or have been scanned.")
-        if (scanning) Text("Pause the active scan to edit exclusions.")
+        Text(AppStrings.inventory.exclusionsTitle, style = MaterialTheme.typography.titleLarge)
+        Text(AppStrings.inventory.exclusionsHelp)
+        if (scanning) Text(AppStrings.inventory.pauseToEditExclusions)
         OutlinedTextField(
-            value = path, onValueChange = { path = it }, label = { Text("Absolute folder path to exclude") },
+            value = path, onValueChange = { path = it }, label = { Text(AppStrings.inventory.exclusionPath) },
             singleLine = true, enabled = !scanning && !busy, modifier = Modifier.fillMaxWidth(),
         )
         OutlinedTextField(
-            value = reason, onValueChange = { reason = it }, label = { Text("Reason (optional)") },
+            value = reason, onValueChange = { reason = it }, label = { Text(AppStrings.inventory.exclusionReason) },
             enabled = !scanning && !busy, modifier = Modifier.fillMaxWidth(),
         )
         Button(enabled = !scanning && !busy && path.isNotBlank(), onClick = {
@@ -81,17 +82,17 @@ fun ExclusionsScreen(repository: DirectoryRepository, scanning: Boolean, modifie
                 path = ""
                 reason = ""
             }
-        }) { Text("Add or update exclusion") }
+        }) { Text(AppStrings.inventory.addOrUpdateExclusion) }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (exclusions.isEmpty()) item { Text("No user exclusions.") }
+            if (exclusions.isEmpty()) item { Text(AppStrings.inventory.noExclusions) }
             items(exclusions, key = { it.path.toString() }) { exclusion ->
                 Column {
                     Text(exclusion.path.toString())
                     exclusion.reason?.let { Text(it) }
                     TextButton(enabled = !scanning && !busy, onClick = {
                         edit { repository.removeExclusion(exclusion.path) }
-                    }) { Text("Remove exclusion for ${exclusion.path}") }
+                    }) { Text(AppStrings.inventory.removeExclusion(exclusion.path.toString())) }
                 }
             }
         }

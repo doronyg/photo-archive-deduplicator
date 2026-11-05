@@ -114,6 +114,21 @@ writes before closing the database. A force-kill can lose an in-flight or queued
 change; saving failures are logged and shown in the UI rather than silently
 discarded.
 
+User-facing English copy lives in the shared `strings` package, accessed through
+`AppStrings` and feature namespaces. Keep labels and interpolated text templates
+there; calculations, filtering, state transitions and evidence selection remain
+in their existing logic. Storage keys, reason codes, parser patterns, protocol
+fields and model prompts are not UI strings.
+
+Keep screens focused on useful labels, counts, progress, errors and actual
+decision evidence. Avoid repeated disclaimers and cache/implementation narration.
+Deletion Recommendations has one concise review notice, not warnings on every
+group/file. Model/server/profile details belong in Ollama settings and its saved
+results viewer, not file recommendations or statistics. Collapsed file rows show
+the decision; expanding them reveals the actual explanation and confidence.
+This copy cleanup does not change detection, scoring, safety or persisted
+score-factor explanations.
+
 ## 4. Test-driven development approach
 
 Use a pragmatic TDD workflow:
@@ -629,7 +644,8 @@ Changing only explanations or confidence does not count as a decision change.
 Replacement changes between still-redundant candidates are reported separately.
 Candidate bytes are advisory, not verified reclaimable space. No AI settings or
 no matching labels means zero coverage/impact and unchanged deterministic results.
-Show the active server/model/prompt so the comparison's profile is explicit.
+Keep server/model/prompt details in Ollama settings rather than the statistics
+report; the statistics still use only the current profile.
 
 Build a cancellable, background, database-only snapshot using stored EXIF,
 stored current-profile retention scores, and the same recommendation engine.

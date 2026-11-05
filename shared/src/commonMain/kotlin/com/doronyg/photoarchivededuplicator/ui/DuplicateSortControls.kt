@@ -20,6 +20,7 @@ import com.doronyg.photoarchivededuplicator.scan.DuplicateSortCriterion
 import com.doronyg.photoarchivededuplicator.scan.DuplicateSortRule
 import com.doronyg.photoarchivededuplicator.scan.SortDirection
 import com.doronyg.photoarchivededuplicator.scan.moveDuplicateSortRule
+import com.doronyg.photoarchivededuplicator.strings.AppStrings
 
 @Composable
 internal fun DuplicateSortControls(
@@ -27,18 +28,18 @@ internal fun DuplicateSortControls(
     enabled: Boolean,
     onChange: ((List<DuplicateSortRule>) -> List<DuplicateSortRule>) -> Unit,
 ) {
-    Text("Sort priority: leftmost enabled criterion first", style = MaterialTheme.typography.titleSmall)
+    Text(AppStrings.duplicates.sortPriority, style = MaterialTheme.typography.titleSmall)
     Row(
         Modifier.horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         rules.forEachIndexed { index, rule ->
             val label = when (rule.criterion) {
-                DuplicateSortCriterion.NAME -> "Filename"
-                DuplicateSortCriterion.FILE_SIZE -> "File size"
-                DuplicateSortCriterion.DUPLICATE_COUNT -> "Copy count"
-                DuplicateSortCriterion.EARLIEST_CREATED -> "Creation date"
-                DuplicateSortCriterion.RECOMMENDATION -> "Recommendation"
+                DuplicateSortCriterion.NAME -> AppStrings.duplicates.filename
+                DuplicateSortCriterion.FILE_SIZE -> AppStrings.duplicates.fileSize
+                DuplicateSortCriterion.DUPLICATE_COUNT -> AppStrings.duplicates.copyCount
+                DuplicateSortCriterion.EARLIEST_CREATED -> AppStrings.duplicates.creationDate
+                DuplicateSortCriterion.RECOMMENDATION -> AppStrings.duplicates.recommendation
             }
             OutlinedCard {
                 Column(Modifier.padding(8.dp)) {
@@ -55,12 +56,12 @@ internal fun DuplicateSortControls(
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         TextButton(
                             enabled = enabled && index > 0,
-                            modifier = Modifier.semantics { contentDescription = "Move $label to higher priority" },
+                            modifier = Modifier.semantics { contentDescription = AppStrings.duplicates.raisePriority(label) },
                             onClick = { onChange { moveDuplicateSortRule(it, rule.criterion, -1) } },
-                        ) { Text("<") }
+                        ) { Text(AppStrings.duplicates.higherPriority) }
                         TextButton(
                             enabled = enabled && rule.enabled,
-                            modifier = Modifier.semantics { contentDescription = "Change $label sort direction" },
+                            modifier = Modifier.semantics { contentDescription = AppStrings.duplicates.changeDirection(label) },
                             onClick = {
                                 onChange { current ->
                                     current.map {
@@ -72,20 +73,15 @@ internal fun DuplicateSortControls(
                                     }
                                 }
                             },
-                        ) { Text(if (rule.direction == SortDirection.ASCENDING) "Ascending" else "Descending") }
+                        ) { Text(if (rule.direction == SortDirection.ASCENDING) AppStrings.duplicates.ascending else AppStrings.duplicates.descending) }
                         TextButton(
                             enabled = enabled && index < rules.lastIndex,
-                            modifier = Modifier.semantics { contentDescription = "Move $label to lower priority" },
+                            modifier = Modifier.semantics { contentDescription = AppStrings.duplicates.lowerPriority(label) },
                             onClick = { onChange { moveDuplicateSortRule(it, rule.criterion, 1) } },
-                        ) { Text(">") }
+                        ) { Text(AppStrings.duplicates.lowerPriority) }
                     }
                 }
             }
         }
     }
-    Text(
-        "Filename order is case-sensitive (smallest filename for mixed-name groups). Creation uses the earliest known date. " +
-            "Recommendation ascending: Keep one, Keep multiple, Review, Protected. Unknown dates/recommendations stay last. All off keeps search order.",
-        style = MaterialTheme.typography.bodySmall,
-    )
 }

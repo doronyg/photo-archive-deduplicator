@@ -6,6 +6,7 @@ import java.io.File
 import javax.swing.JFileChooser
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import com.doronyg.photoarchivededuplicator.strings.AppStrings
 
 private const val MAC_DIRECTORY_DIALOG_PROPERTY = "apple.awt.fileDialogForDirectories"
 
@@ -24,7 +25,7 @@ private fun pickWithMacDialog(parent: Frame): String? {
     // Only the native macOS dialog looks right there, and it picks folders only via this property
     System.setProperty(MAC_DIRECTORY_DIALOG_PROPERTY, "true")
     try {
-        val dialog = FileDialog(parent, "Choose a folder to scan", FileDialog.LOAD)
+        val dialog = FileDialog(parent, AppStrings.platform.chooseScanFolder, FileDialog.LOAD)
         dialog.isVisible = true
         val name = dialog.file ?: return null
         return File(dialog.directory, name).absolutePath
@@ -37,7 +38,7 @@ private fun pickWithSwing(parent: Frame, initialDirectory: File): String? {
     // Swing/native chooser construction and its own browsing are UI toolkit operations.
     val chooser = JFileChooser(initialDirectory).apply {
         fileSelectionMode = JFileChooser.DIRECTORIES_ONLY
-        dialogTitle = "Choose a folder to scan"
+        dialogTitle = AppStrings.platform.chooseScanFolder
     }
     return if (chooser.showOpenDialog(parent) == JFileChooser.APPROVE_OPTION) chooser.selectedFile.absolutePath else null
 }

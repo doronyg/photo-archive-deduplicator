@@ -22,6 +22,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificationContext
 import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificationRecord
+import com.doronyg.photoarchivededuplicator.strings.AppStrings
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
@@ -54,7 +55,7 @@ internal suspend fun loadDirectoryClassificationResults(
     throw e
 } catch (e: Exception) {
     DirectoryClassificationResultsState(loading = false,
-        error = "Could not load saved directory classifications: ${e.message}")
+        error = AppStrings.analysis.loadResultsError(e.message))
 }
 
 @Composable
@@ -65,7 +66,7 @@ internal fun DirectoryClassificationResults(
 ) {
     var expanded by remember { mutableStateOf(false) }
     TextButton(onClick = { expanded = !expanded }) {
-        Text(if (expanded) "Hide saved directory results" else "View saved directory results")
+        Text(if (expanded) AppStrings.analysis.hideSavedResults else AppStrings.analysis.viewSavedResults)
     }
     if (!expanded) return
     var currentOnly by remember { mutableStateOf(true) }
@@ -86,25 +87,23 @@ internal fun DirectoryClassificationResults(
     }
     val loadError = state.error
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Saved directory classifications", style = MaterialTheme.typography.titleMedium)
-        Text("Database only; viewing or reloading results never contacts Ollama. " +
-            "Only matching server, model and prompt-version results are eligible for recommendations.",
+        Text(AppStrings.analysis.savedResultsTitle, style = MaterialTheme.typography.titleMedium)
+        Text(AppStrings.analysis.profileEligibility,
             style = MaterialTheme.typography.bodySmall)
-        Text("AI labels influence group retention recommendations, not individual retention scores or duplicate confidence.",
-            style = MaterialTheme.typography.bodySmall)
+        Text(AppStrings.analysis.labelInfluence, style = MaterialTheme.typography.bodySmall)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterChip(selected = currentOnly, onClick = { currentOnly = true }, label = { Text("Current saved settings") })
-            FilterChip(selected = !currentOnly, onClick = { currentOnly = false }, label = { Text("All saved results") })
+            FilterChip(selected = currentOnly, onClick = { currentOnly = true }, label = { Text(AppStrings.analysis.currentSettings) })
+            FilterChip(selected = !currentOnly, onClick = { currentOnly = false }, label = { Text(AppStrings.analysis.allResults) })
         }
         context?.let {
-            Text("Current: ${quoteResultText(it.baseUrl)} / ${quoteResultText(it.model)} / prompt v${it.promptVersion}",
+            Text(AppStrings.analysis.currentProfile(quoteResultText(it.baseUrl), quoteResultText(it.model), it.promptVersion),
                 style = MaterialTheme.typography.bodySmall)
-        } ?: Text("No valid saved Ollama settings. Choose All saved results to inspect earlier classifications.",
+        } ?: Text(AppStrings.analysis.noCurrentSettings,
             style = MaterialTheme.typography.bodySmall)
-        OutlinedTextField(query, { query = it }, label = { Text("Filter directory, classification or model") },
+        OutlinedTextField(query, { query = it }, label = { Text(AppStrings.analysis.filterResults) },
             singleLine = true, modifier = Modifier.fillMaxWidth())
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(enabled = !state.loading, onClick = { refresh++ }) { Text("Reload saved results") }
+            OutlinedButton(enabled = !state.loading, onClick = { refresh++ }) { Text(AppStrings.refresh) }
             OutlinedButton(enabled = !copying && !state.loading && loadError == null && visible.isNotEmpty(),
                 onClick = {
                     val records = visible.toList()
@@ -118,36 +117,35 @@ internal fun DirectoryClassificationResults(
                         try {
                             val text = formatDirectoryClassificationResults(records, savedContext, selectedScope, selectedQuery)
                             clipboard.setText(AnnotatedString(text))
-                            copyStatus = "Copied ${records.size} saved results from the selected filters, including off-screen rows. Review before sharing."
+                            copyStatus = AppStrings.analysis.copiedResults(records.size)
                         } catch (e: CancellationException) {
                             throw e
                         } catch (e: Exception) {
-                            copyError = "Could not copy saved directory results: ${e.message}"
+                            copyError = AppStrings.analysis.copyResultsError(e.message)
                         } finally {
                             copying = false
                         }
                     }
-                }) { Text(if (copying) "Copying..." else "Copy results") }
+                }) { Text(if (copying) AppStrings.analysis.copying else AppStrings.analysis.copyResults) }
         }
         copyStatus?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
         copyError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         when {
-            state.loading -> Text("Loading saved classifications...")
+            state.loading -> Text(AppStrings.loading)
             loadError != null -> Text(loadError, color = MaterialTheme.colorScheme.error)
             else -> {
-                Text("${visible.size} shown; ${state.records.size} saved results.")
-                if (visible.isEmpty()) Text("No saved classifications match this selection.")
+                Text(AppStrings.analysis.resultCounts(visible.size, state.records.size))
+                if (visible.isEmpty()) Text(AppStrings.analysis.noMatchingResults)
                 else Row(Modifier.fillMaxWidth().heightIn(max = 360.dp)) {
                     LazyColumn(Modifier.weight(1f).fillMaxHeight(), state = listState,
                         verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         items(visible) { record ->
                             Column {
-                                Text("${record.classification.name} · ${quoteResultText(record.directoryPath.toString())}")
-                                Text("${formatEpochMillis(record.classifiedAt)} UTC · model ${quoteResultText(record.context.model)} · " +
-                                    "prompt v${record.context.promptVersion}", style = MaterialTheme.typography.bodySmall)
-                                Text("Server: ${quoteResultText(record.context.baseUrl)} · " +
-                                    if (record.context == context) "Matches current saved settings"
-                                    else "Not used by current saved settings",
+                                Text(AppStrings.analysis.savedLabel(record.classification, quoteResultText(record.directoryPath.toString())))
+                                Text(AppStrings.analysis.savedProfile(formatEpochMillis(record.classifiedAt),
+                                    quoteResultText(record.context.model), record.context.promptVersion),
+                                    style = MaterialTheme.typography.bodySmall)
+                                Text(AppStrings.analysis.savedServer(quoteResultText(record.context.baseUrl), record.context == context),
                                     style = MaterialTheme.typography.bodySmall)
                             }
                         }

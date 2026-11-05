@@ -4,6 +4,7 @@ import com.doronyg.photoarchivededuplicator.exif.ExifQueuePhase
 import com.doronyg.photoarchivededuplicator.exif.ExifQueueState
 import com.doronyg.photoarchivededuplicator.exif.ExifQueuePurpose
 import com.doronyg.photoarchivededuplicator.scan.SUSPECTED_IMAGE_MIN_SIZE_BYTES
+import com.doronyg.photoarchivededuplicator.strings.AppStrings
 
 internal data class ExifQueueRefreshKey(val revision: Long, val terminalPhase: ExifQueuePhase?)
 
@@ -15,23 +16,22 @@ internal fun exifQueueRefreshKey(state: ExifQueueState) = ExifQueueRefreshKey(
 )
 
 internal fun presentExifQueue(state: ExifQueueState): String? {
-    val progress = "${state.groupsCompleted}/${state.groupsTotal} groups · " +
-        "${state.filesCompleted}/${state.filesTotal} files visited (includes cached results, not file reads)"
+    val progress = AppStrings.duplicates.queueProgress(state.groupsCompleted, state.groupsTotal, state.filesCompleted, state.filesTotal)
     return when (state.phase) {
         ExifQueuePhase.IDLE -> null
         ExifQueuePhase.SCORING -> if (state.purpose == ExifQueuePurpose.SUSPECTED_DUPLICATES) {
-            "EXIF queue: finding same-size images with different filenames…"
-        } else "EXIF queue: checking scores and eligibility…"
-        ExifQueuePhase.EXTRACTING -> "EXIF queue: $progress"
-        ExifQueuePhase.REASSESSING -> "EXIF queue: updating final retention scores… $progress"
+            AppStrings.duplicates.queueFinding
+        } else AppStrings.duplicates.queueChecking
+        ExifQueuePhase.EXTRACTING -> AppStrings.duplicates.queueExtracting(progress)
+        ExifQueuePhase.REASSESSING -> AppStrings.duplicates.queueReassessing(progress)
         ExifQueuePhase.COMPLETED -> if (state.groupsTotal == 0) {
             if (state.purpose == ExifQueuePurpose.SUSPECTED_DUPLICATES) {
-                "EXIF queue: no same-size images above $SUSPECTED_IMAGE_MIN_SIZE_BYTES bytes with different filenames."
-            } else "EXIF queue: no eligible ambiguous groups with a complete folder date."
+                AppStrings.duplicates.queueEmptySuspected(SUSPECTED_IMAGE_MIN_SIZE_BYTES)
+            } else AppStrings.duplicates.queueEmpty
         } else {
-            "EXIF queue completed: $progress"
+            AppStrings.duplicates.queueCompleted(progress)
         }
-        ExifQueuePhase.CANCELLED -> "EXIF queue cancelled: $progress. Stored EXIF is preserved; processing stopped."
-        ExifQueuePhase.FAILED -> "EXIF queue failed: ${state.error ?: "Unknown error"}. $progress"
+        ExifQueuePhase.CANCELLED -> AppStrings.duplicates.queueCancelled(progress)
+        ExifQueuePhase.FAILED -> AppStrings.duplicates.queueFailed(state.error ?: AppStrings.unknown, progress)
     }
 }

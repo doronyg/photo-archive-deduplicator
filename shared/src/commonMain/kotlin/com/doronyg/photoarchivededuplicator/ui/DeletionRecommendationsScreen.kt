@@ -51,17 +51,17 @@ import com.doronyg.photoarchivededuplicator.recommendation.FileStatistics
 import com.doronyg.photoarchivededuplicator.recommendation.addFile
 import com.doronyg.photoarchivededuplicator.retention.RetentionScoreService
 import com.doronyg.photoarchivededuplicator.scan.DirectoryRepository
+import com.doronyg.photoarchivededuplicator.strings.AppStrings
 import kotlinx.coroutines.CancellationException
 
-internal const val DELETION_REVIEW_NOTICE =
-    "Review only. Proposed file sizes are not verified reclaimable space. No files are changed."
+internal val DELETION_REVIEW_NOTICE = AppStrings.review.notice
 
 internal fun selectedDeletionCategory(report: DeletionRecommendationReport, selectedId: String?): DeletionCategoryResults? =
     report.categories.firstOrNull { it.category.id == selectedId } ?: report.categories.firstOrNull()
 
 internal fun deletionSummaryText(summary: DeletionRecommendationSummary): String =
-    "${summary.groupCount} groups | ${summary.candidates.fileCount} proposed files | " +
-        formatStatisticsMegabytes(summary.candidates.sizeBytes)
+    AppStrings.review.summary(summary.groupCount, summary.candidates.fileCount,
+        formatStatisticsMegabytes(summary.candidates.sizeBytes))
 
 internal fun deletionGroupSummary(group: DeletionRecommendationGroup): DeletionRecommendationSummary =
     DeletionRecommendationSummary(1, group.candidates.fold(FileStatistics()) { total, file ->
@@ -92,7 +92,7 @@ internal fun DeletionRecommendationsScreen(
         }
     }
     val context = profile.getOrNull()
-    val configurationError = profile.exceptionOrNull()?.let { "Invalid saved Ollama settings: ${it.message}" }
+    val configurationError = profile.exceptionOrNull()?.let { AppStrings.review.configurationError(it.message) }
     val service = remember(repository, retention, context) {
         DeletionRecommendationService(repository, retention, classificationContext = context)
     }
@@ -115,7 +115,7 @@ internal fun DeletionRecommendationsScreen(
                 throw failure
             } catch (failure: Exception) {
                 Diagnostics.logger.e("DeletionRecommendations", "Could not load review candidates: ${failure.message}")
-                if (latestToken === token) value = DeletionLoad(token, error = "Could not load review candidates: ${failure.message}")
+                if (latestToken === token) value = DeletionLoad(token, error = AppStrings.review.loadError(failure.message))
             }
         }
     }
@@ -132,22 +132,17 @@ internal fun DeletionRecommendationsScreen(
             LazyColumn(Modifier.weight(1f), state = listState, verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 item(key = "heading") {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Deletion Recommendations", style = MaterialTheme.typography.titleLarge)
+                        Text(AppStrings.recommendationsTab, style = MaterialTheme.typography.titleLarge)
                         Text(DELETION_REVIEW_NOTICE, style = MaterialTheme.typography.bodyMedium)
-                        Text("All stored roots, respecting exclusions. Uses current saved EXIF, retention scores and " +
-                            "Ollama labels; never extracts metadata, rescores files or contacts Ollama.",
-                            style = MaterialTheme.typography.bodySmall)
                         OutlinedButton(enabled = !blocked && configurationError == null && current != null,
-                            onClick = { refresh++ }) { Text("Refresh candidates") }
+                            onClick = { refresh++ }) { Text(AppStrings.review.refresh) }
                         when {
                             configurationError != null -> Text(configurationError, color = MaterialTheme.colorScheme.error)
-                            blocked -> Text("Review candidates wait until scanning and EXIF processing stop.")
-                            current == null -> Text("Loading review candidates from stored evidence...")
+                            blocked -> Text(AppStrings.review.waiting)
+                            current == null -> Text(AppStrings.review.loading)
                             current.error != null -> Text(current.error, color = MaterialTheme.colorScheme.error)
                             else -> current.report?.let { report ->
-                                Text("Overall: ${deletionSummaryText(report.summary)}", style = MaterialTheme.typography.titleMedium)
-                                Text("Totals count distinct groups and proposed files across categories.",
-                                    style = MaterialTheme.typography.bodySmall)
+                                Text(AppStrings.review.overall(deletionSummaryText(report.summary)), style = MaterialTheme.typography.titleMedium)
                             }
                         }
                     }
@@ -168,21 +163,19 @@ internal fun DeletionRecommendationsScreen(
                                         Text(result.category.name, style = MaterialTheme.typography.titleMedium)
                                         Text(result.category.description, style = MaterialTheme.typography.bodySmall)
                                         Text(deletionSummaryText(result.summary), style = MaterialTheme.typography.bodyMedium)
-                                        Text(if (isSelected) "Selected category" else "Select to review",
+                                        Text(if (isSelected) AppStrings.review.selectedCategory else AppStrings.review.selectCategory,
                                             style = MaterialTheme.typography.labelMedium)
                                     }
                                 }
                             }
                         }
                     }
-                    if (category == null) item { Text("No recommendation categories are registered.") }
+                    if (category == null) item { Text(AppStrings.review.noCategories) }
                     else {
                         item(key = "category-heading") {
                             Column {
                                 Text(category.category.name, style = MaterialTheme.typography.titleMedium)
-                                Text(category.category.description, style = MaterialTheme.typography.bodySmall)
-                                if (category.groups.isEmpty()) Text("No eligible groups in this category. " +
-                                    "Missing, stale or insufficient evidence is never promoted into a recommendation.")
+                                if (category.groups.isEmpty()) Text(AppStrings.review.emptyCategory)
                             }
                         }
                         category.groups.forEach { group ->
@@ -190,17 +183,16 @@ internal fun DeletionRecommendationsScreen(
                             item(key = "group:$groupKey") {
                                 Card(Modifier.fillMaxWidth()) {
                                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        Text("Retain: ${group.survivors.joinToString { it.advice.file.name }}",
+                                        Text(AppStrings.review.retain(group.survivors.joinToString { it.advice.file.name }),
                                             color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.titleMedium)
                                         Text(group.survivors.map { it.advice.file.directoryPath }.distinct().joinToString(),
                                             style = MaterialTheme.typography.bodySmall)
                                         Text(deletionSummaryText(deletionGroupSummary(group)), style = MaterialTheme.typography.bodyMedium)
-                                        Text(group.evidenceSummary, style = MaterialTheme.typography.bodySmall)
                                         TextButton(onClick = {
                                             expanded = if (group.id in expanded) expanded - group.id else expanded + group.id
-                                        }) { Text(if (group.id in expanded) "Collapse details" else "Review files and evidence") }
+                                        }) { Text(if (group.id in expanded) AppStrings.hideDetails else AppStrings.review.showEvidence) }
                                         if (group.id in expanded) {
-                                            Text(group.recommendation.explanation, style = MaterialTheme.typography.bodyMedium)
+                                            Text(group.evidenceSummary, style = MaterialTheme.typography.bodySmall)
                                             DuplicateRecommendationSummary(group.recommendation)
                                         }
                                     }
@@ -231,13 +223,13 @@ private fun DeletionReviewFileCard(file: DeletionReviewFile, retained: Boolean, 
         color = if (retained) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(if (retained) "RETAIN THIS COPY" else "PROPOSED REDUNDANT COPY - REVIEW ONLY",
+            Text(if (retained) AppStrings.review.retainedCopy else AppStrings.review.redundantCopy,
                 style = MaterialTheme.typography.labelLarge)
             FilePathLinks(file.advice.file, pathActions)
-            Text("${file.advice.file.sizeBytes} bytes (${formatBytes(file.advice.file.sizeBytes)})",
+            Text(AppStrings.fileSize(file.advice.file.sizeBytes, formatBytes(file.advice.file.sizeBytes)),
                 style = MaterialTheme.typography.bodySmall)
             file.evidence.forEach { (label, value) ->
-                Text("$label: $value", style = MaterialTheme.typography.bodyMedium)
+                Text(AppStrings.field(label, value), style = MaterialTheme.typography.bodyMedium)
             }
             FileRecommendationLine(file.advice.file.path, file.advice, file.directoryClassification)
             ExifMetadataLine(file.advice.file.path, file.exif)

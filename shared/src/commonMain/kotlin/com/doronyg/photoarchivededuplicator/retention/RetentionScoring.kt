@@ -1,6 +1,7 @@
 package com.doronyg.photoarchivededuplicator.retention
 
 import com.doronyg.photoarchivededuplicator.scan.FileRecord
+import com.doronyg.photoarchivededuplicator.strings.AppStrings
 import com.doronyg.photoarchivededuplicator.exif.ExifInput
 import com.doronyg.photoarchivededuplicator.exif.ExifRecord
 import com.doronyg.photoarchivededuplicator.exif.ExifStatus
@@ -133,60 +134,60 @@ class RetentionScorer(config: RetentionConfig = RetentionConfig()) {
                     else -> config.partialDateBonus
                 }
                 val explanation = when (date.strength) {
-                    PREFERRED_DATE -> "Preferred chronological folder yyyy-MM-dd or date-prefixed folder (${date.isoDate})."
-                    ALTERNATIVE_DATE -> "Alternative date-folder organization (${date.isoDate})."
-                    else -> "Partial ${date.description} directory organization."
+                    PREFERRED_DATE -> AppStrings.recommendations.preferredFolderDate(date.isoDate)
+                    ALTERNATIVE_DATE -> AppStrings.recommendations.alternativeFolderDate(date.isoDate)
+                    else -> AppStrings.recommendations.partialFolderDate(date.description)
                 }
                 add(ScoreFactor("directory-date", bonus, explanation))
             }
             if (filenameMismatch) {
                 add(ScoreFactor("filename-date-mismatch", if (penalizeFilename) config.filenameDateMismatchPenalty else 0.0,
-                    if (exifMatches) "Filename date $filenameDate disagrees with folder date $fullDate, but stored EXIF agrees with the folder; no filename penalty."
-                    else "Filename date $filenameDate disagrees with folder date $fullDate; filename dates are advisory, not verified capture dates."))
+                    if (exifMatches) AppStrings.recommendations.filenameDateMatchesExif(filenameDate, fullDate)
+                    else AppStrings.recommendations.filenameDateMismatch(filenameDate, fullDate)))
             }
             exifEvidence(file, exif)?.let(::add)
             if (exifMatches && date != null) {
                 val base = if (date.strength == PREFERRED_DATE) config.isoDateBonus else config.alternativeDateBonus
                 val bonus = maxOf(0.0, minOf(config.isoDateBonus, config.exifConfirmedDateScore) - base)
                 add(ScoreFactor("exif-date-match", bonus,
-                    "Stored EXIF capture date $exifDate matches folder date $fullDate; confirmed complete-date organization."))
+                    AppStrings.recommendations.exifDateMatch(exifDate, fullDate)))
             } else if (exifMismatch) {
                 val alreadyApplied = if (penalizeFilename) config.filenameDateMismatchPenalty else 0.0
                 val penalty = if (filenameProtectsFolder) 0.0 else minOf(config.exifDateMismatchPenalty, alreadyApplied) - alreadyApplied
                 val explanation = when {
                     filenameProtectsFolder ->
-                        "Stored EXIF capture date $exifDate disagrees with folder date $fullDate, but the filename matches the folder; no penalty."
+                        AppStrings.recommendations.exifMismatchFilenameProtectsFolder(exifDate, fullDate)
                     penalizeFilename ->
-                        "Stored EXIF capture date $exifDate disagrees with folder date $fullDate; overlapping filename/EXIF date penalties count only the strongest once."
-                    else -> "Stored EXIF capture date $exifDate disagrees with folder date $fullDate."
+                        AppStrings.recommendations.overlappingDatePenalties(exifDate, fullDate)
+                    else -> AppStrings.recommendations.exifDateMismatch(exifDate, fullDate)
                 }
                 add(ScoreFactor("exif-date-mismatch", penalty, explanation))
             }
             val location = directoryEvidence(file).location
             if (location == RetentionLocation.TEMPORARY) {
-                add(ScoreFactor("temporary-location", config.temporaryPenalty, "Temporary directory location (counted once)."))
+                add(ScoreFactor("temporary-location", config.temporaryPenalty, AppStrings.recommendations.temporaryLocation))
             } else if (hasBackupLocation(components)) {
-                add(ScoreFactor("backup-location", config.backupPenalty, "Backup, import, or sync directory location (counted once)."))
+                add(ScoreFactor("backup-location", config.backupPenalty, AppStrings.recommendations.backupLocation))
             }
             if (isPicasaOriginals(file)) {
                 add(ScoreFactor("picasa-originals-location", config.picasaOriginalsPenalty,
-                    "Picasa originals backup directory (.picasaoriginals); additional location penalty counted once."))
+                    AppStrings.recommendations.picasaOriginalsLocation))
             }
             if (filename.backupSuffix) {
                 add(ScoreFactor("backup-filename", config.backupFilenamePenalty,
-                    "Backup-style UTC timestamp suffix in filename (counted once); not capture-date evidence."))
+                    AppStrings.recommendations.backupFilename))
             }
             filename.numberedSuffix?.let {
                 add(ScoreFactor("numbered-filename", config.numberedFilenamePenalty,
-                    "Numbered filename suffix $it (counted once); possible copy naming, not proof of duplication."))
+                    AppStrings.recommendations.numberedFilename(it)))
             }
             // Copied timestamps agreeing with an already contradicted folder must not restore its bonus.
             if (fullDate != null && !penalizeFilename && !penalizeExif) {
                 if (utcDate(file.modifiedAt) == fullDate) {
-                    add(ScoreFactor("modified-date-support", config.modifiedDateBonus, "Stored UTC modified date agrees with folder date $fullDate."))
+                    add(ScoreFactor("modified-date-support", config.modifiedDateBonus, AppStrings.recommendations.modifiedDateSupport(fullDate)))
                 }
                 if (utcDate(file.createdAt) == fullDate) {
-                    add(ScoreFactor("created-date-support", config.createdDateBonus, "Stored UTC created date agrees with folder date $fullDate."))
+                    add(ScoreFactor("created-date-support", config.createdDateBonus, AppStrings.recommendations.createdDateSupport(fullDate)))
                 }
             }
         }
@@ -239,7 +240,7 @@ class RetentionScorer(config: RetentionConfig = RetentionConfig()) {
         val date = usableExifDate(file, exif) ?: return null
         if (strongestDate(file.directoryPath.segments)?.isoDate == null) return null
         return ScoreFactor(EXIF_EVIDENCE, 0.0,
-            "Usable stored EXIF capture date $date; compared as a camera-local calendar date, without timezone conversion.")
+            AppStrings.recommendations.usableExifDate(date))
     }
 
     internal fun usableExifDate(file: FileRecord, record: ExifRecord?): String? {
@@ -271,11 +272,11 @@ class RetentionScorer(config: RetentionConfig = RetentionConfig()) {
                     completeDate(components[index - 2], components[index - 1], component, ALTERNATIVE_DATE)
                         ?.copy(componentCount = 3)
                 YEAR_PATTERN.matches(component) && component.toInt() in 1..9999 ->
-                    DirectoryDate(YEAR, null, "year")
+                    DirectoryDate(YEAR, null, AppStrings.recommendations.yearOrganization)
                 index >= 1 && YEAR_PATTERN.matches(components[index - 1]) &&
                     components[index - 1].toInt() in 1..9999 &&
                     MONTH_OR_DAY.matches(component) && component.toInt() in 1..12 ->
-                    DirectoryDate(YEAR_MONTH, null, "year/month")
+                    DirectoryDate(YEAR_MONTH, null, AppStrings.recommendations.yearMonthOrganization)
                 else -> null
             }
             if (candidate != null && candidate.strength >= (strongest?.strength ?: 0)) {
@@ -319,7 +320,7 @@ class RetentionScorer(config: RetentionConfig = RetentionConfig()) {
         }
         if (d !in 1..days) return null
         val iso = "$year-$month-$day"
-        return DirectoryDate(strength, iso, "full date $iso")
+        return DirectoryDate(strength, iso, AppStrings.recommendations.fullDateOrganization(iso))
     }
 
     private fun utcDate(epochMillis: Long?): String? = epochMillis?.let {

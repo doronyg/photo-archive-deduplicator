@@ -15,6 +15,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.doronyg.photoarchivededuplicator.classification.*
+import com.doronyg.photoarchivededuplicator.strings.AppStrings
 import com.doronyg.photoarchivededuplicator.scan.DirectoryRepository
 import com.doronyg.photoarchivededuplicator.scan.DuplicateCandidateGroup
 import com.doronyg.photoarchivededuplicator.scan.FileRecord
@@ -42,19 +43,11 @@ internal fun directoryClassificationCounts(
     return DirectoryClassificationCounts(paths.size, paths.count { it !in records })
 }
 
-internal fun directoryClassificationProgressText(state: DirectoryClassificationJobState): String {
-    val phase = if (state.phase == DirectoryClassificationPhase.COMPLETED && state.failed > 0) {
-        "Completed with failures"
-    } else state.phase.name.lowercase().replaceFirstChar { it.uppercase() }
-    return "AI classification: $phase — ${state.total} directories; ${state.completed} completed, " +
-        "${state.skipped} skipped, ${state.remaining} remaining, ${state.failed} failed."
-}
+internal fun directoryClassificationProgressText(state: DirectoryClassificationJobState): String =
+    AppStrings.analysis.classificationProgress(state)
 
 internal fun directoryClassificationRecordText(record: DirectoryClassificationRecord): String =
-    "AI directory classification (cached): ${record.classification.name}; " +
-        "${quoteResultText(record.directoryPath.toString())}; model ${quoteResultText(record.context.model)}; " +
-        "server ${quoteResultText(record.context.baseUrl)}; classified at ${record.classifiedAt} epoch ms. " +
-        "Advisory, not content verification."
+    AppStrings.analysis.classificationLabel(record.classification)
 
 internal data class CachedDirectoryClassifications(
     val records: Map<Path, DirectoryClassificationRecord> = emptyMap(),
@@ -90,7 +83,7 @@ internal suspend fun loadCachedDirectoryClassifications(
     } catch (e: CancellationException) {
         throw e
     } catch (e: Exception) {
-        CachedDirectoryClassifications(error = "Could not load cached AI classifications: ${e.message}")
+        CachedDirectoryClassifications(error = AppStrings.analysis.cacheError(e.message))
     }
 }
 
@@ -138,10 +131,9 @@ internal fun DirectoryClassificationControls(
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(Modifier.horizontalScroll(rememberScrollState())) {
             TextButton(onClick = { controlsExpanded = !controlsExpanded }) {
-                Text(if (controlsExpanded) "Hide AI classification" else "AI directory classification")
+                Text(if (controlsExpanded) AppStrings.analysis.hideClassification else AppStrings.analysis.directoryClassification)
             }
-            Text("${counts.total} unique directories; " +
-                if (cache.ready) "${counts.missing} missing valid." else "checking cache.",
+            Text(AppStrings.analysis.classificationCounts(counts.total, counts.missing, cache.ready),
                 style = MaterialTheme.typography.bodySmall)
         }
         if (state.phase != DirectoryClassificationPhase.IDLE) {
@@ -150,23 +142,22 @@ internal fun DirectoryClassificationControls(
         state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         if (controlsExpanded) Column(Modifier.heightIn(max = 220.dp).verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text("Scope: all displayed groups, including offscreen and every member. Selection is snapshotted at start.",
+        Text(AppStrings.analysis.classificationScope,
             style = MaterialTheme.typography.bodySmall)
-        Text(DIRECTORY_CLASSIFICATION_PRIVACY, style = MaterialTheme.typography.bodySmall)
-        if (context == null) Text("Configure a valid server URL and model in Ollama settings to enable classification.")
+        if (context == null) Text(AppStrings.analysis.configureClassification)
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(enabled = enabled && counts.missing > 0, onClick = {
                 error = null
-                if (!controller.start(groups.orEmpty().map { it.toList() }, context!!)) error = "Classification could not start."
-            }) { Text("Classify missing valid") }
+                if (!controller.start(groups.orEmpty().map { it.toList() }, context!!)) error = AppStrings.analysis.cannotStart
+            }) { Text(AppStrings.analysis.classifyMissing) }
             OutlinedButton(enabled = enabled, onClick = {
                 error = null
-                if (!controller.start(groups.orEmpty().map { it.toList() }, context!!, forceRefresh = true)) error = "Classification could not start."
-            }) { Text("Refresh AI results") }
+                if (!controller.start(groups.orEmpty().map { it.toList() }, context!!, forceRefresh = true)) error = AppStrings.analysis.cannotStart
+            }) { Text(AppStrings.analysis.refreshResults) }
             OutlinedButton(enabled = enabled && retryCount > 0 && state.context == context, onClick = {
                 error = null
-                if (!controller.retryFailed(groups.orEmpty().map { it.toList() }, context!!)) error = "No failed directories in this selection could be retried."
-            }) { Text("Retry failed ($retryCount)") }
+                if (!controller.retryFailed(groups.orEmpty().map { it.toList() }, context!!)) error = AppStrings.analysis.cannotRetry
+            }) { Text(AppStrings.analysis.retryFailed(retryCount)) }
             if (state.isRunning) OutlinedButton(enabled = !cancelling, onClick = {
                 cancelling = true
                 scope.launch {
@@ -175,24 +166,19 @@ internal fun DirectoryClassificationControls(
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
-                        error = "Could not cancel classification: ${e.message}"
+                        error = AppStrings.analysis.cancelError(e.message)
                     } finally {
                         cancelling = false
                     }
                 }
-            }) { Text(if (cancelling) "Cancelling..." else "Cancel AI classification") }
+            }) { Text(if (cancelling) AppStrings.analysis.cancelling else AppStrings.cancel) }
         }
-        state.context?.let {
-            if (state.phase != DirectoryClassificationPhase.IDLE) Text(
-                "Job profile: ${quoteResultText(it.baseUrl)} / ${quoteResultText(it.model)}.",
-                style = MaterialTheme.typography.bodySmall)
-        }
-        state.failures.forEach { Text("${quoteResultText(it.directory.toString())}: ${quoteResultText(it.message)}",
+        state.failures.forEach { Text(AppStrings.analysis.directoryFailure(quoteResultText(it.directory.toString()), quoteResultText(it.message)),
             color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
         }
         cache.error?.let {
             Text(it, color = MaterialTheme.colorScheme.error)
-            OutlinedButton(onClick = onReloadCache) { Text("Retry cached evidence load") }
+            OutlinedButton(onClick = onReloadCache) { Text(AppStrings.analysis.retryCache) }
         }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
     }

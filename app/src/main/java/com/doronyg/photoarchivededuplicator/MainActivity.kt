@@ -11,6 +11,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import com.doronyg.photoarchivededuplicator.ui.InventoryApp
 import com.doronyg.photoarchivededuplicator.ui.ScanTarget
+import com.doronyg.photoarchivededuplicator.strings.AppStrings
 
 class MainActivity : ComponentActivity() {
     private val mediaPermissions =
@@ -29,7 +30,7 @@ class MainActivity : ComponentActivity() {
         if (results.values.any { it }) {
             callback?.invoke()
         } else {
-            Toast.makeText(this, "Photo and video access is needed to scan", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, AppStrings.platform.mediaPermissionNeeded, Toast.LENGTH_LONG).show()
         }
     }
 
@@ -39,7 +40,7 @@ class MainActivity : ComponentActivity() {
         val owner = application as PhotoArchiveApplication
         val scanTarget = ScanTarget.Fixed(
             root = ANDROID_STORAGE_ROOT,
-            buttonLabel = "Scan photo library",
+            buttonLabel = AppStrings.platform.scanPhotoLibrary,
             requestAccess = ::withMediaAccess,
         )
         val pathActions = androidPathActions(this, owner::container)

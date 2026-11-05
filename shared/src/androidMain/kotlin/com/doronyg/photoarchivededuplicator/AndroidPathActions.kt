@@ -10,6 +10,7 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okio.Path
+import com.doronyg.photoarchivededuplicator.strings.AppStrings
 
 internal data class MediaOpenTarget(val contentUri: String, val mimeType: String)
 
@@ -22,8 +23,8 @@ internal class AndroidPathActions(
     override suspend fun openFile(path: Path) {
         val target = filesystemLane.run("native MediaStore lookup $path") {
             val found = Diagnostics.logger.operation(LogTags.NATIVE_PATH, "MediaStore lookup $path") { lookup(path) }
-                ?: error("This photo or video is missing from MediaStore or is not accessible: $path")
-            check(found.contentUri.startsWith("content://")) { "A MediaStore content URI is required." }
+                ?: error(AppStrings.platform.mediaMissing(path.toString()))
+            check(found.contentUri.startsWith("content://")) { AppStrings.platform.mediaUriRequired }
             found
         }
         withContext(Dispatchers.Main) {
@@ -32,7 +33,7 @@ internal class AndroidPathActions(
     }
 
     override suspend fun openFolder(path: Path): Unit =
-        throw UnsupportedOperationException("Opening a containing folder is not supported by this Android media-library view. Use your file manager to browse $path.")
+        throw UnsupportedOperationException(AppStrings.platform.androidFolderUnsupported(path.toString()))
 }
 
 fun androidPathActions(context: Context, loadContainer: suspend () -> AppContainer): PathActions = object : PathActions {
@@ -66,17 +67,17 @@ private fun findMediaTarget(resolver: ContentResolver, path: Path): MediaOpenTar
         "${MediaStore.MediaColumns.DATA} = ? AND ${MediaStore.Files.FileColumns.MEDIA_TYPE} IN (?, ?)",
         arrayOf(path.toString(), MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE.toString(),
             MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO.toString()), null,
-    ) } ?: error("MediaStore did not return a cursor. Check photo and video permissions.")
+    ) } ?: error(AppStrings.platform.mediaPermissionsError)
     return Diagnostics.logger.blockingOperation(LogTags.MEDIA_STORE, "cursor consume/close path=$path") { cursor.use {
         if (!it.moveToFirst()) return@use null
         val id = it.getLong(it.getColumnIndexOrThrow(MediaStore.MediaColumns._ID))
         val volume = it.getString(it.getColumnIndexOrThrow(MediaStore.MediaColumns.VOLUME_NAME))
-            ?: error("MediaStore did not supply the media volume.")
+            ?: error(AppStrings.platform.mediaVolumeMissing)
         val type = it.getInt(it.getColumnIndexOrThrow(MediaStore.Files.FileColumns.MEDIA_TYPE))
         val collection = when (type) {
             MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE -> MediaStore.Images.Media.getContentUri(volume)
             MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO -> MediaStore.Video.Media.getContentUri(volume)
-            else -> error("Only images and videos can be opened from this inventory.")
+            else -> error(AppStrings.platform.mediaOnly)
         }
         val mime = it.getString(it.getColumnIndexOrThrow(MediaStore.MediaColumns.MIME_TYPE))
             ?: if (type == MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE) "image/*" else "video/*"

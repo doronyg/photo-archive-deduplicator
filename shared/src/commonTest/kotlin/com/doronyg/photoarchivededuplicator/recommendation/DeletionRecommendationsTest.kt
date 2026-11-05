@@ -45,7 +45,7 @@ class DeletionRecommendationsTest {
             result.survivors.single().advice.explanation)
         assertEquals(input.recommendation.files.getValue(files.last().path).explanation,
             result.candidates.single().advice.explanation)
-        assertTrue("not byte-verified" in result.evidenceSummary)
+        assertTrue("equal sizes and matching capture metadata" in result.evidenceSummary)
         assertEquals(input.recommendation, result.recommendation)
         assertNotNull(result.survivors.single().exif)
     }

@@ -23,9 +23,13 @@ class InventoryFilePathsTextTest {
     @Test
     fun lineBreaksInFileNamesAreReportedInsteadOfProducingMisleadingPaths() = runTest {
         for (path in listOf("/Photos/a\nb.jpg", "/Photos/a\rb.jpg")) {
-            assertFailsWith<IllegalArgumentException> {
+            val error = assertFailsWith<IllegalArgumentException> {
                 formatInventoryFilePaths(listOf(path), StandardTestDispatcher(testScheduler))
             }
+            assertEquals(
+                "A stored file path contains a line break and cannot be exported as one path per line.",
+                error.message,
+            )
         }
     }
 }

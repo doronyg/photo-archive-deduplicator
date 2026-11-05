@@ -7,6 +7,7 @@ import okio.Path.Companion.toPath
 import java.awt.Desktop
 import java.io.File
 import java.net.URI
+import com.doronyg.photoarchivededuplicator.strings.AppStrings
 
 fun desktopPathActions(
     diagnosticActions: PathActions = DesktopPathActions(),
@@ -40,13 +41,13 @@ internal class DesktopPathActions(
             !Diagnostics.logger.blockingOperation(LogTags.FILE_SYSTEM, "File.exists $path") { file.exists() } -> null
             Diagnostics.logger.blockingOperation(LogTags.FILE_SYSTEM, "File.isDirectory $path") { file.isDirectory } -> true
             Diagnostics.logger.blockingOperation(LogTags.FILE_SYSTEM, "File.isFile $path") { file.isFile } -> false
-            else -> error("Not a regular file or folder: $path")
+            else -> error(AppStrings.platform.notRegular(path.toString()))
         }
     },
     private val launch: (URI) -> Unit = { uri ->
         // Desktop.open is a blocking OS integration call, not a Swing UI callback.
         check(Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.OPEN)) {
-            "Opening files and folders is not supported on this desktop."
+            AppStrings.platform.desktopOpenUnsupported
         }
         // Desktop delegates folders to Finder on macOS and files to their default applications.
         Desktop.getDesktop().open(File(uri))
@@ -58,11 +59,13 @@ internal class DesktopPathActions(
     override suspend fun openFolder(path: Path) = open(path, directory = true)
 
     private suspend fun open(path: Path, directory: Boolean) = filesystemLane.run("native open $path") {
-        require(path.isAbsolute) { "A native target must be an absolute path." }
+        require(path.isAbsolute) { AppStrings.platform.absoluteNativePath }
         val isDirectory = Diagnostics.logger.operation(LogTags.NATIVE_PATH, "file kind exists/isDirectory/isFile $path") {
             kind(path)
-        } ?: error("File or folder no longer exists or is inaccessible: $path")
-        check(isDirectory == directory) { if (directory) "Not a folder: $path" else "Not a file: $path" }
+        } ?: error(AppStrings.platform.inaccessible(path.toString()))
+        check(isDirectory == directory) {
+            if (directory) AppStrings.platform.notFolder(path.toString()) else AppStrings.platform.notFile(path.toString())
+        }
         // Construct the URI without File.toURI(), which probes the real filesystem.
         // The native launcher receives a decoded File; shell quoting is never involved.
         val nativePath = File(path.toString()).absolutePath.replace(File.separatorChar, '/')

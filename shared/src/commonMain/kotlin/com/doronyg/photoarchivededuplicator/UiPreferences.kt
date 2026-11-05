@@ -9,6 +9,7 @@ import com.doronyg.photoarchivededuplicator.scan.DuplicateSortCriterion
 import com.doronyg.photoarchivededuplicator.scan.DuplicateSortRule
 import com.doronyg.photoarchivededuplicator.scan.SortDirection
 import com.doronyg.photoarchivededuplicator.scan.defaultDuplicateSortRules
+import com.doronyg.photoarchivededuplicator.strings.AppStrings
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.NonCancellable
@@ -22,9 +23,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 enum class UiTab(val title: String) {
-    SCAN("Scan"), BROWSE("Browse"), DUPLICATES("Duplicates"), SUSPECTED_DUPLICATES("Suspected duplicates"),
-    STATISTICS("Statistics"), DELETION_RECOMMENDATIONS("Deletion Recommendations"),
-    OLLAMA("Ollama settings"), EXCLUSIONS("Exclusions"), LOGS("Logs"),
+    SCAN(AppStrings.scanTab), BROWSE(AppStrings.browseTab), DUPLICATES(AppStrings.duplicatesTab),
+    SUSPECTED_DUPLICATES(AppStrings.suspectedTab), STATISTICS(AppStrings.statisticsTab),
+    DELETION_RECOMMENDATIONS(AppStrings.recommendationsTab), OLLAMA(AppStrings.ollamaTab),
+    EXCLUSIONS(AppStrings.exclusionsTab), LOGS(AppStrings.logsTab),
 }
 
 data class UiChoices(

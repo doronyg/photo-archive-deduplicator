@@ -17,6 +17,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.doronyg.photoarchivededuplicator.UiPreferences
+import com.doronyg.photoarchivededuplicator.strings.AppStrings
 import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificationController
 import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificationException
 import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificationRecord
@@ -30,15 +31,11 @@ internal fun ollamaSettingsValidationError(settings: OllamaSettings): String? {
         settings.context()
         null
     } catch (e: IllegalArgumentException) {
-        e.message ?: "Enter a valid HTTP(S) server URL and model."
+        e.message ?: AppStrings.analysis.invalidSettings
     }
 }
 
-internal const val DIRECTORY_CLASSIFICATION_PRIVACY =
-    "Only when you click Classify, Refresh AI results, or Retry failed: directory paths/names " +
-        "are sent to your configured Ollama server. No filenames, file contents, EXIF, scores, or groups are sent. " +
-        "Results are advisory, not content verification. Fetch models requests installed model names without sending directory data. " +
-        "Opening screens or saving settings never contacts the server."
+internal val DIRECTORY_CLASSIFICATION_PRIVACY = AppStrings.analysis.privacy
 
 @Composable
 internal fun OllamaSettingsScreen(
@@ -60,14 +57,14 @@ internal fun OllamaSettingsScreen(
     var modelsExpanded by remember(draft.baseUrl) { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     Column(modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Ollama settings", style = MaterialTheme.typography.titleLarge)
-        Text("Optional directory classification. No server or model is selected by default.")
+        Text(AppStrings.analysis.settingsTitle, style = MaterialTheme.typography.titleLarge)
+        Text(AppStrings.analysis.settingsDescription)
         Text(DIRECTORY_CLASSIFICATION_PRIVACY, style = MaterialTheme.typography.bodySmall)
         OutlinedTextField(draft.baseUrl, { draft = draft.copy(baseUrl = it); status = null },
-            label = { Text("Ollama HTTP(S) base URL") }, enabled = !saving && !loadingModels, singleLine = true,
+            label = { Text(AppStrings.analysis.serverUrl) }, enabled = !saving && !loadingModels, singleLine = true,
             modifier = Modifier.fillMaxWidth())
         OutlinedTextField(draft.model, { draft = draft.copy(model = it); status = null },
-            label = { Text("Model") }, enabled = !saving, singleLine = true, modifier = Modifier.fillMaxWidth())
+            label = { Text(AppStrings.analysis.model) }, enabled = !saving, singleLine = true, modifier = Modifier.fillMaxWidth())
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(enabled = !saving && !loadingModels && draft.baseUrl.isNotBlank(), onClick = {
                 error = null
@@ -81,17 +78,17 @@ internal fun OllamaSettingsScreen(
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: IllegalArgumentException) {
-                        error = e.message ?: "Enter a valid Ollama URL."
+                        error = e.message ?: AppStrings.analysis.invalidUrl
                     } catch (e: DirectoryClassificationException) {
-                        error = "Could not fetch models: ${e.message}"
+                        error = AppStrings.analysis.fetchModelsError(e.message)
                     } finally {
                         loadingModels = false
                     }
                 }
-            }) { Text(if (loadingModels) "Fetching models..." else "Fetch models") }
+            }) { Text(if (loadingModels) AppStrings.analysis.fetchingModels else AppStrings.analysis.fetchModels) }
             Box {
                 OutlinedButton(enabled = !saving && !loadingModels && models.orEmpty().isNotEmpty(),
-                    onClick = { modelsExpanded = true }) { Text("Choose model") }
+                    onClick = { modelsExpanded = true }) { Text(AppStrings.analysis.chooseModel) }
                 DropdownMenu(expanded = modelsExpanded, onDismissRequest = { modelsExpanded = false }) {
                     models.orEmpty().forEach { model ->
                         DropdownMenuItem(text = { Text(model) }, onClick = {
@@ -104,11 +101,11 @@ internal fun OllamaSettingsScreen(
             }
         }
         models?.let {
-            Text(if (it.isEmpty()) "No installed models returned by this server."
-                else "${it.size} installed models. Choose one or enter a model identifier manually.",
+            Text(if (it.isEmpty()) AppStrings.analysis.noModels
+                else AppStrings.analysis.modelCount(it.size),
                 style = MaterialTheme.typography.bodySmall)
         }
-        Text("Saving changes cancels any active classification before updating the profile. Clear all fields to disable AI.")
+        Text(AppStrings.analysis.disableHelp)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(enabled = !saving && !loadingModels, onClick = {
                 error = ollamaSettingsValidationError(draft)
@@ -119,19 +116,19 @@ internal fun OllamaSettingsScreen(
                         try {
                             if (saved != preferences.state.value.ollama) controller.cancel()
                             preferences.update { it.copy(ollama = saved) }
-                            status = "Settings saved. No AI request was made."
+                            status = AppStrings.analysis.settingsSaved
                         } catch (e: CancellationException) {
                             throw e
                         } catch (e: Exception) {
-                            error = "Could not save settings: ${e.message}"
+                            error = AppStrings.analysis.saveSettingsError(e.message)
                         } finally {
                             saving = false
                         }
                     }
                 }
-            }) { Text(if (saving) "Saving..." else "Save settings") }
+            }) { Text(if (saving) AppStrings.analysis.saving else AppStrings.analysis.saveSettings) }
             OutlinedButton(enabled = !saving && !loadingModels, onClick = { draft = OllamaSettings(); error = null; status = null }) {
-                Text("Clear configuration")
+                Text(AppStrings.analysis.clearConfiguration)
             }
         }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }

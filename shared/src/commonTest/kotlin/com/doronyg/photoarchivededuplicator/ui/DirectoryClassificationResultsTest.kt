@@ -95,6 +95,7 @@ class DirectoryClassificationResultsTest {
         assertTrue("Model: \"model\\nline\"" in text)
         assertTrue("Filter: \"filter\\nline\"" in text)
         assertEquals(1, text.lineSequence().count { it.startsWith("Classification: ") })
-        assertTrue("not content verification" in text)
+        assertFalse("not content verification" in text)
+        assertFalse("No files have been changed" in text)
     }
 }

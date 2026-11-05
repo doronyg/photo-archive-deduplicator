@@ -61,6 +61,7 @@ import com.doronyg.photoarchivededuplicator.scan.sortDuplicateCandidates
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import okio.Path
+import com.doronyg.photoarchivededuplicator.strings.AppStrings
 import okio.Path.Companion.toPath
 
 private data class SortedCandidates(
@@ -182,7 +183,7 @@ fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathAc
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            if (current()) error = "Could not load stored EXIF or scores: ${e.message}"
+            if (current()) error = AppStrings.duplicates.storedError(e.message)
         } finally {
             if (current()) exifLoading = false
         }
@@ -198,13 +199,13 @@ fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathAc
             if (current()) {
                 retention = result
                 if (result.invalidatedFiles > 0) {
-                    error = "Inventory or stored EXIF changed during scoring. Search again to refresh the affected files."
+                    error = AppStrings.duplicates.scoringChanged
                 }
             }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            if (current()) error = "Could not calculate retention scores: ${e.message}"
+            if (current()) error = AppStrings.duplicates.scoringError(e.message)
         } finally {
             if (current()) scoring = false
         }
@@ -222,12 +223,12 @@ fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathAc
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            error = "Could not load roots: ${e.message}"
+            error = AppStrings.duplicates.rootsError(e.message)
         }
     }
 
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Duplicate candidates", style = MaterialTheme.typography.titleLarge)
+        Text(AppStrings.duplicates.title, style = MaterialTheme.typography.titleLarge)
         directoryClassifications?.let { controller ->
             DirectoryClassificationControls(controller, choices.ollama,
                 displayedSnapshot?.groups?.map { it.files }?.takeUnless { busy || scanRunning },
@@ -236,7 +237,7 @@ fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathAc
         OutlinedTextField(
             value = rootText,
             onValueChange = { value -> invalidateExif(); preferences.update { it.copy(duplicateRoot = value) }; groups = null },
-            label = { Text("Search under absolute folder path") },
+            label = { Text(AppStrings.duplicates.folderPath) },
             enabled = !busy,
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
@@ -253,10 +254,10 @@ fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathAc
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
-                        error = "Could not choose folder: ${e.message}"
+                        error = AppStrings.duplicates.chooseFolderError(e.message)
                     }
                 }
-            }) { Text("Choose folder…") }
+            }) { Text(AppStrings.duplicates.chooseFolder) }
         }
         Row(
             Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
@@ -269,10 +270,10 @@ fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathAc
                     enabled = !busy,
                     label = {
                         Text(when (type) {
-                            DuplicateFileType.ALL -> "All"
-                            DuplicateFileType.IMAGES -> "Images"
-                            DuplicateFileType.VIDEOS -> "Videos"
-                            DuplicateFileType.DOCUMENTS -> "Documents"
+                            DuplicateFileType.ALL -> AppStrings.duplicates.all
+                            DuplicateFileType.IMAGES -> AppStrings.duplicates.images
+                            DuplicateFileType.VIDEOS -> AppStrings.duplicates.videos
+                            DuplicateFileType.DOCUMENTS -> AppStrings.duplicates.documents
                         })
                     },
                 )
@@ -281,13 +282,8 @@ fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathAc
         OutlinedTextField(
             value = filenamePattern,
             onValueChange = { value -> invalidateExif(); preferences.update { it.copy(duplicateFilenamePattern = value) }; groups = null },
-            label = { Text("Filename wildcard (optional)") },
-            supportingText = {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Case-insensitive, e.g. IMG*.jpg. * = any text, ? = one character; dot is literal. Types use file extensions.")
-                    Text("Same exact name (case-sensitive) and size only — not verified duplicates. Times are evidence, not a filter. No files are changed.")
-                }
-            },
+            label = { Text(AppStrings.duplicates.filenameWildcard) },
+            supportingText = { Text(AppStrings.duplicates.wildcardHelp) },
             enabled = !busy,
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
@@ -315,12 +311,12 @@ fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathAc
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
-                        error = "Search failed: ${e.message}"
+                        error = AppStrings.duplicates.searchError(e.message)
                     } finally {
                         busy = false
                     }
                 }
-            }) { Text(if (scoring) "Scoring..." else if (busy) "Searching…" else "Find candidates") }
+            }) { Text(if (scoring) AppStrings.duplicates.scoring else if (busy) AppStrings.duplicates.searching else AppStrings.duplicates.findCandidates) }
             OutlinedButton(enabled = !busy && !queueState.isRunning && !groups.isNullOrEmpty(), onClick = {
                 val snapshot = groups ?: return@OutlinedButton
                 busy = true
@@ -332,16 +328,16 @@ fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathAc
                         busy = false
                     }
                 }
-            }) { Text("Recompute scores") }
+            }) { Text(AppStrings.duplicates.recomputeScores) }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             OutlinedButton(
                 enabled = !scanRunning && !busy && !queueState.isRunning && !displayedSnapshot?.groups.isNullOrEmpty(),
                 onClick = {
                     val snapshot = displayedSnapshot?.groups?.toList() ?: return@OutlinedButton
-                    if (!queue.start(snapshot)) error = "EXIF analysis could not start: a scan or queue is already running."
+                    if (!queue.start(snapshot)) error = AppStrings.duplicates.analysisBusy
                 },
-            ) { Text("Analyze ambiguous EXIF") }
+            ) { Text(AppStrings.duplicates.analyzeAmbiguous) }
             if (queueState.isRunning) {
                 TextButton(enabled = !cancellingQueue, onClick = {
                     cancellingQueue = true
@@ -351,17 +347,15 @@ fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathAc
                         } catch (e: CancellationException) {
                             throw e
                         } catch (e: Exception) {
-                            error = "Could not cancel EXIF queue: ${e.message}"
+                            error = AppStrings.duplicates.cancellationError(e.message)
                         } finally {
                             cancellingQueue = false
                         }
                     }
-                }) { Text(if (cancellingQueue) "Cancelling…" else "Cancel EXIF queue") }
+                }) { Text(if (cancellingQueue) AppStrings.duplicates.cancelling else AppStrings.duplicates.cancelExif) }
             }
         }
         presentExifQueue(queueState)?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-        Text("Automatic EXIF checks gaps of 10 or less between the top two scores after a completed scan and initial scoring. Only groups with a valid complete folder date qualify (not year/month alone); all files in an eligible group are visited. Unchanged cached inputs and reader versions avoid file reads.",
-            style = MaterialTheme.typography.bodySmall)
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         SelectionContainer(Modifier.weight(1f)) {
             Row(Modifier.fillMaxSize()) {
@@ -371,7 +365,7 @@ fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathAc
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     if (groups == null) {
-                        item { Text("Previously scanned roots (select or enter any subtree):") }
+                        item { Text(AppStrings.duplicates.scannedRoots) }
                         items(roots) { root ->
                             TextButton(enabled = !busy, onClick = {
                                 invalidateExif()
@@ -381,13 +375,13 @@ fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathAc
                         }
                     }
                     if (groups != null && displayedSnapshot == null) {
-                        item { Text("Sorting candidates...") }
+                        item { Text(AppStrings.duplicates.sorting) }
                     }
                     displayedSnapshot?.let { displayed ->
                         val results = displayed.groups
                         item {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text("${results.size} candidate groups under $reportRoot.", Modifier.weight(1f))
+                                Text(AppStrings.duplicates.candidateCount(results.size, reportRoot), Modifier.weight(1f))
                                 DisableSelection {
                                     TextButton(enabled = !copying, onClick = {
                                         val reportExif = exif
@@ -400,40 +394,36 @@ fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathAc
                                                 val text = formatDuplicateResults(reportRoot, reportFilter, displayed.rules, results,
                                                     retention = reportRetention, exif = reportExif, recommendations = reportRecommendations)
                                                 clipboard.setText(AnnotatedString(text))
-                                                copyStatus = "Copied ${results.size} groups, including full paths. Review before sharing."
+                                                copyStatus = AppStrings.duplicates.copied(results.size)
                                             } catch (e: CancellationException) {
                                                 throw e
                                             } catch (e: Exception) {
-                                                error = "Could not copy results: ${e.message}"
+                                                error = AppStrings.duplicates.copyError(e.message)
                                             } finally {
                                                 copying = false
                                             }
                                         }
-                                    }) { Text(if (copying) "Copying..." else "Copy results") }
+                                    }) { Text(if (copying) AppStrings.duplicates.copying else AppStrings.duplicates.copyResults) }
                                 }
                             }
-                            Text("Sort changes apply immediately; search again after changing inventory or exclusions.",
+                            Text(AppStrings.duplicates.completeGroups,
                                 style = MaterialTheme.typography.bodySmall)
-                            Text("Folder search selects complete matching groups; copies outside the folder are included.",
+                            Text(AppStrings.duplicates.scoreDetailsHelp,
                                 style = MaterialTheme.typography.bodySmall)
-                            Text("Highest retention score first within each group. Scores are advisory, not content verification. Tap a score for its factors.",
-                                style = MaterialTheme.typography.bodySmall)
-                            Text("Stored EXIF capture dates influence advisory scores. Manual analysis uses the displayed groups and the same eligibility/cache rules as automatic analysis. Missing EXIF adds no bonus or penalty. No GPS.",
-                                style = MaterialTheme.typography.bodySmall)
-                            if (exifLoading) Text("Loading stored EXIF…", style = MaterialTheme.typography.bodySmall)
+                            if (exifLoading) Text(AppStrings.duplicates.loadingExif, style = MaterialTheme.typography.bodySmall)
                             copyStatus?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                         }
-                        if (results.isEmpty()) item { Text("No candidate groups match these filters in the stored inventory.") }
+                        if (results.isEmpty()) item { Text(AppStrings.duplicates.emptyCandidates) }
                         results.forEach { group ->
                             item {
                                 HorizontalDivider()
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text("${group.name} · ${formatBytes(group.sizeBytes)} · ${group.files.size} files",
+                                    Text(AppStrings.duplicates.group(group.name, formatBytes(group.sizeBytes), group.files.size),
                                         modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
                                     DisableSelection {
                                         TextButton(enabled = !scanRunning && !busy && !queueState.isRunning, onClick = {
-                                            if (!queue.start(listOf(group))) error = "EXIF analysis could not start: a scan or queue is already running."
-                                        }) { Text("Analyze EXIF") }
+                                            if (!queue.start(listOf(group))) error = AppStrings.duplicates.analysisBusy
+                                        }) { Text(AppStrings.duplicates.analyzeExif) }
                                     }
                                 }
                                 DuplicateRecommendationSummary(group.files.firstOrNull()?.let { recommendations?.get(it.path) })
@@ -441,7 +431,7 @@ fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathAc
                             items(group.files, key = { it.path.toString() }) { file ->
                                 Column {
                                     FilePathLinks(file, pathActions)
-                                    Text("Created ${formatEpochMillis(file.createdAt)} · modified ${formatEpochMillis(file.modifiedAt)}",
+                                    Text(AppStrings.duplicates.timestamps(formatEpochMillis(file.createdAt), formatEpochMillis(file.modifiedAt)),
                                         style = MaterialTheme.typography.bodySmall)
                                     RetentionScoreLine(file.path, reportRetention[file.path])
                                     FileRecommendationLine(file.path, recommendations?.get(file.path)?.files?.get(file.path),

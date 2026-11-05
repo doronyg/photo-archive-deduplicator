@@ -22,6 +22,7 @@ import com.doronyg.photoarchivededuplicator.recommendation.RecommendationAction
 import com.doronyg.photoarchivededuplicator.recommendation.recommendDuplicateGroups
 import com.doronyg.photoarchivededuplicator.retention.RetentionPresentation
 import com.doronyg.photoarchivededuplicator.scan.FileRecord
+import com.doronyg.photoarchivededuplicator.strings.AppStrings
 import okio.Path
 
 private data class RecommendationSnapshot(
@@ -48,68 +49,63 @@ internal fun rememberDuplicateRecommendations(
 
 internal fun recommendationActionLabel(action: RecommendationAction): String =
     when (action) {
-        RecommendationAction.KEEP_ONE -> "Keep one"
-        RecommendationAction.KEEP_MULTIPLE -> "Keep multiple"
-        RecommendationAction.REVIEW -> "Review - no automatic action"
-        RecommendationAction.PROTECTED -> "Protected"
+        RecommendationAction.KEEP_ONE -> AppStrings.duplicates.keepOne
+        RecommendationAction.KEEP_MULTIPLE -> AppStrings.duplicates.keepMultiple
+        RecommendationAction.REVIEW -> AppStrings.duplicates.review
+        RecommendationAction.PROTECTED -> AppStrings.duplicates.protected
     }
 
 internal fun groupRecommendationText(recommendation: DuplicateGroupRecommendation?): String {
-    if (recommendation == null) return "Recommendation: Loading stored evidence..."
-    val action = recommendationActionLabel(recommendation.action)
-    return "Recommendation: $action"
+    if (recommendation == null) return AppStrings.duplicates.loadingRecommendation
+    return recommendationActionLabel(recommendation.action)
 }
 
 private fun confidenceAssessmentText(assessment: ConfidenceAssessment): String =
-    "${assessment.score}/100 (${assessment.band.name.lowercase().replace('_', ' ').replaceFirstChar { it.uppercase() }})"
+    AppStrings.duplicates.confidence(assessment.score,
+        assessment.band.name.lowercase().replace('_', ' ').replaceFirstChar { it.uppercase() })
 
 internal fun groupConfidenceSummaryText(recommendation: DuplicateGroupRecommendation): String =
-    "Duplicate confidence: ${confidenceAssessmentText(recommendation.duplicateConfidence.assessment)}"
+    AppStrings.duplicates.duplicateConfidence(confidenceAssessmentText(recommendation.duplicateConfidence.assessment))
 
 internal fun groupConfidenceDetailsText(recommendation: DuplicateGroupRecommendation): String = buildString {
     val duplicate = recommendation.duplicateConfidence
-    appendLine("Heuristic scores, not probabilities; even 100/100 is not content-verified.")
-    appendLine("Duplicate-confidence explanation: ${quoteResultText(duplicate.assessment.explanation)}")
-    appendLine("Duplicate-confidence reasons: ${duplicate.assessment.reasonCodes.joinToString { it.name }}")
-    appendLine("Duplicate-confidence reference: ${duplicate.referenceFile?.path?.toString()?.let(::quoteResultText) ?: "unavailable"}")
-    if (duplicate.comparisons.isEmpty()) appendLine("Duplicate-confidence comparisons: none")
+    appendLine(quoteResultText(duplicate.assessment.explanation))
+    appendLine(AppStrings.duplicates.reference(duplicate.referenceFile?.path?.toString()?.let(::quoteResultText) ?: AppStrings.unavailable))
+    if (duplicate.comparisons.isEmpty()) appendLine(AppStrings.duplicates.noComparisons)
     duplicate.comparisons.values.forEach { comparison ->
-        appendLine("  Comparison: ${quoteResultText(comparison.file.path.toString())}")
-        appendLine("    Reference: ${quoteResultText(comparison.reference.path.toString())}")
-        appendLine("    Duplicate confidence: ${confidenceAssessmentText(comparison.assessment)}")
-        appendLine("    Contradictions: ${if (comparison.hasContradictions) "yes" else "no"}")
-        appendLine("    Comparison explanation: ${quoteResultText(comparison.assessment.explanation)}")
-        appendLine("    Comparison reasons: ${comparison.assessment.reasonCodes.joinToString { it.name }}")
+        appendLine(AppStrings.duplicates.comparison(quoteResultText(comparison.file.path.toString())))
+        appendLine(AppStrings.duplicates.reference(quoteResultText(comparison.reference.path.toString())))
+        appendLine(AppStrings.duplicates.duplicateConfidence(confidenceAssessmentText(comparison.assessment)))
+        appendLine(AppStrings.duplicates.contradictions(comparison.hasContradictions))
+        appendLine(quoteResultText(comparison.assessment.explanation))
         comparison.evidence.forEach { evidence ->
             val points = "${if (evidence.points > 0) "+" else ""}${evidence.points}"
-            appendLine("      $points points [${evidence.reasonCode.name}]: ${quoteResultText(evidence.explanation)}")
+            appendLine(AppStrings.duplicates.confidenceEvidence(points, quoteResultText(evidence.explanation)))
         }
     }
 }.trimEnd()
 
 internal fun fileDecisionConfidenceSummaryText(recommendation: FileRecommendation): String =
-    "Retention-decision confidence: ${confidenceAssessmentText(recommendation.retentionDecisionConfidence)}"
+    AppStrings.duplicates.retentionConfidence(confidenceAssessmentText(recommendation.retentionDecisionConfidence))
 
 private fun retainedReplacementText(recommendation: FileRecommendation): String =
-    "Retained replacement: ${recommendation.retainedReplacementPath?.toString()?.let(::quoteResultText) ?: "none"}"
+    AppStrings.duplicates.replacement(recommendation.retainedReplacementPath?.toString()?.let(::quoteResultText) ?: AppStrings.none)
 
 internal fun fileDecisionConfidenceDetailsText(recommendation: FileRecommendation): String = buildString {
     val confidence = recommendation.retentionDecisionConfidence
-    appendLine("Retention-confidence explanation: ${quoteResultText(confidence.explanation)}")
-    appendLine("Retention-confidence reasons: ${confidence.reasonCodes.joinToString { it.name }}")
-    appendLine(retainedReplacementText(recommendation))
-    append("Heuristic scores, not probabilities; even 100/100 is not content-verified.")
+    appendLine(quoteResultText(recommendation.explanation))
+    appendLine(quoteResultText(confidence.explanation))
+    append(retainedReplacementText(recommendation))
 }
 
 internal fun fileRecommendationText(recommendation: FileRecommendation?): String {
-    if (recommendation == null) return "Recommendation: Loading stored evidence..."
-    val role = when (recommendation.role) {
-        FileRecommendationRole.PREFERRED -> "Preferred copy"
-        FileRecommendationRole.REDUNDANT_CANDIDATE -> "Likely redundant candidate"
-        FileRecommendationRole.PRESERVE -> "Preserve this copy"
-        FileRecommendationRole.REVIEW -> "Preserve for review"
+    if (recommendation == null) return AppStrings.duplicates.loadingRecommendation
+    return when (recommendation.role) {
+        FileRecommendationRole.PREFERRED -> AppStrings.duplicates.preferredCopy
+        FileRecommendationRole.REDUNDANT_CANDIDATE -> AppStrings.duplicates.redundantCopy
+        FileRecommendationRole.PRESERVE -> AppStrings.duplicates.preserveCopy
+        FileRecommendationRole.REVIEW -> AppStrings.duplicates.preserveForReview
     }
-    return "Recommendation: $role - ${quoteResultText(recommendation.explanation)}"
 }
 
 @Composable
@@ -122,9 +118,8 @@ internal fun DuplicateRecommendationSummary(recommendation: DuplicateGroupRecomm
             Text(groupConfidenceSummaryText(recommendation), style = MaterialTheme.typography.bodySmall)
             if (expanded) {
                 Text(quoteResultText(recommendation.explanation), style = MaterialTheme.typography.bodySmall)
-                Text("${recommendation.mustPreserve.size} to preserve; ${recommendation.redundantCandidates.size} likely redundant candidates.",
+                Text(AppStrings.duplicates.planCounts(recommendation.mustPreserve.size, recommendation.redundantCandidates.size),
                     style = MaterialTheme.typography.bodySmall)
-                Text("Reasons: ${recommendation.reasonCodes.joinToString { it.name }}", style = MaterialTheme.typography.bodySmall)
                 Text(groupConfidenceDetailsText(recommendation), style = MaterialTheme.typography.bodySmall)
             }
         }
@@ -153,11 +148,8 @@ internal fun FileRecommendationLine(
             }
         }
         if (expanded && recommendation != null) {
-            Text("Normalized filename: ${quoteResultText(recommendation.normalizedFilename)}", style = MaterialTheme.typography.bodySmall)
-            Text("Reasons: ${recommendation.reasonCodes.joinToString { it.name }}", style = MaterialTheme.typography.bodySmall)
+            Text(AppStrings.duplicates.normalizedFilename(quoteResultText(recommendation.normalizedFilename)), style = MaterialTheme.typography.bodySmall)
             Text(fileDecisionConfidenceDetailsText(recommendation), style = MaterialTheme.typography.bodySmall)
-            Text("Naming and metadata evidence only; contents have not been compared. No files are changed.",
-                style = MaterialTheme.typography.bodySmall)
         }
     }
 }

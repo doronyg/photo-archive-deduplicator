@@ -137,6 +137,10 @@ class ExifRetentionScoringTest {
         val file = file("2013_06_25")
         val record = exif(file)
         val original = scorer.score(file, 3, record)
+        assertEquals(
+            "Usable stored EXIF capture date 2013-06-25; compared as a camera-local calendar date, without timezone conversion.",
+            original.factors.single { it.key == "exif-date-evidence" }.explanation,
+        )
         assertTrue(scorer.hasCurrentExifEvidence(original, file, record))
         val sameDate = record.copy(extractedAt = 999, result = record.result.copy(
             metadata = record.result.metadata.copy(capturedAt = "2013:06:25 01:02:03", make = "Other")))

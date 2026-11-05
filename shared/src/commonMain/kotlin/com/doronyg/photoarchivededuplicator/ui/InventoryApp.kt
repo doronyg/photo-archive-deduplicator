@@ -24,6 +24,7 @@ import com.doronyg.photoarchivededuplicator.AppContainer
 import com.doronyg.photoarchivededuplicator.PathActions
 import com.doronyg.photoarchivededuplicator.Diagnostics
 import com.doronyg.photoarchivededuplicator.UiTab
+import com.doronyg.photoarchivededuplicator.strings.AppStrings
 import com.doronyg.photoarchivededuplicator.scan.ScanState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -41,8 +42,8 @@ fun InventoryApp(loadContainer: suspend () -> AppContainer, scanTarget: ScanTarg
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                Diagnostics.logger.e(LogTags.CONTAINER, "Startup failed: ${e.message}")
-                error = "Could not open inventory: ${e.message}"
+                Diagnostics.logger.e(LogTags.CONTAINER, AppStrings.inventory.startupFailed(e.message))
+                error = AppStrings.inventory.openInventoryFailed(e.message)
             }
         }
     }
@@ -53,7 +54,7 @@ fun InventoryApp(loadContainer: suspend () -> AppContainer, scanTarget: ScanTarg
         MaterialTheme {
             Surface(Modifier.fillMaxSize()) {
                 Column(Modifier.safeDrawingPadding().padding(16.dp)) {
-                    Text(error ?: "Loading inventory…")
+                    Text(error ?: AppStrings.inventory.loadingInventory)
                     LogsScreen(pathActions, Modifier.fillMaxSize())
                 }
             }
