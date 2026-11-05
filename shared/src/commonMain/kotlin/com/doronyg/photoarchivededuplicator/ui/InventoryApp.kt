@@ -95,6 +95,9 @@ fun InventoryApp(container: AppContainer, scanTarget: ScanTarget, pathActions: P
                         container.exifQueue, pathActions, container.uiPreferences, scanState is ScanState.Running, content, container.directoryClassifications)
                     UiTab.STATISTICS -> RecommendationStatisticsScreen(container.repository, container.retentionScores,
                         container.exifQueue, scanState is ScanState.Running, content, container.directoryClassifications, container.uiPreferences)
+                    UiTab.DELETION_RECOMMENDATIONS -> DeletionRecommendationsScreen(container.repository, container.retentionScores,
+                        container.exifQueue, pathActions, container.uiPreferences, scanState is ScanState.Running,
+                        content, container.directoryClassifications)
                     UiTab.OLLAMA -> OllamaSettingsScreen(container.uiPreferences, container.directoryClassifications,
                         container::availableOllamaModels, container.repository::allDirectoryClassifications, content)
                     UiTab.EXCLUSIONS -> ExclusionsScreen(container.repository, scanState is ScanState.Running, content)

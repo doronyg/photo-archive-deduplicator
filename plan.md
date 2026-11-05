@@ -643,6 +643,44 @@ Measure how many files and groups survive the initial filter.
 
 **Deliverable:** a candidate report showing the potential scope of deduplication.
 
+#### Deletion Recommendations review screen
+
+The Deletion Recommendations tab is separate from duplicate investigation.
+Category cards have stable IDs, names, explanations, group counts and proposed
+file counts/bytes. The selected category is explicit; empty categories remain
+selectable. Overall totals deduplicate groups and proposed paths across categories.
+Sizes are advisory, not verified reclaimable space.
+
+The first category is **same-directory metadata matches**, following the approved
+metadata-only scope: the inventory has no hashes/byte comparisons or persisted
+final deletion plans. These are explicitly **unverified review candidates**, not
+proven identical files or authorization to delete. Use complete stored suspected
+image groups (strictly larger than 100,000 bytes); never trim a cross-directory
+group down to a qualifying subset. Require differing names, equal stored sizes,
+current valid matching capture timestamps/EXIF and current saved retention scores.
+The existing recommendation engine and retention-plan safety guard must identify
+exactly one retained preferred copy with every other member a high-confidence
+redundant candidate explicitly depending on that survivor. Missing, outdated,
+contradictory or weak evidence does not qualify.
+
+The database-only service derives advice from saved evidence with the existing
+engine, not a second decision policy. It never extracts EXIF, recomputes/saves
+retention scores or contacts Ollama. Only labels matching current saved settings
+apply. Scan/EXIF activity and evidence/profile refreshes immediately hide obsolete
+results; reload on completion/revision changes, with explicit manual refresh.
+
+Providers registered in the service own category eligibility and return generic
+review groups; the UI does not switch on category IDs. Additional providers can
+use different rules, explanations and multiple survivors without changing the
+presentation. Extend the service's input datasets when a future category needs
+evidence beyond stored suspected groups.
+
+Lazy group summaries show survivors and proposed counts/bytes. Expanding reveals
+distinct retained/candidate cards with file/folder links, sizes, saved capture and
+identifying EXIF, score factors, cached AI labels and the actual engine explanations,
+confidence evidence and replacement dependencies. Details are lazy list entries,
+with the shared desktop scrollbar. No deletion, move or rename controls exist.
+
 #### Cached and queued EXIF inspection
 
 After a genuine file scan completes, including a resumed scan, calculate regular
