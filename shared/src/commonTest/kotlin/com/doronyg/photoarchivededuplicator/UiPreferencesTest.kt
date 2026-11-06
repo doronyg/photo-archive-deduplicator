@@ -40,6 +40,9 @@ internal val preferencesTestScanner = object : InventoryScanner {
 internal val allUiChoices = UiChoices(
     selectedTab = UiTab.DUPLICATES,
     scanRoot = "/写真\nscan",
+    operationHistoryArchiveRoot = "/NAS/写真/history",
+    operationHistoryArchiveId = "archive-id",
+    operationHistoryRegistrationToken = "registration-token",
     browseStack = listOf("/写真", "/写真/a\nb", "/写真/a\nb/\\|;☃"),
     duplicateRoot = "/duplicates\nroot",
     duplicateFileType = DuplicateFileType.VIDEOS,
@@ -62,12 +65,49 @@ internal val allUiChoices = UiChoices(
 @OptIn(ExperimentalCoroutinesApi::class)
 class UiPreferencesTest {
     @Test
+    fun historySettingsReadLegacyKeysAndWriteStorageNeutralKeys() {
+        val legacy = mapOf(
+            "nasHistoryArchiveRoot" to "/Photos",
+            "nasHistoryArchiveId" to "archive-id",
+            "nasHistoryRegistrationToken" to "registration-token",
+        )
+        val expected = UiChoices(
+            operationHistoryArchiveRoot = "/Photos",
+            operationHistoryArchiveId = "archive-id",
+            operationHistoryRegistrationToken = "registration-token",
+        )
+        assertEquals(expected, decodeUiChoices(legacy))
+        val encoded = encodeUiChoices(expected)
+        assertEquals("/Photos", encoded["operationHistoryArchiveRoot"])
+        assertEquals("archive-id", encoded["operationHistoryArchiveId"])
+        assertEquals("registration-token", encoded["operationHistoryRegistrationToken"])
+        assertTrue(legacy.keys.none { it in encoded })
+    }
+
+    @Test
+    fun storageNeutralHistorySettingsTakePrecedenceOverLegacyKeys() {
+        val entries = mapOf(
+            "nasHistoryArchiveRoot" to "/Old",
+            "nasHistoryArchiveId" to "old-id",
+            "nasHistoryRegistrationToken" to "old-token",
+            "operationHistoryArchiveRoot" to "",
+            "operationHistoryArchiveId" to "new-id",
+            "operationHistoryRegistrationToken" to "new-token",
+        )
+        assertEquals(UiChoices(
+            operationHistoryArchiveId = "new-id",
+            operationHistoryRegistrationToken = "new-token",
+        ), decodeUiChoices(entries))
+    }
+
+    @Test
     fun fileOperationsTabRoundTripsWithoutAnArchiveRootSetting() {
         val choices = allUiChoices.copy(selectedTab = UiTab.FILE_OPERATIONS)
         assertEquals("File Operations", UiTab.FILE_OPERATIONS.title)
         assertEquals("FILE_OPERATIONS", encodeUiChoices(choices)["selectedTab"])
         assertEquals(choices, decodeUiChoices(encodeUiChoices(choices)))
         assertFalse("fileOperationArchiveRoot" in encodeUiChoices(choices))
+        assertEquals(choices.operationHistoryArchiveRoot, encodeUiChoices(choices)["operationHistoryArchiveRoot"])
         assertEquals(UiChoices(), decodeUiChoices(mapOf("fileOperationArchiveRoot" to "/old")))
         assertEquals(UiTab.SCAN, decodeUiChoices(emptyMap()).selectedTab)
     }

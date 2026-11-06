@@ -760,6 +760,18 @@ reviewed, and approval, moves, restoration and permanent deletion are unavailabl
 Missing Bin directories do not block a dry run. The UI suggests an editable Bin
 location, presents each file's suggested stay/move destination, provides copyable
 results and keeps saved evidence collapsed until opened.
+
+#### Operation history infrastructure
+
+File Operations also provides history on local or network storage, separate from
+local dry-run proposals. Explicit registration writes archive/Bin identity metadata; each
+installation verifies and pins its own local archive mapping. Versioned manifests
+and append-only JSON-lines events live under the Bin's `.deduplicator-history`
+directory, using archive-relative and Bin-relative paths rather than mount paths.
+Readers display malformed, unsupported and interrupted records, and aggregate
+confirmed events without claiming physical storage reclamation. Reads are off
+the main thread and publish stable snapshots on refresh. This increment has no
+operation executor, restoration or journal-writing controls.
 Provider-supplied file evidence is rendered generically without category-specific
 UI branches. Extend the input datasets only when a future category requires it.
 

@@ -33,6 +33,9 @@ enum class UiTab(val title: String) {
 data class UiChoices(
     val selectedTab: UiTab = UiTab.SCAN,
     val scanRoot: String = "",
+    val operationHistoryArchiveRoot: String = "",
+    val operationHistoryArchiveId: String = "",
+    val operationHistoryRegistrationToken: String = "",
     val browseStack: List<String> = emptyList(),
     val duplicateRoot: String = "",
     val duplicateFileType: DuplicateFileType = DuplicateFileType.ALL,
@@ -128,6 +131,9 @@ internal fun encodeUiChoices(choices: UiChoices): Map<String, String> = buildMap
     }
     put("selectedTab", choices.selectedTab.name)
     put("scanRoot", choices.scanRoot)
+    put("operationHistoryArchiveRoot", choices.operationHistoryArchiveRoot)
+    put("operationHistoryArchiveId", choices.operationHistoryArchiveId)
+    put("operationHistoryRegistrationToken", choices.operationHistoryRegistrationToken)
     put("duplicateRoot", choices.duplicateRoot)
     put("duplicateFileType", choices.duplicateFileType.name)
     put("duplicateFilenamePattern", choices.duplicateFilenamePattern)
@@ -197,6 +203,10 @@ internal fun decodeUiChoices(
     return UiChoices(
         selectedTab = enumValue("selectedTab", UiTab.entries, UiTab.SCAN),
         scanRoot = entries["scanRoot"] ?: "",
+        operationHistoryArchiveRoot = entries["operationHistoryArchiveRoot"] ?: entries["nasHistoryArchiveRoot"] ?: "",
+        operationHistoryArchiveId = entries["operationHistoryArchiveId"] ?: entries["nasHistoryArchiveId"] ?: "",
+        operationHistoryRegistrationToken = entries["operationHistoryRegistrationToken"]
+            ?: entries["nasHistoryRegistrationToken"] ?: "",
         browseStack = List(count) { index -> requireNotNull(entries["browseStack.$index"]) {
             "Missing UI preference browseStack.$index"
         } },

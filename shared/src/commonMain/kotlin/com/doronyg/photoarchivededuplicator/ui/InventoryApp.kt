@@ -3,6 +3,8 @@ package com.doronyg.photoarchivededuplicator.ui
 import com.doronyg.photoarchivededuplicator.LogTags
 
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
@@ -11,6 +13,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.PrimaryScrollableTabRow
 import androidx.compose.material3.Text
+import androidx.compose.material3.FilterChip
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -25,6 +28,7 @@ import com.doronyg.photoarchivededuplicator.PathActions
 import com.doronyg.photoarchivededuplicator.Diagnostics
 import com.doronyg.photoarchivededuplicator.UiTab
 import com.doronyg.photoarchivededuplicator.strings.AppStrings
+import com.doronyg.photoarchivededuplicator.strings.OperationHistoryStrings
 import com.doronyg.photoarchivededuplicator.scan.ScanState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -72,6 +76,10 @@ fun InventoryApp(container: AppContainer, scanTarget: ScanTarget, pathActions: P
     val selectedTab = choices.selectedTab
     val scanState by container.scanController.state.collectAsState()
     val fileOperationState by container.fileOperations.state.collectAsState()
+    val operationHistoryState by container.operationHistory.state.collectAsState()
+    val exifState by container.exifQueue.state.collectAsState()
+    val classificationState by container.directoryClassifications.state.collectAsState()
+    var showingOperationHistory by remember { mutableStateOf(false) }
     MaterialTheme {
         Surface(modifier = Modifier.fillMaxSize()) {
             // safeDrawingPadding keeps content clear of Android system bars; no-op on desktop
@@ -102,10 +110,26 @@ fun InventoryApp(container: AppContainer, scanTarget: ScanTarget, pathActions: P
                         content, container.directoryClassifications, fileOperationsBusy = fileOperationState.busy,
                         onPrepareDryRun = { selected ->
                             container.fileOperations.selectGroups(selected)
+                            showingOperationHistory = false
                             container.uiPreferences.update { it.copy(selectedTab = UiTab.FILE_OPERATIONS) }
                         })
-                    UiTab.FILE_OPERATIONS -> FileOperationsScreen(container.fileOperations, container.uiPreferences,
-                        container.exifQueue, pathActions, scanState is ScanState.Running, content)
+                    UiTab.FILE_OPERATIONS -> Column(content) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilterChip(selected = !showingOperationHistory, onClick = { showingOperationHistory = false },
+                                label = { Text(OperationHistoryStrings.localProposals) })
+                            FilterChip(selected = showingOperationHistory, onClick = { showingOperationHistory = true },
+                                label = { Text(OperationHistoryStrings.title) })
+                        }
+                        if (showingOperationHistory) {
+                            OperationHistoryScreen(container.operationHistory, container.uiPreferences, fileOperationState.binRoot,
+                                registrationBlocked = scanState is ScanState.Running || exifState.isRunning ||
+                                    classificationState.isRunning || fileOperationState.busy,
+                                modifier = Modifier.weight(1f))
+                        } else {
+                            FileOperationsScreen(container.fileOperations, container.uiPreferences, container.exifQueue,
+                                pathActions, scanState is ScanState.Running || operationHistoryState.busy, Modifier.weight(1f))
+                        }
+                    }
                     UiTab.OLLAMA -> OllamaSettingsScreen(container.uiPreferences, container.directoryClassifications,
                         container::availableOllamaModels, container.repository::allDirectoryClassifications, content)
                     UiTab.EXCLUSIONS -> ExclusionsScreen(container.repository, scanState is ScanState.Running, content)

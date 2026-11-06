@@ -213,6 +213,119 @@ are not implemented in this increment. A future executor must revalidate after
 AI review and obtain explicit approval. Metadata alone does not establish identical
 contents, and no full-file hashing is introduced.
 
+### Operation history and portable archive identity
+
+The **Operation history** view under File Operations reads history from local or
+network storage independently of the inventory database. Local dry-run proposals above remain
+local snapshots; they are not evidence of completed filesystem operations and
+are not silently converted or published to operation history.
+
+An explicit registration action initializes one archive per Bin:
+
+```
+<Archive>/.photo-archive-id.json
+<Bin>/.deduplicator-history/bin.json
+<Bin>/.deduplicator-history/operations/<operation-id>/manifest.json
+<Bin>/.deduplicator-history/operations/<operation-id>/events.jsonl
+```
+
+Registration writes identity metadata only, never archive-file contents. The
+archive must already exist. A missing Bin can be created if its parent exists.
+Existing identities must match and are not overwritten.
+An interrupted registration can leave metadata requiring reconciliation; stale
+registration locks are never automatically taken over. Archive markers and history
+directories are excluded from desktop, media-index and imported inventory listings.
+
+Each installation explicitly connects the shared archive identity to its local
+mount path. The path, expected archive ID and registration token are stored as
+local preferences, not another database or authoritative history. A mismatching
+or unavailable mapping does not prevent history browsing. Identity markers are
+not proof against a cloned archive containing an identical marker.
+
+Versioned operation manifests contain slash-separated archive-relative original
+and retained paths and Bin-relative destination paths. Absolute, traversing and
+platform-incompatible paths must not be resolved. These are a separate portable
+format from existing absolute-path local proposals. One operation manifest records
+the plan; its append-only JSON-lines journal records intents and actual completed
+actions. The reader does not infer a completed move from a planned destination.
+Future execution must persist intent before mutation and durable confirmation
+after verification; no filesystem executor or operation journal writer is enabled
+in this increment.
+
+Refresh reads history metadata off the main thread, caches unchanged parsed records
+where safe and publishes complete snapshots without clearing the previous display
+while loading. Unsupported versions, malformed records and unfinished journals
+are visible; statistics are marked partial where history cannot be trusted.
+Only confirmed journal transitions contribute to event totals or current recorded
+Bin occupancy. Move/restore/move cycles count as movement events, not distinct
+content identities. Physical storage space reclaimed remains unknown.
+
+The portable filesystem layer cannot promise power-loss durability from a
+buffer flush or an atomic rename alone. Storage-specific persistence, exclusive
+execution locking and crash reconciliation must be established before enabling
+actual moves or restoration. No AI, hashing or permanent deletion is added.
+
+#### History JSON format 1
+
+The archive marker contains `formatVersion`, `archiveId` and `registrationToken`.
+`bin.json` contains the same fields plus `binId`. These generated identifiers are
+not mount paths or display names. Tokens detect mismatched registration, not
+tampering; copied markers or manually edited manifests are not cryptographic
+proof of archive or file identity.
+
+An example `operations/op1/manifest.json`:
+
+```json
+{
+  "formatVersion": 1,
+  "operationId": "op1",
+  "createdAt": "2026-01-01T00:00:00Z",
+  "archiveId": "archive-id",
+  "items": [{
+    "itemId": "item1",
+    "originalRelativePath": "Family/photo.jpg",
+    "binRelativePath": "Family/photo.jpg",
+    "sizeBytes": 12345,
+    "modifiedAtMillis": 1767225600000,
+    "createdAtMillis": null,
+    "categoryId": "regular-duplicates-full-confidence",
+    "explanation": "Saved recommendation explanation",
+    "retainedRelativePath": "Originals/photo.jpg"
+  }]
+}
+```
+
+Identifiers use ASCII letters, digits, hyphens or underscores (1-128 characters).
+The operation directory name must match `operationId`, and `archiveId` must match
+the Bin registration. Relative paths cannot target application metadata. Paths
+with traversal, platform-reserved names or case-colliding components are rejected,
+not silently renamed. Missing file times or retained paths are represented as JSON
+`null`, not invented values.
+
+Each `events.jsonl` record ends with a newline. A move consists of two records:
+
+```json
+{"formatVersion":1,"eventId":"e1","sequence":1,"itemId":"item1","attemptId":"attempt1","action":"MOVE","state":"INTENT","occurredAt":"2026-01-01T00:00:00Z"}
+{"formatVersion":1,"eventId":"e2","sequence":2,"itemId":"item1","attemptId":"attempt1","action":"MOVE","state":"COMPLETED","occurredAt":"2026-01-01T00:00:01Z"}
+```
+
+`RESTORE` uses the same protocol; `FAILED` may include an `error` string and must
+mean that the attempt is confirmed not to have changed the file's location.
+An uncertain outcome remains an unconfirmed intent until reconciled. A new
+attempt needs a new attempt ID. Sequences increase from 1 within each operation.
+An identical repeated event ID is counted once; conflicting duplicates, gaps or
+terminal events without matching intents invalidate journal statistics. A torn
+final line is reported and excluded while the confirmed prefix remains readable.
+Missing journals, untouched plans and pending intents are incomplete operations.
+Last confirmed move/restoration timestamps and last failed-action details remain
+visible. No source or Bin file is opened merely to browse these records.
+
+Readers bound identity files to 64 KiB, manifests to 8 MiB and journals to 16 MiB;
+oversized metadata is reported, not silently truncated. At most 128 parsed
+operations are cached. Cache fingerprints use metadata size/modification time;
+they are a refresh optimization, not an integrity guarantee. Shared ancestors are
+inspected once per refresh, and cancellation is checked between records.
+
 ## Suspected duplicates
 
 The adjacent **Suspected duplicates** tab uses SQL size buckets rather than exact

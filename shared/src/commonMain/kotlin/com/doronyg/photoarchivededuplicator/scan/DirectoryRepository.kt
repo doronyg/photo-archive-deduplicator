@@ -309,7 +309,7 @@ class DirectoryRepository internal constructor(
     /** Queues [root] for scanning, re-queuing it if a previous scan already processed it. */
     suspend fun seedRoot(root: Path) = io("seedRoot transaction $root") {
         val normalized = root.inventoryPath()
-        if (exclusionsInLane().none { normalized.isInTree(it.path) }) {
+        if (!normalized.isHistoryMetadata() && exclusionsInLane().none { normalized.isInTree(it.path) }) {
             Diagnostics.logger.operation(LogTags.DATABASE, "transaction seedRoot $normalized") {
                 database.transaction { enqueue(normalized, parent = null, modifiedAt = null) }
             }
@@ -340,7 +340,7 @@ class DirectoryRepository internal constructor(
      */
     suspend fun recordListing(dir: Path, listing: DirectoryListing, scannedAt: Long) = io("recordListing transaction $dir") {
         val exclusions = exclusionsInLane()
-        fun protected(path: Path) = exclusions.any { path.isInTree(it.path) }
+        fun protected(path: Path) = path.isHistoryMetadata() || exclusions.any { path.isInTree(it.path) }
         if (protected(dir)) return@io
         Diagnostics.logger.operation(LogTags.DATABASE, "transaction recordListing $dir") { database.transaction {
             val dirKey = dir.toString()

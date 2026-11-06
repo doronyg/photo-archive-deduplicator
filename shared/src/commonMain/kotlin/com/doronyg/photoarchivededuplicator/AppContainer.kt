@@ -19,6 +19,8 @@ import com.doronyg.photoarchivededuplicator.classification.ollamaBaseUrl
 import com.doronyg.photoarchivededuplicator.operations.FileOperationController
 import com.doronyg.photoarchivededuplicator.operations.FileOperationRepository
 import com.doronyg.photoarchivededuplicator.operations.FileOperationService
+import com.doronyg.photoarchivededuplicator.operations.OperationHistoryController
+import com.doronyg.photoarchivededuplicator.operations.history.OperationHistoryStore
 import com.doronyg.photoarchivededuplicator.scan.ScanState
 import io.ktor.client.HttpClient
 import kotlinx.coroutines.CoroutineScope
@@ -85,6 +87,8 @@ class AppContainer internal constructor(
                 if (settings.baseUrl.isBlank() && settings.model.isBlank()) null else settings.context()
             }, admissionBlocked = ::operationBlocked),
         admissionBlocked = ::operationBlocked)
+    internal val operationHistory = OperationHistoryController(appScope, repository, uiPreferences,
+        OperationHistoryStore(filesystemLane, dispatcher = workerDispatcher), admissionBlocked = ::operationBlocked)
 
     internal suspend fun availableOllamaModels(baseUrl: String): List<String> {
         val server = ollamaBaseUrl(baseUrl)

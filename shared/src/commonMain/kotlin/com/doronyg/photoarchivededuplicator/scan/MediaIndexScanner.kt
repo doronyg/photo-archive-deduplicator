@@ -41,13 +41,13 @@ internal class MediaIndexScanner(
     private suspend fun scanRoot(root: Path, onEvent: suspend (ScanEvent) -> Unit) {
         val scanRoot = root.inventoryPath()
         val exclusions = repository.exclusions()
-        if (exclusions.any { scanRoot.isInTree(it.path) }) return
+        if (scanRoot.isHistoryMetadata() || exclusions.any { scanRoot.isInTree(it.path) }) return
         repository.seedRoot(scanRoot)
         val filesByFolder = Diagnostics.logger.operation(LogTags.MEDIA_INDEX, "source.items dispatch-to=$ioDispatcher") {
             withContext(ioDispatcher) { source.items() }
         }
             .map { it.copy(path = it.path.normalized()) }
-            .filter { it.path != scanRoot && it.path.isInTree(scanRoot) &&
+            .filter { !it.path.isHistoryMetadata() && it.path != scanRoot && it.path.isInTree(scanRoot) &&
                 exclusions.none { excluded -> it.path.isInTree(excluded.path) } }
             .groupBy { it.path.parent!! }
         val subfoldersByFolder = subfolderTree(scanRoot, filesByFolder.keys)

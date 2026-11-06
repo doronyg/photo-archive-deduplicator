@@ -53,6 +53,7 @@ internal class DirectoryScanner(
     private val filesystemLane: IoLane = IoLane("filesystem-test", ioDispatcher),
 ) : InventoryScanner {
     override suspend fun startScan(root: Path, onEvent: suspend (ScanEvent) -> Unit) = repository.scanning {
+        if (root.isHistoryMetadata()) return@scanning
         repository.seedRoot(root)
         resumeScan(root.inventoryPath(), onEvent)
     }
@@ -63,6 +64,7 @@ internal class DirectoryScanner(
     }
 
     private suspend fun resumeScan(root: Path, onEvent: suspend (ScanEvent) -> Unit) {
+        if (root.isHistoryMetadata()) return
         repository.resetInterrupted(root)
         onEvent(ScanEvent.Started(pendingDirectories = repository.pendingScanCount(root)))
         while (true) {
@@ -99,7 +101,7 @@ internal class DirectoryScanner(
         val files = mutableListOf<DirectoryListing.Entry>()
         for (child in Diagnostics.logger.operation(LogTags.FILE_SYSTEM, "list $dir") { fileSystem.list(dir) }) {
             currentCoroutineContext().ensureActive()
-            if (exclusions.any { child.isInTree(it.path) }) continue
+            if (child.isHistoryMetadata() || exclusions.any { child.isInTree(it.path) }) continue
             // Entries can vanish between list() and metadata(); skip them
             val metadata = Diagnostics.logger.operation(LogTags.FILE_SYSTEM, "metadataOrNull $child") {
                 fileSystem.metadataOrNull(child)
