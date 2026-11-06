@@ -23,6 +23,12 @@ AND (:currentOnly = 0 OR EXISTS (
     WHERE f.path = s.filePath AND f.directoryPath = s.directoryPath
     AND f.sizeBytes = s.inputSizeBytes
     AND f.modifiedAt IS s.inputModifiedAt AND f.createdAt IS s.inputCreatedAt
+    AND NOT EXISTS (
+        SELECT 1 FROM fileBinRoot b WHERE f.path = b.path OR (
+            substr(f.path, 1, length(b.path)) = b.path
+            AND (substr(b.path, -1) IN ('/', '\') OR substr(f.path, length(b.path) + 1, 1) IN ('/', '\'))
+        )
+    )
 ))
 ORDER BY s.id;
 
@@ -37,6 +43,12 @@ AND (:currentOnly = 0 OR EXISTS (
     WHERE f.path = s.filePath AND f.directoryPath = s.directoryPath
     AND f.sizeBytes = s.inputSizeBytes
     AND f.modifiedAt IS s.inputModifiedAt AND f.createdAt IS s.inputCreatedAt
+    AND NOT EXISTS (
+        SELECT 1 FROM fileBinRoot b WHERE f.path = b.path OR (
+            substr(f.path, 1, length(b.path)) = b.path
+            AND (substr(b.path, -1) IN ('/', '\') OR substr(f.path, length(b.path) + 1, 1) IN ('/', '\'))
+        )
+    )
 ))
 ORDER BY s.id;
 

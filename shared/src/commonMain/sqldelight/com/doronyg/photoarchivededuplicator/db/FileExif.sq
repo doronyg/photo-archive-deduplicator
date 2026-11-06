@@ -22,12 +22,18 @@ CREATE TABLE fileExif (
 selectForPaths:
 SELECT * FROM fileExif
 WHERE filePath IN :paths
-AND (:currentOnly = 0 OR EXISTS (
+AND (:currentOnly = 0 OR (EXISTS (
     SELECT 1 FROM scanFile f
     WHERE f.path = fileExif.filePath AND f.directoryPath = fileExif.directoryPath
     AND f.sizeBytes = fileExif.inputSizeBytes
     AND f.modifiedAt IS fileExif.inputModifiedAt AND f.createdAt IS fileExif.inputCreatedAt
-))
+) AND NOT EXISTS (
+    SELECT 1 FROM fileBinRoot b
+    WHERE fileExif.filePath = b.path OR (
+        substr(fileExif.filePath, 1, length(b.path)) = b.path
+        AND (substr(b.path, -1) IN ('/', '\') OR substr(fileExif.filePath, length(b.path) + 1, 1) IN ('/', '\'))
+    )
+)))
 ORDER BY filePath;
 
 selectSuspectedMatches:
@@ -41,7 +47,7 @@ WITH eligible AS (
         AND (substr(:root, -1) IN ('/', '\') OR substr(f.path, length(:root) + 1, 1) IN ('/', '\'))
     ))
     AND NOT EXISTS (
-        SELECT 1 FROM directoryExclusion e
+        SELECT 1 FROM archiveExclusion e
         WHERE f.path = e.path OR (
             substr(f.path, 1, length(e.path)) = e.path
             AND (substr(e.path, -1) IN ('/', '\') OR substr(f.path, length(e.path) + 1, 1) IN ('/', '\'))

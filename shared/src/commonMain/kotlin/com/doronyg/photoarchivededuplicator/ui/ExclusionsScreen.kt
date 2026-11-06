@@ -90,9 +90,11 @@ fun ExclusionsScreen(repository: DirectoryRepository, scanning: Boolean, modifie
                 Column {
                     Text(exclusion.path.toString())
                     exclusion.reason?.let { Text(it) }
-                    TextButton(enabled = !scanning && !busy, onClick = {
-                        edit { repository.removeExclusion(exclusion.path) }
-                    }) { Text(AppStrings.inventory.removeExclusion(exclusion.path.toString())) }
+                    if (!exclusion.isSystem) {
+                        TextButton(enabled = !scanning && !busy, onClick = {
+                            edit { repository.removeExclusion(exclusion.path) }
+                        }) { Text(AppStrings.inventory.removeExclusion(exclusion.path.toString())) }
+                    }
                 }
             }
         }

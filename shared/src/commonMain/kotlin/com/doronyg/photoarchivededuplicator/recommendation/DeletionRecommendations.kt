@@ -1,5 +1,6 @@
 package com.doronyg.photoarchivededuplicator.recommendation
 
+import com.doronyg.photoarchivededuplicator.classification.DirectoryClassification
 import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificationRecord
 import com.doronyg.photoarchivededuplicator.exif.ExifRecord
 import com.doronyg.photoarchivededuplicator.exif.validatedExifTimestamp
@@ -30,6 +31,9 @@ internal data class DeletionAnalysisSnapshot(
     val directoryClassifications: Map<Path, DirectoryClassificationRecord>,
     val source: DeletionRecommendationSource = DeletionRecommendationSource.SUSPECTED,
 )
+
+internal fun DeletionAnalysisSnapshot.hasProtectedMember(): Boolean =
+    files.any { directoryClassifications[it.directoryPath]?.classification == DirectoryClassification.PROTECTED }
 
 internal data class DeletionReviewFile(
     val advice: FileRecommendation,
@@ -71,6 +75,7 @@ internal class SameDirectoryMetadataProvider : DeletionRecommendationProvider {
     }
 
     fun recommend(snapshot: DeletionAnalysisSnapshot): DeletionRecommendationGroup? {
+        if (snapshot.hasProtectedMember()) return null
         val proposal = snapshot.recommendation
         val files = snapshot.files
         if (files.size < 2 || files.map { it.directoryPath }.distinct().size != 1 ||
@@ -158,7 +163,9 @@ internal suspend fun buildDeletionRecommendationReport(
     }
     val categories = providers.map { provider ->
         task.ensureActive()
-        val groups = provider.recommendations(snapshots.filter { it.source == provider.source })
+        val groups = provider.recommendations(snapshots.filter {
+            it.source == provider.source && !it.hasProtectedMember()
+        })
         require(groups.map { it.id }.distinct().size == groups.size && groups.all { it.id.isNotBlank() }) {
             "Deletion recommendation group IDs must be nonempty and unique within their category."
         }

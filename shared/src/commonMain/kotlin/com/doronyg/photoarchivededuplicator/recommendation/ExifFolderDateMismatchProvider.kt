@@ -1,6 +1,5 @@
 package com.doronyg.photoarchivededuplicator.recommendation
 
-import com.doronyg.photoarchivededuplicator.classification.DirectoryClassification
 import com.doronyg.photoarchivededuplicator.retention.RetentionScorer
 import com.doronyg.photoarchivededuplicator.strings.AppStrings
 import kotlinx.coroutines.currentCoroutineContext
@@ -26,9 +25,7 @@ internal class ExifFolderDateMismatchProvider : DeletionRecommendationProvider {
 
     fun recommend(snapshot: DeletionAnalysisSnapshot): DeletionRecommendationGroup? {
         val files = snapshot.files
-        if (files.any {
-            snapshot.directoryClassifications[it.directoryPath]?.classification == DirectoryClassification.PROTECTED
-        }) return null
+        if (snapshot.hasProtectedMember()) return null
         if (snapshot.source != source || files.size < 2 ||
             files.map { it.path }.distinct().size != files.size ||
             snapshot.recommendation.action != RecommendationAction.KEEP_ONE) return null

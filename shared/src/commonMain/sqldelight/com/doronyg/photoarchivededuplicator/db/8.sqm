@@ -1,0 +1,25 @@
+CREATE TABLE fileBinRoot (
+    path TEXT NOT NULL PRIMARY KEY,
+    active INTEGER NOT NULL CHECK(active IN (0, 1)),
+    registeredAt INTEGER NOT NULL
+);
+
+CREATE UNIQUE INDEX fileBinRootActiveIndex ON fileBinRoot(active) WHERE active = 1;
+
+CREATE VIEW archiveExclusion AS
+SELECT path FROM directoryExclusion
+UNION
+SELECT path FROM fileBinRoot;
+
+CREATE TABLE fileOperationProposal (
+    id TEXT NOT NULL PRIMARY KEY,
+    createdAt INTEGER NOT NULL,
+    validatedAt INTEGER NOT NULL,
+    archiveRoot TEXT NOT NULL,
+    binRoot TEXT NOT NULL,
+    validationStatus TEXT NOT NULL,
+    groupCount INTEGER NOT NULL,
+    candidateCount INTEGER NOT NULL,
+    candidateBytes INTEGER NOT NULL,
+    snapshotJson TEXT NOT NULL
+);

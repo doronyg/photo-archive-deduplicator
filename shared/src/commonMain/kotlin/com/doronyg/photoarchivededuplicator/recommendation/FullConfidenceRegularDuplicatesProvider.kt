@@ -1,6 +1,5 @@
 package com.doronyg.photoarchivededuplicator.recommendation
 
-import com.doronyg.photoarchivededuplicator.classification.DirectoryClassification
 import com.doronyg.photoarchivededuplicator.retention.RetentionScorer
 import com.doronyg.photoarchivededuplicator.strings.AppStrings
 import kotlinx.coroutines.currentCoroutineContext
@@ -24,6 +23,7 @@ internal class FullConfidenceRegularDuplicatesProvider : DeletionRecommendationP
     }
 
     fun recommend(snapshot: DeletionAnalysisSnapshot): DeletionRecommendationGroup? {
+        if (snapshot.hasProtectedMember()) return null
         val files = snapshot.files
         val proposal = snapshot.recommendation
         if (snapshot.source != source || files.size < 2 ||
@@ -36,11 +36,8 @@ internal class FullConfidenceRegularDuplicatesProvider : DeletionRecommendationP
             if (currentRecommendationScore(file, exif, snapshot.retention[file.path], scorer) == null) return null
         }
 
-        val protectedPaths = files.filter {
-            snapshot.directoryClassifications[it.directoryPath]?.classification == DirectoryClassification.PROTECTED
-        }.map { it.path }.toSet()
         val safe = enforceRetentionPlanSafety(proposal, files,
-            proposal.mustPreserve.map { it.directoryPath }.toSet(), protectedPaths)
+            proposal.mustPreserve.map { it.directoryPath }.toSet())
         if (safe.action !in setOf(RecommendationAction.KEEP_ONE, RecommendationAction.KEEP_MULTIPLE) ||
             safe.redundantCandidates.isEmpty() ||
             safe.files.values.any { it.role == FileRecommendationRole.REVIEW }) return null

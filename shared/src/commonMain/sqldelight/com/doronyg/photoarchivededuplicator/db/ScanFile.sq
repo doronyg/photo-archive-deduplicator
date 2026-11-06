@@ -29,8 +29,26 @@ SELECT path FROM scanFile WHERE directoryPath = :directoryPath;
 selectByPath:
 SELECT * FROM scanFile WHERE path = :path;
 
+selectVisibleByPath:
+SELECT * FROM scanFile
+WHERE path = :path AND NOT EXISTS (
+    SELECT 1 FROM fileBinRoot b
+    WHERE scanFile.path = b.path OR (
+        substr(scanFile.path, 1, length(b.path)) = b.path
+        AND (substr(b.path, -1) IN ('/', '\') OR substr(scanFile.path, length(b.path) + 1, 1) IN ('/', '\'))
+    )
+);
+
 selectAll:
-SELECT * FROM scanFile ORDER BY path;
+SELECT * FROM scanFile
+WHERE NOT EXISTS (
+    SELECT 1 FROM fileBinRoot b
+    WHERE scanFile.path = b.path OR (
+        substr(scanFile.path, 1, length(b.path)) = b.path
+        AND (substr(b.path, -1) IN ('/', '\') OR substr(scanFile.path, length(b.path) + 1, 1) IN ('/', '\'))
+    )
+)
+ORDER BY path;
 
 deleteByPath:
 DELETE FROM scanFile WHERE path = :path;
@@ -39,18 +57,40 @@ deleteInDirectory:
 DELETE FROM scanFile WHERE directoryPath = :directoryPath;
 
 selectInDirectory:
-SELECT * FROM scanFile WHERE directoryPath = :directoryPath ORDER BY name;
+SELECT * FROM scanFile
+WHERE directoryPath = :directoryPath AND NOT EXISTS (
+    SELECT 1 FROM fileBinRoot b
+    WHERE scanFile.path = b.path OR (
+        substr(scanFile.path, 1, length(b.path)) = b.path
+        AND (substr(b.path, -1) IN ('/', '\') OR substr(scanFile.path, length(b.path) + 1, 1) IN ('/', '\'))
+    )
+)
+ORDER BY name;
 
 selectPathsInTree:
 SELECT path FROM scanFile
-WHERE :root IS NULL OR directoryPath = :root OR (
+WHERE (:root IS NULL OR directoryPath = :root OR (
     substr(directoryPath, 1, length(:root)) = :root
     AND (substr(:root, -1) IN ('/', '\') OR substr(directoryPath, length(:root) + 1, 1) IN ('/', '\'))
+))
+AND NOT EXISTS (
+    SELECT 1 FROM fileBinRoot b
+    WHERE scanFile.path = b.path OR (
+        substr(scanFile.path, 1, length(b.path)) = b.path
+        AND (substr(b.path, -1) IN ('/', '\') OR substr(scanFile.path, length(b.path) + 1, 1) IN ('/', '\'))
+    )
 )
 ORDER BY path COLLATE BINARY;
 
 selectTotals:
-SELECT count(*) AS fileCount, coalesce(sum(sizeBytes), 0) AS totalBytes FROM scanFile;
+SELECT count(*) AS fileCount, coalesce(sum(sizeBytes), 0) AS totalBytes FROM scanFile
+WHERE NOT EXISTS (
+    SELECT 1 FROM fileBinRoot b
+    WHERE scanFile.path = b.path OR (
+        substr(scanFile.path, 1, length(b.path)) = b.path
+        AND (substr(b.path, -1) IN ('/', '\') OR substr(scanFile.path, length(b.path) + 1, 1) IN ('/', '\'))
+    )
+);
 
 selectEligibleCountsByExtension:
 SELECT coalesce(lower(CASE WHEN f.extension IS NULL AND substr(f.name, 1, 1) = '.'
@@ -58,7 +98,7 @@ SELECT coalesce(lower(CASE WHEN f.extension IS NULL AND substr(f.name, 1, 1) = '
     count(*) AS fileCount
 FROM scanFile f
 WHERE NOT EXISTS (
-    SELECT 1 FROM directoryExclusion e
+    SELECT 1 FROM archiveExclusion e
     WHERE f.path = e.path OR (
         substr(f.path, 1, length(e.path)) = e.path
         AND (substr(e.path, -1) IN ('/', '\') OR substr(f.path, length(e.path) + 1, 1) IN ('/', '\'))
@@ -76,7 +116,7 @@ WITH eligible AS (
         AND (substr(:root, -1) IN ('/', '\') OR substr(f.path, length(:root) + 1, 1) IN ('/', '\'))
     ))
     AND NOT EXISTS (
-        SELECT 1 FROM directoryExclusion e
+        SELECT 1 FROM archiveExclusion e
         WHERE f.path = e.path OR (
             substr(f.path, 1, length(e.path)) = e.path
             AND (substr(e.path, -1) IN ('/', '\') OR substr(f.path, length(e.path) + 1, 1) IN ('/', '\'))
@@ -100,7 +140,7 @@ WITH eligible AS (
         AND (substr(:root, -1) IN ('/', '\') OR substr(f.path, length(:root) + 1, 1) IN ('/', '\'))
     ))
     AND NOT EXISTS (
-        SELECT 1 FROM directoryExclusion e
+        SELECT 1 FROM archiveExclusion e
         WHERE f.path = e.path OR (
             substr(f.path, 1, length(e.path)) = e.path
             AND (substr(e.path, -1) IN ('/', '\') OR substr(f.path, length(e.path) + 1, 1) IN ('/', '\'))

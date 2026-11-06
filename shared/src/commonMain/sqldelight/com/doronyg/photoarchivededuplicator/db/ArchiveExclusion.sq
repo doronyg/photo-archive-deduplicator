@@ -1,0 +1,4 @@
+CREATE VIEW archiveExclusion AS
+SELECT path FROM directoryExclusion
+UNION
+SELECT path FROM fileBinRoot;

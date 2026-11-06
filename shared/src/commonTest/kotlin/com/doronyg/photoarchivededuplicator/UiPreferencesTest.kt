@@ -62,6 +62,17 @@ internal val allUiChoices = UiChoices(
 @OptIn(ExperimentalCoroutinesApi::class)
 class UiPreferencesTest {
     @Test
+    fun fileOperationsTabRoundTripsWithoutAnArchiveRootSetting() {
+        val choices = allUiChoices.copy(selectedTab = UiTab.FILE_OPERATIONS)
+        assertEquals("File Operations", UiTab.FILE_OPERATIONS.title)
+        assertEquals("FILE_OPERATIONS", encodeUiChoices(choices)["selectedTab"])
+        assertEquals(choices, decodeUiChoices(encodeUiChoices(choices)))
+        assertFalse("fileOperationArchiveRoot" in encodeUiChoices(choices))
+        assertEquals(UiChoices(), decodeUiChoices(mapOf("fileOperationArchiveRoot" to "/old")))
+        assertEquals(UiTab.SCAN, decodeUiChoices(emptyMap()).selectedTab)
+    }
+
+    @Test
     fun suspectedDuplicatesTabIsAdjacentAndPersistsByNameWithoutChangingExistingSelections() {
         assertEquals(UiTab.SUSPECTED_DUPLICATES, UiTab.entries[UiTab.DUPLICATES.ordinal + 1])
         for (tab in UiTab.entries) {

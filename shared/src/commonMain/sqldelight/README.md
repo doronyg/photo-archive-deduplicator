@@ -175,6 +175,44 @@ can reclaim free space. Do not run it during a scan or inside a schema migration
 The upgrade needs temporary disk space for the replacement score/factor tables;
 compaction also needs space for a rebuilt database.
 
+### DeduplicatorGarbageBin and saved dry runs (version 9)
+
+Migration `8.sqm` adds registered Bin roots and saved file-operation proposals.
+It does not change existing inventory, score, EXIF or classification records.
+Registered roots are mandatory exclusions even inside scanned directories.
+Changing the active root retains previous roots as exclusions so older proposals
+and future managed files cannot re-enter archive results. Ordinary user exclusions
+remain separate; their previous browsing behavior is unchanged.
+
+The File Operations tab configures the full Bin path and creates saved proposals
+from selected deletion recommendations. Each proposal captures the Bin root,
+complete group evidence and exact proposed destinations. No source archive root
+needs to be configured. Destinations preserve the full original path beneath the
+Bin, for example `/Photos/Trip/a.jpg` becomes `<Bin>/Photos/Trip/a.jpg`; Windows
+drive letters and network share paths are preserved without the drive colon.
+No operation or file IDs are inserted into directory names. Existing destinations
+are reported as conflicts.
+
+Dry runs perform metadata reads only. They neither create the Bin nor read file
+contents, extract EXIF, rescore files, call Ollama, move files or delete anything.
+Passed checks describe observations at the recorded time, not approval to move.
+Snapshots use a versioned JSON payload; history summaries load independently of
+the larger evidence payload. Stored proposals remain unchanged when configuration,
+cached evidence or recommendation algorithms change.
+
+Migration `9.sqm` (version 10) makes the legacy proposal archive-root field
+optional without changing any existing proposal, mapping or evidence. New proposals
+do not use that field. Missing Bin directories and missing parents do not block
+dry runs; existing files, symlinks and collisions still produce findings. Creating
+directories belongs to a future explicitly approved real run. The UI suggests an
+editable Bin location, shows stay/move outcomes, collapses evidence by default and
+can copy the complete result without exporting raw evidence JSON.
+
+AI review, approval, native move-capability checks, actual moves and restoration
+are not implemented in this increment. A future executor must revalidate after
+AI review and obtain explicit approval. Metadata alone does not establish identical
+contents, and no full-file hashing is introduced.
+
 ## Suspected duplicates
 
 The adjacent **Suspected duplicates** tab uses SQL size buckets rather than exact

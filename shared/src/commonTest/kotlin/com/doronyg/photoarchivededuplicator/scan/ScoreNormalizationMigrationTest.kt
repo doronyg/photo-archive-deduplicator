@@ -40,8 +40,8 @@ class ScoreNormalizationMigrationTest {
                 val upgradedGuarded = IoGuardedDriver(upgraded, io)
                 withContext(io) {
                     upgradedGuarded.execute(null, "PRAGMA foreign_keys = ON", 0).await()
-                    assertEquals(8L, FilesDatabase.Schema.version)
-                    assertEquals(listOf(listOf("8")), rows(upgradedGuarded, "PRAGMA user_version", 1))
+                    assertEquals(10L, FilesDatabase.Schema.version)
+                    assertEquals(listOf(listOf("10")), rows(upgradedGuarded, "PRAGMA user_version", 1))
                     assertEquals(before.first, rows(upgradedGuarded, """
                         SELECT s.id, s.filePath, s.directoryPath, s.inputSizeBytes, s.inputModifiedAt,
                             s.inputCreatedAt, p.scoreType, p.algorithmId, p.algorithmVersion,
@@ -97,7 +97,7 @@ class ScoreNormalizationMigrationTest {
         try {
             createReleasedVersionSeven(driver)
             FilesDatabase.Schema.migrate(driver, 7, 8).await()
-            assertEquals(8L, FilesDatabase.Schema.version)
+            assertEquals(10L, FilesDatabase.Schema.version)
             for (table in listOf("scoreProfile", "factorDefinition", "fileScore", "fileScoreFactor")) {
                 assertEquals(listOf(listOf("0")), rows(driver, "SELECT COUNT(*) FROM $table", 1))
             }

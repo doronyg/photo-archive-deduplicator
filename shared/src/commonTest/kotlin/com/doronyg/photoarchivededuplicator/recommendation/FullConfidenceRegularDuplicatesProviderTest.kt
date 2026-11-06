@@ -142,14 +142,19 @@ class FullConfidenceRegularDuplicatesProviderTest {
     }
 
     @Test
-    fun protectedFilesCannotBeCandidatesButCanRemainSurvivors() {
+    fun anyProtectedMemberExcludesEntireGroupIncludingUnshownMembers() {
         val valid = snapshot()
-        assertNull(provider.recommend(valid.copy(directoryClassifications = mapOf(backup.directoryPath to label(backup)))))
-        val protectedKeeper = valid.copy(directoryClassifications = mapOf(keeper.directoryPath to label(keeper)))
-        val result = assertNotNull(provider.recommend(protectedKeeper))
-        assertEquals(keeper.path, result.survivors.single().advice.file.path)
-        assertEquals(DirectoryClassification.PROTECTED, result.survivors.single().directoryClassification?.classification)
-        assertEquals(listOf(backup), result.candidates.map { it.advice.file })
+        for (file in valid.files) {
+            assertNull(provider.recommend(valid.copy(
+                directoryClassifications = mapOf(file.directoryPath to label(file)))))
+        }
+        val third = file("/Photos/Family")
+        val complete = snapshot(valid.files + third)
+        assertNotNull(provider.recommend(complete))
+        assertNull(provider.recommend(complete.copy(
+            directoryClassifications = mapOf(third.directoryPath to label(third)))))
+        assertNull(provider.recommend(valid.copy(files = valid.files + third,
+            directoryClassifications = mapOf(third.directoryPath to label(third)))))
     }
 
     @Test
@@ -162,6 +167,12 @@ class FullConfidenceRegularDuplicatesProviderTest {
         assertTrue(report.categories.all { it.summary.groupCount == 1L })
         assertEquals(1L, report.summary.groupCount)
         assertEquals(FileStatistics(1, 80_000), report.summary.candidates)
+        for (file in input.files) {
+            val protectedReport = buildDeletionRecommendationReport(listOf(input.copy(
+                directoryClassifications = mapOf(file.directoryPath to label(file)))), listOf(mismatch, provider))
+            assertTrue(protectedReport.categories.all { it.groups.isEmpty() })
+            assertEquals(DeletionRecommendationSummary(), protectedReport.summary)
+        }
         val empty = buildDeletionRecommendationReport(
             listOf(input.copy(source = DeletionRecommendationSource.SUSPECTED)), listOf(provider))
         assertEquals(provider.category, empty.categories.single().category)

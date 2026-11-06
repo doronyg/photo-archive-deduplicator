@@ -1,0 +1,28 @@
+CREATE TABLE fileOperationProposal (
+    id TEXT NOT NULL PRIMARY KEY,
+    createdAt INTEGER NOT NULL,
+    validatedAt INTEGER NOT NULL,
+    archiveRoot TEXT,
+    binRoot TEXT NOT NULL,
+    validationStatus TEXT NOT NULL,
+    groupCount INTEGER NOT NULL,
+    candidateCount INTEGER NOT NULL,
+    candidateBytes INTEGER NOT NULL,
+    snapshotJson TEXT NOT NULL
+);
+
+insertProposal:
+INSERT INTO fileOperationProposal(
+    id, createdAt, validatedAt, archiveRoot, binRoot, validationStatus,
+    groupCount, candidateCount, candidateBytes, snapshotJson
+) VALUES (
+    :id, :createdAt, :validatedAt, :archiveRoot, :binRoot, :validationStatus,
+    :groupCount, :candidateCount, :candidateBytes, :snapshotJson
+);
+
+selectRecent:
+SELECT id, createdAt, archiveRoot, binRoot, validationStatus, groupCount, candidateCount, candidateBytes
+FROM fileOperationProposal ORDER BY createdAt DESC, id LIMIT :limit;
+
+selectById:
+SELECT * FROM fileOperationProposal WHERE id = :id;

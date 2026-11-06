@@ -1,5 +1,6 @@
 package com.doronyg.photoarchivededuplicator.scan
 
+import app.cash.sqldelight.db.SqlDriver
 import com.doronyg.photoarchivededuplicator.db.FilesDatabase
 import com.doronyg.photoarchivededuplicator.UiChoices
 import com.doronyg.photoarchivededuplicator.allUiChoices
@@ -39,7 +40,7 @@ class SchemaMigrationTest {
                     INSERT INTO scanFile VALUES
                     ('/archive/existing.jpg', '/archive', 'existing.jpg', 'jpg', 42, 456, 789)
                 """.trimIndent(), 0).await()
-                assertEquals(8L, FilesDatabase.Schema.version)
+                assertEquals(10L, FilesDatabase.Schema.version)
                 guarded.execute(null, "PRAGMA user_version = 1", 0).await()
             }
             // Uses the same schema constructor as production desktop. Android's driver
@@ -102,18 +103,12 @@ class SchemaMigrationTest {
                     )""",
                     "PRAGMA user_version = 2",
                 )) guarded.execute(null, statement, 0).await()
+                seedHistoricalInventory(guarded, "existing.jpg")
             }
-            val repository = DirectoryRepository(createFilesDatabase(guarded), io)
-            repository.beginScanSession(root)
-            repository.recordListing(root, DirectoryListing(emptyList(), listOf(
-                DirectoryListing.Entry(root / "existing.jpg", 42, 456, 100),
-            )), 789)
-            repository.addExclusion(root / "private", "Keep out")
-            repository.checkpointScanSession(ScanSessionRecord(root, 12_345, finished = true))
-            val directories = repository.allDirectories()
-            val files = repository.allFiles()
-            val exclusions = repository.exclusions()
-            val session = repository.currentScanSession()
+            val directories = listOf(DirectoryRecord(root, null, DirectoryStatus.COMPLETED, 0, 1, null, 789))
+            val files = listOf(FileRecord(root / "existing.jpg", root, "existing.jpg", "jpg", 42, 456, 789, 100))
+            val exclusions = listOf(DirectoryExclusion(root / "private", "Keep out"))
+            val session = ScanSessionRecord(root, 12_345, finished = true)
 
             val reopenedDriver = withContext(io) { createMigrationTestDriver(migrate = true) }
             try {
@@ -146,16 +141,11 @@ class SchemaMigrationTest {
                 for (statement in historicalVersionOneSchema) guarded.execute(null, statement, 0).await()
                 FilesDatabase.Schema.migrate(guarded, 1, 6).await()
                 guarded.execute(null, "PRAGMA user_version = 6", 0).await()
+                seedHistoricalInventory(guarded, "雪.jpg")
             }
             val repository = DirectoryRepository(createFilesDatabase(guarded), io)
-            repository.beginScanSession(root)
-            repository.recordListing(root, DirectoryListing(emptyList(), listOf(
-                DirectoryListing.Entry(root / "雪.jpg", 42, 456, 100),
-            )), 789)
-            repository.addExclusion(root / "private", "Keep out")
-            repository.checkpointScanSession(ScanSessionRecord(root, 12_345, finished = true))
             repository.saveUiChoices(allUiChoices)
-            val file = repository.allFiles().single()
+            val file = FileRecord(root / "雪.jpg", root, "雪.jpg", "jpg", 42, 456, 789, 100)
             val exif = ExifRecord(ExifInput.from(file), ExifReadResult(ExifStatus.NO_EXIF), 800,
                 readerId = "historical", readerVersion = "1")
             val score = FileScore(FileScoreInput.from(file), ScoreIdentity("retention", "rules", "1", "default"),
@@ -176,14 +166,14 @@ class SchemaMigrationTest {
                 guarded.execute(null,
                     "INSERT INTO fileScoreFactor VALUES (17, 0, 'metadata', 0.5, 'Preserved')", 0).await()
             }
-            val directories = repository.allDirectories()
-            val files = repository.allFiles()
-            val exclusions = repository.exclusions()
-            val session = repository.currentScanSession()
+            val directories = listOf(DirectoryRecord(root, null, DirectoryStatus.COMPLETED, 0, 1, null, 789))
+            val files = listOf(file)
+            val exclusions = listOf(DirectoryExclusion(root / "private", "Keep out"))
+            val session = ScanSessionRecord(root, 12_345, finished = true)
             val reopenedDriver = withContext(io) { createMigrationTestDriver(migrate = true) }
             try {
                 val reopened = DirectoryRepository(createFilesDatabase(IoGuardedDriver(reopenedDriver, io)), io)
-                assertEquals(8L, FilesDatabase.Schema.version)
+                assertEquals(10L, FilesDatabase.Schema.version)
                 assertEquals(directories, reopened.allDirectories())
                 assertEquals(files, reopened.allFiles())
                 assertEquals(exclusions, reopened.exclusions())
@@ -204,6 +194,24 @@ class SchemaMigrationTest {
             driver.close()
         }
     }
+}
+
+private suspend fun seedHistoricalInventory(driver: SqlDriver, fileName: String) {
+    driver.execute(null, """
+        INSERT INTO scanDirectory(path, parentPath, status, retryCount, fileCount, modifiedAt, lastScanned)
+        VALUES ('/archive', NULL, 'COMPLETED', 0, 1, NULL, 789)
+    """.trimIndent(), 0).await()
+    driver.execute(null, """
+        INSERT INTO scanFile(path, directoryPath, name, extension, sizeBytes, modifiedAt, createdAt, lastScanned)
+        VALUES (?, '/archive', ?, 'jpg', 42, 456, 100, 789)
+    """.trimIndent(), 2) {
+        bindString(0, "/archive/$fileName")
+        bindString(1, fileName)
+    }.await()
+    driver.execute(null, "INSERT INTO directoryExclusion VALUES ('/archive/private', 'Keep out')", 0).await()
+    driver.execute(null, """
+        INSERT INTO scanSession(root, activeMillis, selected, finished) VALUES ('/archive', 12345, 1, 1)
+    """.trimIndent(), 0).await()
 }
 
 internal val historicalVersionOneSchema = listOf(

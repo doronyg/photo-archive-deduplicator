@@ -70,7 +70,7 @@ data class FileRecord(
     val createdAt: Long? = null,
 )
 
-data class DirectoryExclusion(val path: Path, val reason: String?)
+data class DirectoryExclusion(val path: Path, val reason: String?, val isSystem: Boolean = false)
 data class DuplicateCandidateGroup(val name: String, val sizeBytes: Long, val files: List<FileRecord>)
 data class ScanSessionRecord(val root: Path, val activeMillis: Long, val finished: Boolean = false)
 
@@ -116,6 +116,7 @@ class DirectoryRepository internal constructor(
     private val directories = database.scanDirectoryQueries
     private val files = database.scanFileQueries
     private val excluded = database.directoryExclusionQueries
+    private val bins = database.fileBinRootQueries
     private val scanSession = Mutex()
 
     internal suspend fun loadUiChoices(): UiChoices = io("load UI choices") { loadUiChoicesInLane(database) }
@@ -210,14 +211,48 @@ class DirectoryRepository internal constructor(
     suspend fun exclusions(): List<DirectoryExclusion> = io("exclusions") { exclusionsInLane() }
 
     private suspend fun exclusionsInLane(): List<DirectoryExclusion> =
-        excluded.selectAll().awaitAsList().map { DirectoryExclusion(it.path.toPath(), it.reason) }
+        (registeredBinRootsInLane().map { DirectoryExclusion(it, "DeduplicatorGarbageBin", isSystem = true) } +
+            excluded.selectAll().awaitAsList().map { DirectoryExclusion(it.path.toPath(), it.reason) })
+            .distinctBy { it.path }
+            .sortedBy { it.path.toString() }
+
+    suspend fun binRoot(): Path? = io("binRoot") { bins.selectActive().awaitAsOneOrNull()?.toPath() }
+
+    suspend fun registeredBinRoots(): List<Path> = io("registeredBinRoots") { registeredBinRootsInLane() }
+
+    private suspend fun registeredBinRootsInLane(): List<Path> =
+        bins.selectAll().awaitAsList().map { it.toPath() }
+
+    suspend fun configureBinRoot(path: Path, registeredAt: Long): Unit = editExclusions("configureBinRoot $path") {
+        val normalized = path.inventoryPath()
+        require(normalized.parent != null) { "The Bin cannot be a filesystem root." }
+        val knownRoots = directories.selectScanRoots().awaitAsList().map { it.toPath() }
+        require(knownRoots.none { it.isInTree(normalized) }) {
+            "The Bin cannot equal or contain a known scan root."
+        }
+        database.transaction {
+            bins.deactivateAll()
+            bins.register(normalized.toString(), registeredAt)
+            bins.activate(normalized.toString())
+        }
+    }
+
+    private suspend fun requireOrdinaryExclusion(path: Path) {
+        require(path !in registeredBinRootsInLane()) {
+            "DeduplicatorGarbageBin is a mandatory system exclusion and cannot be edited or removed."
+        }
+    }
 
     suspend fun addExclusion(path: Path, reason: String? = null) = editExclusions("addExclusion $path") {
-        excluded.put(path.inventoryPath().toString(), reason?.trim()?.takeIf { it.isNotEmpty() })
+        val normalized = path.inventoryPath()
+        requireOrdinaryExclusion(normalized)
+        excluded.put(normalized.toString(), reason?.trim()?.takeIf { it.isNotEmpty() })
     }
 
     suspend fun removeExclusion(path: Path) = editExclusions("removeExclusion $path") {
-        excluded.remove(path.inventoryPath().toString())
+        val normalized = path.inventoryPath()
+        requireOrdinaryExclusion(normalized)
+        excluded.remove(normalized.toString())
     }
 
     suspend fun isExcluded(path: Path): Boolean = exclusions().any { path.isInTree(it.path) }
@@ -381,7 +416,7 @@ class DirectoryRepository internal constructor(
     }
 
     suspend fun directoriesWithStatus(status: DirectoryStatus): List<DirectoryRecord> = io("directoriesWithStatus $status") {
-        directories.selectWithStatus(status).awaitAsList().map { it.toRecord() }
+        directories.selectWithStatus(status, mapper = ::ScanDirectory).awaitAsList().map { it.toRecord() }
     }
 
     suspend fun summary(): InventorySummary = io("summary") {
@@ -396,15 +431,15 @@ class DirectoryRepository internal constructor(
     suspend fun directory(path: Path): DirectoryRecord? = io("directory $path") { directoryInLane(path) }
 
     private suspend fun directoryInLane(path: Path): DirectoryRecord? =
-        directories.selectByPath(path.toString()).awaitAsOneOrNull()?.toRecord()
+        directories.selectVisibleByPath(path.toString(), mapper = ::ScanDirectory).awaitAsOneOrNull()?.toRecord()
 
     suspend fun allDirectories(): List<DirectoryRecord> = io("allDirectories") { allDirectoriesInLane() }
 
     private suspend fun allDirectoriesInLane(): List<DirectoryRecord> =
-        directories.selectAll().awaitAsList().map { it.toRecord() }
+        directories.selectAll(mapper = ::ScanDirectory).awaitAsList().map { it.toRecord() }
 
     suspend fun file(path: Path): FileRecord? = io("file $path") {
-        files.selectByPath(path.toString()).awaitAsOneOrNull()?.toRecord()
+        files.selectVisibleByPath(path.toString()).awaitAsOneOrNull()?.toRecord()
     }
 
     suspend fun allFiles(): List<FileRecord> = io("allFiles") {

@@ -1,5 +1,6 @@
 package com.doronyg.photoarchivededuplicator.recommendation
 
+import com.doronyg.photoarchivededuplicator.classification.*
 import com.doronyg.photoarchivededuplicator.exif.*
 import com.doronyg.photoarchivededuplicator.retention.*
 import com.doronyg.photoarchivededuplicator.scan.FileRecord
@@ -33,6 +34,28 @@ class DeletionRecommendationsTest {
         return DeletionAnalysisSnapshot(files, result, exif, retention, emptyMap())
     }
     private val files = listOf(file("/Photos/Family", "IMG.jpg"), file("/Photos/Family", "IMG-001.jpg"))
+
+    @Test
+    fun protectedClassificationRejectsStrongExistingDecisionInDirectAndReportPaths() = runTest {
+        val valid = snapshot(files)
+        val provider = SameDirectoryMetadataProvider()
+        assertNotNull(provider.recommend(valid))
+        val directory = files.first().directoryPath
+        val record = DirectoryClassificationRecord(directory, directory.toString(),
+            DirectoryClassification.PROTECTED, OllamaSettings("http://ollama.test", "model").context(), 5)
+        val protected = valid.copy(directoryClassifications = mapOf(directory to record))
+        assertNull(provider.recommend(protected))
+        val future = object : DeletionRecommendationProvider {
+            override val category = DeletionRecommendationCategory("future", "Future", "Future category")
+            override suspend fun recommendations(snapshots: List<DeletionAnalysisSnapshot>): List<DeletionRecommendationGroup> {
+                assertTrue(snapshots.isEmpty(), "Registry must not pass protected groups to any category")
+                return emptyList()
+            }
+        }
+        val report = buildDeletionRecommendationReport(listOf(protected), listOf(provider, future))
+        assertTrue(report.categories.all { it.groups.isEmpty() })
+        assertEquals(DeletionRecommendationSummary(), report.summary)
+    }
 
     @Test
     fun sameDirectoryProviderPreservesEngineSurvivorDependenciesAndRealExplanations() {

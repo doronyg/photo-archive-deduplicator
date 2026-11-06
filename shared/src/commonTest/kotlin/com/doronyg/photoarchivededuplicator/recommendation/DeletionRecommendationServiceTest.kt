@@ -102,13 +102,22 @@ class DeletionRecommendationServiceTest {
             DirectoryClassification.PROTECTED, profile, 5))
         f.repository.saveDirectoryClassification(DirectoryClassificationRecord(family, family.toString(),
             DirectoryClassification.BACKUP, profile.copy(model = "other-model"), 6))
-        val statements = f.driver.statements.size
         f.fs.onBlockingCall = { error("Review screen must not access files") }
-        val report = DeletionRecommendationService(f.repository, retention, f.dispatcher, profile).load()
+        val service = DeletionRecommendationService(f.repository, retention, f.dispatcher, profile)
+        val protectedStatements = f.driver.statements.size
+        val protectedReport = service.load()
+        assertTrue(protectedReport.categories.all { it.groups.isEmpty() })
+        assertEquals(DeletionRecommendationSummary(), protectedReport.summary)
+        assertTrue(f.driver.statements.drop(protectedStatements).all { it.startsWith("SELECT") || it.startsWith("WITH") })
+        assertEquals(before, retention.storedSuspected(source))
+        f.repository.saveDirectoryClassification(DirectoryClassificationRecord(family, family.toString(),
+            DirectoryClassification.PREFERRED, profile, 7))
+        val statements = f.driver.statements.size
+        val report = service.load()
         val group = report.categories.single { it.category.id == "same-directory-metadata" }.groups.single()
         assertEquals(family / "IMG.jpg", group.survivors.single().advice.file.path)
         assertEquals(family / "IMG-001.jpg", group.candidates.single().advice.file.path)
-        assertEquals(DirectoryClassification.PROTECTED, group.survivors.single().directoryClassification?.classification)
+        assertEquals(DirectoryClassification.PREFERRED, group.survivors.single().directoryClassification?.classification)
         assertEquals(FileStatistics(1, 120_000), report.summary.candidates)
         assertTrue(f.driver.statements.drop(statements).all { it.startsWith("SELECT") || it.startsWith("WITH") })
         assertEquals(before, retention.storedSuspected(source))

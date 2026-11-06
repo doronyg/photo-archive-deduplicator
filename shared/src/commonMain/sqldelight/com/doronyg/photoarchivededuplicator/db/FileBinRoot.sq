@@ -1,0 +1,22 @@
+CREATE TABLE fileBinRoot (
+    path TEXT NOT NULL PRIMARY KEY,
+    active INTEGER NOT NULL CHECK(active IN (0,1)),
+    registeredAt INTEGER NOT NULL
+);
+
+CREATE UNIQUE INDEX fileBinRootActiveIndex ON fileBinRoot(active) WHERE active=1;
+
+selectActive:
+SELECT path FROM fileBinRoot WHERE active = 1;
+
+selectAll:
+SELECT path FROM fileBinRoot ORDER BY path;
+
+deactivateAll:
+UPDATE fileBinRoot SET active = 0 WHERE active = 1;
+
+register:
+INSERT OR IGNORE INTO fileBinRoot(path, active, registeredAt) VALUES (:path, 0, :registeredAt);
+
+activate:
+UPDATE fileBinRoot SET active = 1 WHERE path = :path;

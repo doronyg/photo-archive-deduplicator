@@ -742,6 +742,24 @@ review groups; the UI does not switch on category IDs. Additional providers can
 use different rules, explanations and multiple survivors without changing the
 presentation. Providers select regular or suspected duplicate evidence; the service
 loads only requested sources and keeps their complete group decisions separate.
+
+#### File Operations: saved dry-run proposals
+
+The configurable DeduplicatorGarbageBin preserves each file's full original path
+beneath the Bin, with no source archive root to configure. Operation/file IDs
+exist only in the database, not the Bin layout. Registered Bin roots are mandatory archive exclusions, including
+already inventoried content and roots inside the archive. Previous roots remain
+excluded after configuration changes. Whole groups containing a PROTECTED member
+are excluded from every deletion category.
+
+Users select existing recommendations and prepare a saved proposal in the File
+Operations tab. It records exact candidates/destinations, original survivors,
+complete group evidence and metadata-validation findings. It performs no content
+reads, hashing, rescoring, AI calls or filesystem writes. AI review remains Not
+reviewed, and approval, moves, restoration and permanent deletion are unavailable.
+Missing Bin directories do not block a dry run. The UI suggests an editable Bin
+location, presents each file's suggested stay/move destination, provides copyable
+results and keeps saved evidence collapsed until opened.
 Provider-supplied file evidence is rendered generically without category-specific
 UI branches. Extend the input datasets only when a future category requires it.
 

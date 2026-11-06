@@ -15,6 +15,8 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Card
+import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -41,6 +43,7 @@ import com.doronyg.photoarchivededuplicator.UiPreferences
 import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificationController
 import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificationJobState
 import com.doronyg.photoarchivededuplicator.exif.ExifQueueController
+import com.doronyg.photoarchivededuplicator.operations.SelectedDeletionGroup
 import com.doronyg.photoarchivededuplicator.recommendation.DeletionCategoryResults
 import com.doronyg.photoarchivededuplicator.recommendation.DeletionRecommendationGroup
 import com.doronyg.photoarchivededuplicator.recommendation.DeletionRecommendationReport
@@ -68,6 +71,14 @@ internal fun deletionGroupSummary(group: DeletionRecommendationGroup): DeletionR
         total.addFile(file.advice.file.sizeBytes)
     })
 
+internal fun selectedDeletionGroups(report: DeletionRecommendationReport, keys: Set<String>): List<SelectedDeletionGroup> =
+    report.categories.flatMap { result ->
+        result.groups.map { SelectedDeletionGroup(result.category, it) }.filter { it.key in keys }
+    }
+
+internal fun toggleDeletionGroup(keys: Set<String>, key: String, selected: Boolean): Set<String> =
+    if (selected) keys + key else keys - key
+
 private data class DeletionLoad(val token: Any, val report: DeletionRecommendationReport? = null, val error: String? = null)
 
 @Composable
@@ -80,6 +91,8 @@ internal fun DeletionRecommendationsScreen(
     scanning: Boolean,
     modifier: Modifier = Modifier,
     directoryClassifications: DirectoryClassificationController? = null,
+    fileOperationsBusy: Boolean,
+    onPrepareDryRun: (List<SelectedDeletionGroup>) -> Unit,
 ) {
     val choices by preferences.state.collectAsState()
     val settings = choices.ollama
@@ -123,6 +136,8 @@ internal fun DeletionRecommendationsScreen(
     val current = load?.takeIf { !blocked && configurationError == null && it.token === token }
     var selectedId by remember { mutableStateOf<String?>(null) }
     val category = current?.report?.let { selectedDeletionCategory(it, selectedId) }
+    var selectedKeys by remember(token) { mutableStateOf(emptySet<String>()) }
+    val selectedGroups = current?.report?.let { selectedDeletionGroups(it, selectedKeys) }.orEmpty()
     var expanded by remember(token, category?.category?.id) { mutableStateOf(emptySet<String>()) }
     val listState = rememberLazyListState()
     LaunchedEffect(category?.category?.id) { listState.scrollToItem(0) }
@@ -136,6 +151,10 @@ internal fun DeletionRecommendationsScreen(
                         Text(DELETION_REVIEW_NOTICE, style = MaterialTheme.typography.bodyMedium)
                         OutlinedButton(enabled = !blocked && configurationError == null && current != null,
                             onClick = { refresh++ }) { Text(AppStrings.review.refresh) }
+                        Button(
+                            enabled = !blocked && !fileOperationsBusy && selectedGroups.isNotEmpty(),
+                            onClick = { onPrepareDryRun(selectedGroups) },
+                        ) { Text(AppStrings.operations.prepare(selectedGroups.size)) }
                         when {
                             configurationError != null -> Text(configurationError, color = MaterialTheme.colorScheme.error)
                             blocked -> Text(AppStrings.review.waiting)
@@ -183,6 +202,15 @@ internal fun DeletionRecommendationsScreen(
                             item(key = "group:$groupKey") {
                                 Card(Modifier.fillMaxWidth()) {
                                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        val selection = SelectedDeletionGroup(category.category, group)
+                                        Row {
+                                            Checkbox(
+                                                checked = selection.key in selectedKeys,
+                                                enabled = !blocked && !fileOperationsBusy,
+                                                onCheckedChange = { selectedKeys = toggleDeletionGroup(selectedKeys, selection.key, it) },
+                                            )
+                                            Text(AppStrings.operations.selectGroup, Modifier.padding(top = 12.dp))
+                                        }
                                         Text(AppStrings.review.retain(group.survivors.joinToString { it.advice.file.name }),
                                             color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.titleMedium)
                                         Text(group.survivors.map { it.advice.file.directoryPath }.distinct().joinToString(),

@@ -71,6 +71,7 @@ fun InventoryApp(container: AppContainer, scanTarget: ScanTarget, pathActions: P
     val preferencesError by container.uiPreferences.error.collectAsState()
     val selectedTab = choices.selectedTab
     val scanState by container.scanController.state.collectAsState()
+    val fileOperationState by container.fileOperations.state.collectAsState()
     MaterialTheme {
         Surface(modifier = Modifier.fillMaxSize()) {
             // safeDrawingPadding keeps content clear of Android system bars; no-op on desktop
@@ -98,7 +99,13 @@ fun InventoryApp(container: AppContainer, scanTarget: ScanTarget, pathActions: P
                         container.exifQueue, scanState is ScanState.Running, content, container.directoryClassifications, container.uiPreferences)
                     UiTab.DELETION_RECOMMENDATIONS -> DeletionRecommendationsScreen(container.repository, container.retentionScores,
                         container.exifQueue, pathActions, container.uiPreferences, scanState is ScanState.Running,
-                        content, container.directoryClassifications)
+                        content, container.directoryClassifications, fileOperationsBusy = fileOperationState.busy,
+                        onPrepareDryRun = { selected ->
+                            container.fileOperations.selectGroups(selected)
+                            container.uiPreferences.update { it.copy(selectedTab = UiTab.FILE_OPERATIONS) }
+                        })
+                    UiTab.FILE_OPERATIONS -> FileOperationsScreen(container.fileOperations, container.uiPreferences,
+                        container.exifQueue, pathActions, scanState is ScanState.Running, content)
                     UiTab.OLLAMA -> OllamaSettingsScreen(container.uiPreferences, container.directoryClassifications,
                         container::availableOllamaModels, container.repository::allDirectoryClassifications, content)
                     UiTab.EXCLUSIONS -> ExclusionsScreen(container.repository, scanState is ScanState.Running, content)

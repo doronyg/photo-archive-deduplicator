@@ -16,6 +16,10 @@ import com.doronyg.photoarchivededuplicator.classification.OllamaDirectoryClassi
 import com.doronyg.photoarchivededuplicator.classification.createOllamaHttpClient
 import com.doronyg.photoarchivededuplicator.classification.fetchOllamaModels
 import com.doronyg.photoarchivededuplicator.classification.ollamaBaseUrl
+import com.doronyg.photoarchivededuplicator.operations.FileOperationController
+import com.doronyg.photoarchivededuplicator.operations.FileOperationRepository
+import com.doronyg.photoarchivededuplicator.operations.FileOperationService
+import com.doronyg.photoarchivededuplicator.scan.ScanState
 import io.ktor.client.HttpClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineDispatcher
@@ -52,7 +56,8 @@ class AppContainer internal constructor(
     private val shutdownLock = Mutex()
     private var closed = false
 
-    val repository = DirectoryRepository(createFilesDatabase(driver), databaseLane = databaseLane)
+    private val database = createFilesDatabase(driver)
+    val repository = DirectoryRepository(database, databaseLane = databaseLane)
     private val ollamaClient = lazy(createOllamaClient)
     val directoryClassifications = DirectoryClassificationController(appScope,
         DirectoryClassifier { directory, context -> OllamaDirectoryClassifier(ollamaClient.value).classify(directory, context) },
@@ -70,6 +75,16 @@ class AppContainer internal constructor(
             else exifQueue.scanStopped()
         })
     val uiPreferences = UiPreferences(initialUiChoices, appScope, repository::saveUiChoices)
+    private val operationProposals = FileOperationRepository(database, databaseLane)
+    private fun operationBlocked(): Boolean = scanController.state.value is ScanState.Running ||
+        exifQueue.state.value.isRunning || directoryClassifications.state.value.isRunning
+    internal val fileOperations = FileOperationController(appScope, repository, operationProposals,
+        FileOperationService(repository, operationProposals, retentionScores, filesystemLane,
+            dispatcher = workerDispatcher, classificationContext = {
+                val settings = uiPreferences.state.value.ollama
+                if (settings.baseUrl.isBlank() && settings.model.isBlank()) null else settings.context()
+            }, admissionBlocked = ::operationBlocked),
+        admissionBlocked = ::operationBlocked)
 
     internal suspend fun availableOllamaModels(baseUrl: String): List<String> {
         val server = ollamaBaseUrl(baseUrl)

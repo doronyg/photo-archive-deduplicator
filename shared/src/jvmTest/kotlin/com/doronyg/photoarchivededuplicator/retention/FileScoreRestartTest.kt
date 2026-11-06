@@ -81,7 +81,7 @@ class FileScoreRestartTest {
             }
             val upgraded = withContext(io) { JdbcSqliteDriver(url, schema = FilesDatabase.Schema.synchronous()) }
             try {
-                assertEquals(8L, FilesDatabase.Schema.version)
+                assertEquals(10L, FilesDatabase.Schema.version)
                 assertEquals(before, snapshot(upgraded))
                 val repository = DirectoryRepository(createFilesDatabase(IoGuardedDriver(upgraded, io)), io)
                 val root = "/archive".toPath()

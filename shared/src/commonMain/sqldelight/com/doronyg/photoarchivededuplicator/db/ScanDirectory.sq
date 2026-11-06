@@ -36,7 +36,7 @@ UPDATE scanDirectory SET status = :newStatus WHERE status = :oldStatus AND (:roo
     substr(path, 1, length(:root)) = :root
     AND (substr(:root, -1) IN ('/', '\') OR substr(path, length(:root) + 1, 1) IN ('/', '\'))
 )) AND NOT EXISTS (
-    SELECT 1 FROM directoryExclusion e WHERE scanDirectory.path = e.path OR (
+    SELECT 1 FROM archiveExclusion e WHERE scanDirectory.path = e.path OR (
         substr(scanDirectory.path, 1, length(e.path)) = e.path
         AND (substr(e.path, -1) IN ('/', '\') OR substr(scanDirectory.path, length(e.path) + 1, 1) IN ('/', '\'))
     )
@@ -59,7 +59,7 @@ WHERE d.status = :status AND (:root IS NULL OR d.path = :root OR (
     substr(d.path, 1, length(:root)) = :root
     AND (substr(:root, -1) IN ('/', '\') OR substr(d.path, length(:root) + 1, 1) IN ('/', '\'))
 )) AND NOT EXISTS (
-    SELECT 1 FROM directoryExclusion e WHERE d.path = e.path OR (
+    SELECT 1 FROM archiveExclusion e WHERE d.path = e.path OR (
         substr(d.path, 1, length(e.path)) = e.path
         AND (substr(e.path, -1) IN ('/', '\') OR substr(d.path, length(e.path) + 1, 1) IN ('/', '\'))
     )
@@ -72,7 +72,7 @@ WHERE d.status = :status AND (:root IS NULL OR d.path = :root OR (
     substr(d.path, 1, length(:root)) = :root
     AND (substr(:root, -1) IN ('/', '\') OR substr(d.path, length(:root) + 1, 1) IN ('/', '\'))
 )) AND NOT EXISTS (
-    SELECT 1 FROM directoryExclusion e WHERE d.path = e.path OR (
+    SELECT 1 FROM archiveExclusion e WHERE d.path = e.path OR (
         substr(d.path, 1, length(e.path)) = e.path
         AND (substr(e.path, -1) IN ('/', '\') OR substr(d.path, length(e.path) + 1, 1) IN ('/', '\'))
     )
@@ -81,8 +81,47 @@ WHERE d.status = :status AND (:root IS NULL OR d.path = :root OR (
 selectByPath:
 SELECT * FROM scanDirectory WHERE path = :path;
 
+selectScanRoots:
+SELECT path FROM scanDirectory WHERE parentPath IS NULL
+UNION
+SELECT root FROM scanSession;
+
+selectVisibleByPath:
+SELECT d.path, d.parentPath, d.status, d.retryCount,
+       CASE WHEN NOT EXISTS (SELECT 1 FROM fileBinRoot) THEN d.fileCount ELSE
+       d.fileCount - (SELECT count(*) FROM scanFile f WHERE f.directoryPath = d.path AND EXISTS (
+           SELECT 1 FROM fileBinRoot b WHERE f.path = b.path OR (
+               substr(f.path, 1, length(b.path)) = b.path
+               AND (substr(b.path, -1) IN ('/', '\') OR substr(f.path, length(b.path) + 1, 1) IN ('/', '\'))
+           )
+       )) END AS fileCount,
+       d.modifiedAt, d.lastScanned
+FROM scanDirectory d
+WHERE d.path = :path AND NOT EXISTS (
+    SELECT 1 FROM fileBinRoot b WHERE d.path = b.path OR (
+        substr(d.path, 1, length(b.path)) = b.path
+        AND (substr(b.path, -1) IN ('/', '\') OR substr(d.path, length(b.path) + 1, 1) IN ('/', '\'))
+    )
+);
+
 selectAll:
-SELECT * FROM scanDirectory ORDER BY path;
+SELECT d.path, d.parentPath, d.status, d.retryCount,
+       CASE WHEN NOT EXISTS (SELECT 1 FROM fileBinRoot) THEN d.fileCount ELSE
+       d.fileCount - (SELECT count(*) FROM scanFile f WHERE f.directoryPath = d.path AND EXISTS (
+           SELECT 1 FROM fileBinRoot b WHERE f.path = b.path OR (
+               substr(f.path, 1, length(b.path)) = b.path
+               AND (substr(b.path, -1) IN ('/', '\') OR substr(f.path, length(b.path) + 1, 1) IN ('/', '\'))
+           )
+       )) END AS fileCount,
+       d.modifiedAt, d.lastScanned
+FROM scanDirectory d
+WHERE NOT EXISTS (
+    SELECT 1 FROM fileBinRoot b WHERE d.path = b.path OR (
+        substr(d.path, 1, length(b.path)) = b.path
+        AND (substr(b.path, -1) IN ('/', '\') OR substr(d.path, length(b.path) + 1, 1) IN ('/', '\'))
+    )
+)
+ORDER BY d.path;
 
 selectChildPaths:
 SELECT path FROM scanDirectory WHERE parentPath = :parentPath;
@@ -100,17 +139,64 @@ DELETE FROM scanDirectory WHERE path = :path;
 
 -- Browsing. A null :parentPath selects the scan roots.
 selectChildOverviews:
-SELECT d.*,
-       coalesce((SELECT sum(f.sizeBytes) FROM scanFile f WHERE f.directoryPath = d.path), 0) AS fileBytes
+SELECT d.path, d.parentPath, d.status, d.retryCount,
+       CASE WHEN NOT EXISTS (SELECT 1 FROM fileBinRoot) THEN d.fileCount ELSE
+       d.fileCount - (SELECT count(*) FROM scanFile f WHERE f.directoryPath = d.path AND EXISTS (
+           SELECT 1 FROM fileBinRoot b WHERE f.path = b.path OR (
+               substr(f.path, 1, length(b.path)) = b.path
+               AND (substr(b.path, -1) IN ('/', '\') OR substr(f.path, length(b.path) + 1, 1) IN ('/', '\'))
+           )
+       )) END AS fileCount,
+       d.modifiedAt, d.lastScanned,
+       coalesce((SELECT sum(f.sizeBytes) FROM scanFile f WHERE f.directoryPath = d.path AND NOT EXISTS (
+           SELECT 1 FROM fileBinRoot b WHERE f.path = b.path OR (
+               substr(f.path, 1, length(b.path)) = b.path
+               AND (substr(b.path, -1) IN ('/', '\') OR substr(f.path, length(b.path) + 1, 1) IN ('/', '\'))
+           )
+       )), 0) AS fileBytes
 FROM scanDirectory d
 WHERE d.parentPath IS :parentPath
+AND NOT EXISTS (
+    SELECT 1 FROM fileBinRoot b WHERE d.path = b.path OR (
+        substr(d.path, 1, length(b.path)) = b.path
+        AND (substr(b.path, -1) IN ('/', '\') OR substr(d.path, length(b.path) + 1, 1) IN ('/', '\'))
+    )
+)
 ORDER BY d.path;
 
 selectWithStatus:
-SELECT * FROM scanDirectory WHERE status = :status ORDER BY path;
+SELECT d.path, d.parentPath, d.status, d.retryCount,
+       CASE WHEN NOT EXISTS (SELECT 1 FROM fileBinRoot) THEN d.fileCount ELSE
+       d.fileCount - (SELECT count(*) FROM scanFile f WHERE f.directoryPath = d.path AND EXISTS (
+           SELECT 1 FROM fileBinRoot b WHERE f.path = b.path OR (
+               substr(f.path, 1, length(b.path)) = b.path
+               AND (substr(b.path, -1) IN ('/', '\') OR substr(f.path, length(b.path) + 1, 1) IN ('/', '\'))
+           )
+       )) END AS fileCount,
+       d.modifiedAt, d.lastScanned
+FROM scanDirectory d
+WHERE d.status = :status AND NOT EXISTS (
+    SELECT 1 FROM fileBinRoot b WHERE d.path = b.path OR (
+        substr(d.path, 1, length(b.path)) = b.path
+        AND (substr(b.path, -1) IN ('/', '\') OR substr(d.path, length(b.path) + 1, 1) IN ('/', '\'))
+    )
+)
+ORDER BY d.path;
 
 countWithStatus:
-SELECT count(*) FROM scanDirectory WHERE status = :status;
+SELECT count(*) FROM scanDirectory d WHERE status = :status AND NOT EXISTS (
+    SELECT 1 FROM fileBinRoot b WHERE d.path = b.path OR (
+        substr(d.path, 1, length(b.path)) = b.path
+        AND (substr(b.path, -1) IN ('/', '\') OR substr(d.path, length(b.path) + 1, 1) IN ('/', '\'))
+    )
+);
 
 countByStatus:
-SELECT status, count(*) AS directoryCount FROM scanDirectory GROUP BY status;
+SELECT status, count(*) AS directoryCount FROM scanDirectory d
+WHERE NOT EXISTS (
+    SELECT 1 FROM fileBinRoot b WHERE d.path = b.path OR (
+        substr(d.path, 1, length(b.path)) = b.path
+        AND (substr(b.path, -1) IN ('/', '\') OR substr(d.path, length(b.path) + 1, 1) IN ('/', '\'))
+    )
+)
+GROUP BY status;
