@@ -1,6 +1,7 @@
 package com.doronyg.photoarchivededuplicator.operations.history
 
 import com.doronyg.photoarchivededuplicator.IoLane
+import com.doronyg.photoarchivededuplicator.operations.BIN_DIRECTORY_MARKER_NAME
 import com.doronyg.photoarchivededuplicator.scan.TrackingIoDispatcher
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -393,6 +394,8 @@ class OperationHistoryStoreTest {
         for (invalid in listOf(
             manifest.replace("items/photo.jpg", "$HISTORY_DIRECTORY_NAME/bin.json"),
             manifest.replace("photo.jpg", ARCHIVE_MARKER_NAME),
+            manifest.replace("photo.jpg", BIN_DIRECTORY_MARKER_NAME),
+            manifest.replace("photo.jpg", "$BIN_DIRECTORY_MARKER_NAME.partial"),
             manifest.replace("kept.jpg", "photo.jpg"),
         )) {
             assertFailsWith<IllegalArgumentException> { parseHistoryOperation("op1", binding.identity.archiveId, invalid, "") }

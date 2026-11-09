@@ -8,6 +8,7 @@ import com.doronyg.photoarchivededuplicator.operations.FileOperationProposal
 import com.doronyg.photoarchivededuplicator.operations.FileOperationIssueCode
 import com.doronyg.photoarchivededuplicator.operations.FileOperationState
 import com.doronyg.photoarchivededuplicator.operations.FileOperationValidationStatus
+import com.doronyg.photoarchivededuplicator.operations.FileMoveExecutionStatus
 import com.doronyg.photoarchivededuplicator.operations.ProposedFileMove
 import com.doronyg.photoarchivededuplicator.operations.SelectedDeletionGroup
 import com.doronyg.photoarchivededuplicator.recommendation.DeletionCategoryResults
@@ -55,11 +56,16 @@ class FileOperationPresentationTest {
     }
 
     @Test
-    fun validationIsNotApprovalAndAiIsAlwaysNotReviewed() {
+    fun validationIsNotApprovalAndRealRunsDiscloseTheMissingIndependentAiReview() {
         assertEquals("Dry-run metadata checks: Passed", strings.status(FileOperationValidationStatus.READY))
         assertEquals("Dry-run metadata checks: Needs attention", strings.status(FileOperationValidationStatus.NEEDS_ATTENTION))
-        assertEquals("AI review: Not reviewed", strings.aiStatus)
-        assertTrue(strings.availability.contains("unavailable"))
+        assertEquals("Independent AI review: Not performed (not implemented)", strings.aiStatus)
+        assertTrue(strings.availability.contains("Approved real runs"))
+        assertTrue(strings.realRunAiNote.contains("has not been performed"))
+        assertTrue(strings.realRunChecks.contains("same-filesystem"))
+        assertTrue(strings.approveMoves(42).contains("exactly these 42 files"))
+        assertEquals("Needs reconciliation", strings.executionStatus(FileMoveExecutionStatus.UNCERTAIN))
+        assertEquals("Not moved", strings.executionStatus(FileMoveExecutionStatus.FAILED))
         assertEquals("Candidate", strings.role(FileRecommendationRole.REDUNDANT_CANDIDATE))
         assertEquals("Retained member", strings.role(FileRecommendationRole.PREFERRED))
         assertEquals("Preserved member", strings.role(FileRecommendationRole.PRESERVE))

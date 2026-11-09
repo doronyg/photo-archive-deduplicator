@@ -19,6 +19,9 @@ CREATE TABLE fileExif (
     readerVersion TEXT NOT NULL
 );
 
+deleteForFile:
+DELETE FROM fileExif WHERE filePath = :filePath;
+
 selectForPaths:
 SELECT * FROM fileExif
 WHERE filePath IN :paths

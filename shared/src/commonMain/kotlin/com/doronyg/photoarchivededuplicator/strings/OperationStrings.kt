@@ -3,11 +3,12 @@ package com.doronyg.photoarchivededuplicator.strings
 import com.doronyg.photoarchivededuplicator.operations.FileOperationFinding
 import com.doronyg.photoarchivededuplicator.operations.FileOperationIssueCode
 import com.doronyg.photoarchivededuplicator.operations.FileOperationValidationStatus
+import com.doronyg.photoarchivededuplicator.operations.FileMoveExecutionStatus
 import com.doronyg.photoarchivededuplicator.recommendation.FileRecommendationRole
 
 internal object OperationStrings {
-    const val availability = "AI review and file moves are unavailable in this increment. Dry runs do not change files."
-    const val aiStatus = "AI review: Not reviewed"
+    const val availability = "Dry runs do not change files. Approved real runs move files into the Bin; nothing is permanently deleted."
+    const val aiStatus = "Independent AI review: Not performed (not implemented)"
     const val binRoot = "Bin root (full absolute path)"
     const val binPlaceholder = "Enter a full absolute Bin path"
     const val saveBin = "Save Bin configuration"
@@ -16,6 +17,22 @@ internal object OperationStrings {
     const val exclusionsNote = "All registered Bin roots, including previous locations, remain excluded from scanning and recommendations."
     const val registeredRoots = "Registered Bin roots"
     const val createDryRun = "Create dry run"
+    const val prepareDirectories = "Prepare Bin directories"
+    const val confirmPreparation = "Create Bin directories and mapping files?"
+    const val preparationNote = "Creates folders and directory mapping JSON files only. No photo files are moved. Register or connect the archive in Operation history first."
+    const val preparationNotApproval = "Directory preparation is not approval to move files. File safety checks must run again before any future move."
+    const val realRun = "Run approved moves"
+    const val confirmRealRun = "Approve moving files into the Bin?"
+    const val realRunChecks = "Recommendations and file metadata will be checked again. Metadata does not prove identical contents. Only same-filesystem moves are allowed; existing destinations are never replaced. Do not modify the source or Bin from another program during the run."
+    const val realRunAiNote = "Independent AI review has not been performed. This run uses the saved recommendations and current deterministic safety checks."
+    const val realRunHistory = "Confirmed moves are recorded in Operation history and removed from the active inventory. An uncertain outcome stops the run and requires reconciliation."
+    const val executionResults = "Real-run results"
+    const val reconcileRun = "This run needs reconciliation. Check Operation history and the source/Bin locations before retrying. Rescan the archive if inventory updates failed."
+    const val executionFinished = "Execution finished"
+    const val executionRunning = "Moving approved files..."
+    const val inventoryUpdateError = "Inventory update needs reconciliation"
+    const val statisticsSaveError = "Statistics checkpoint could not be saved. Confirmed moves remain recorded in Operation history."
+    const val logicalBytesMoved = "Logical bytes moved to Bin (not storage reclaimed)"
     const val selectedGroups = "Selected recommendations"
     const val emptySelection = "Select whole groups in Deletion Recommendations to prepare a dry run."
     const val selectGroup = "Select this category recommendation"
@@ -32,7 +49,7 @@ internal object OperationStrings {
     const val captureTime = "Captured at"
     const val classification = "Classification"
     const val evidence = "Saved evidence"
-    const val waiting = "Waiting for scanning or EXIF analysis to finish."
+    const val waiting = "Waiting for scanning, EXIF analysis, or directory classification to finish."
     const val busy = "Preparing file operation data..."
     const val createdAt = "Created (epoch milliseconds)"
     const val validatedAt = "Validated (epoch milliseconds)"
@@ -52,6 +69,17 @@ internal object OperationStrings {
     const val engineRole = "Original engine role"
 
     fun fileMoves(destination: String) = "File moves to $destination"
+    fun preparedDirectories(created: Int, markers: Int, checked: Int) =
+        "Bin directories prepared: $created created, $markers mapping files written, $checked directories checked. No files moved."
+    fun approveMoves(count: Int) = "I approve moving exactly these $count files into the Bin."
+    fun executionCounts(total: Int, completed: Int, failed: Int, uncertain: Int, remaining: Int) =
+        "$completed/$total moved and verified; $failed failed; $uncertain uncertain; $remaining not started."
+    fun executionStatus(status: FileMoveExecutionStatus) = when (status) {
+        FileMoveExecutionStatus.COMPLETED -> "Moved and verified"
+        FileMoveExecutionStatus.FAILED -> "Not moved"
+        FileMoveExecutionStatus.UNCERTAIN -> "Needs reconciliation"
+        FileMoveExecutionStatus.NOT_STARTED -> "Not started"
+    }
     fun copyResultsError(detail: String?) = "Could not copy results: ${detail ?: "Unknown error"}"
     fun selection(count: Int) = "$count selected groups"
     fun prepare(count: Int) = "Prepare dry run for $count groups"
@@ -99,5 +127,9 @@ internal object OperationStrings {
         FileOperationIssueCode.BUSY -> "Wait for the current scan, EXIF analysis, or operation to finish."
         FileOperationIssueCode.CONFIGURATION_ERROR -> "The Bin configuration could not be saved."
         FileOperationIssueCode.PROPOSAL_ERROR -> "The dry-run proposal could not be saved or loaded."
+        FileOperationIssueCode.DIRECTORY_PREPARATION_ERROR ->
+            "Bin directory preparation failed. Some folders or markers may have been created; no photo files were moved."
+        FileOperationIssueCode.EXECUTION_ERROR ->
+            "The real run could not complete. Check the execution results and Operation history before retrying."
     }
 }

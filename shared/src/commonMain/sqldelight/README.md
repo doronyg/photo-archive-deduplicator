@@ -186,8 +186,9 @@ remain separate; their previous browsing behavior is unchanged.
 
 The File Operations tab configures the full Bin path and creates saved proposals
 from selected deletion recommendations. Each proposal captures the Bin root,
-complete group evidence and exact proposed destinations. No source archive root
-needs to be configured. Destinations preserve the full original path beneath the
+complete group evidence and exact proposed destinations. Dry-run setup requires
+no source archive root; real runs separately require verified history registration.
+Destinations preserve the full original path beneath the
 Bin, for example `/Photos/Trip/a.jpg` becomes `<Bin>/Photos/Trip/a.jpg`; Windows
 drive letters and network share paths are preserved without the drive colon.
 No operation or file IDs are inserted into directory names. Existing destinations
@@ -204,21 +205,147 @@ Migration `9.sqm` (version 10) makes the legacy proposal archive-root field
 optional without changing any existing proposal, mapping or evidence. New proposals
 do not use that field. Missing Bin directories and missing parents do not block
 dry runs; existing files, symlinks and collisions still produce findings. Creating
-directories belongs to a future explicitly approved real run. The UI suggests an
+directories belongs to explicit directory preparation or an approved real run. The UI suggests an
 editable Bin location, shows stay/move outcomes, collapses evidence by default and
 can copy the complete result without exporting raw evidence JSON.
 
-AI review, approval, native move-capability checks, actual moves and restoration
-are not implemented in this increment. A future executor must revalidate after
-AI review and obtain explicit approval. Metadata alone does not establish identical
-contents, and no full-file hashing is introduced.
+Real runs require explicit approval and fresh validation. Independent AI review
+and restoration are not implemented. The approval dialog explicitly discloses
+the missing independent review; existing saved directory classifications still
+participate in deterministic recommendation and protection rules. Metadata alone
+does not establish identical contents, and no full-file hashing is introduced.
+
+### Preparing Bin directories
+
+After opening a passed dry run, **Prepare Bin directories** explicitly creates
+the proposed destination folders and their mapping metadata. A confirmation
+dialog distinguishes this filesystem-writing action from the read-only dry run.
+First register or connect the archive in **Operation history**. Preparation
+verifies the saved archive identity, the current Bin and the exact reviewed
+full-source-path destinations. It does not move, copy, rename or delete photos,
+approve future moves, or add completed file-operation events.
+
+The Bin root and every destination ancestor beneath it receive a dedicated
+`.deduplicator-bin-directory.json` file, including existing folders that need a
+marker. For example, `<Bin>/archive/Trip/.deduplicator-bin-directory.json`:
+
+```json
+{
+  "formatVersion": 1,
+  "kind": "photo-archive-deduplicator-bin-directory",
+  "archiveId": "archive-id",
+  "registrationToken": "registration-token",
+  "binRelativeDirectory": "archive/Trip",
+  "originalDirectory": "/archive/Trip",
+  "originalArchiveRelativeDirectory": "Trip"
+}
+```
+
+`originalDirectory` is a readable, informational location from this installation.
+Portable restoration must use the archive identity and
+`originalArchiveRelativeDirectory`, not trust the absolute path. The relative
+path is empty for the archive root and null for structural prefix directories
+outside it; `originalDirectory` can be null for a structural Bin container.
+The Bin root is a structural container with a null original directory, so its
+marker is independent of the installation's mount path. Absolute location hints
+are not identity when an archive-relative mapping is available. Marker filenames
+and operation/file IDs are not inserted into photo paths.
+
+All paths and existing markers are checked before folder creation. Unsafe paths,
+symlink ancestors, occupied photo destinations, case/file-directory collisions,
+and mismatching or malformed markers are rejected. Matching markers are reused.
+An exclusive preparation lock serializes cooperating installations; stale locks
+are not automatically taken over. Each marker is created exclusively, never
+overwritten. A failed write can leave a partial marker: that tree remains
+excluded, and the marker must be inspected rather than silently replaced.
+Preparation starts with the Bin root marker so interruption while creating
+children does not make their contents eligible for inventory.
+
+Inventory scans discover reserved markers and persist their directories as Bin
+exclusions, even without a locally configured Bin or when a scan starts inside
+the tree. Malformed marker contents are not grounds for admitting Bin content.
+A discovered Bin excludes every descendant: scanning stops at the Bin boundary
+and does not inspect its child markers. Known Bin trees are skipped altogether.
+Discovery reuses ancestor observations within a scan and persists only outermost
+new exclusions.
+
+Browsing, statistics, duplicate queries, exports and retention scoring use the
+stored exclusions without filesystem discovery. An externally created Bin marker
+therefore takes effect after the next inventory scan of its containing tree, not
+on the next screen refresh. Existing inventory records remain stored but become
+ineligible once the Bin is discovered. Bins configured through this application
+are already registered and excluded before directory preparation starts.
+
+Filesystem discovery and directory creation use the filesystem lane, not the
+main or database thread. Existing configured Bin exclusions, PROTECTED-group
+rules and targeted preparation checks remain in force.
+
+On Android, marker discovery can only inspect folders visible under the app's
+storage permissions. MediaStore does not index JSON markers, so the media-index
+scanner probes their filesystem paths separately during scanning; reported access
+errors block discovery rather than treating inaccessible metadata as a valid
+archive. Ordinary database browsing does not require marker access.
+
+### Approved real runs
+
+Open a passed dry run and choose **Run approved moves**. The confirmation shows
+the exact saved file count, logical bytes and Bin, and requires a separate
+approval checkbox. Connect or register the archive under **Operation history**
+first. Preparation alone is neither approval nor a completed operation.
+
+Execution holds the inventory scan/configuration mutex and cooperating archive/Bin
+execution locks. It revalidates the current recommendations, saved evidence,
+protection rules and metadata once, then performs targeted source, survivor,
+destination and configuration checks before each move. It does not rescan the
+whole archive per file or introduce full-file hashing. Every candidate must be
+on the same filesystem as its destination before the first photo is moved.
+Cross-filesystem moves are rejected; there is no copy/delete fallback.
+Existing destination files are never replaced.
+Do not concurrently modify the source paths, Bin or mount configuration from
+another program: execution locks coordinate this application, not external tools.
+The platform requires atomic rename support and never retries an unsupported
+rename as a copy/delete operation. Java's atomic rename is not a race-proof
+no-clobber primitive, so destination-absence checks rely on that cooperation.
+
+The executor prepares the mapped Bin directories, publishes an immutable portable
+manifest and flushes each move intent before changing a photo's location. It
+checks that the source disappeared and the destination has the expected regular
+file metadata before flushing a completed event. Only then does one inventory
+transaction remove the matching source record, its cached EXIF and all profile
+scores/factors, and decrement the original directory's file count. Retained
+files and other cached records are untouched. History and statistics refresh
+after the run; progress updates are throttled instead of republishing every event.
+
+Each operation also overwrites a small `statistics.json` summary after every 20
+confirmed moves and at the end, including failure or orderly cancellation. It
+records `formatVersion`, operation/archive IDs, `updatedAt`, `completedMoves`,
+`logicalBytesMoved` and `finished` (execution stopped, not necessarily successful).
+These are cumulative per-operation totals, not increments; failed, uncertain and
+unstarted moves do not count, but confirmed moves count even if inventory updates
+fail. This replaceable checkpoint uses ordinary buffered writes, without extra
+forced flushes or recovery machinery. A write failure is logged and shown without
+stopping photo moves. The journal remains authoritative, so stale or partial
+checkpoints never change history totals. The Statistics tab displays confirmed
+history totals separately from recommendation estimates; logical bytes moved
+are not physical storage reclaimed.
+
+Execution stops on the first failure. A confirmed unchanged source is a failed
+move; a possibly changed location is uncertain and leaves the intent pending.
+Remaining candidates are not started. A confirmed move whose database update
+fails stays completed in history and reports a separate reconciliation error.
+The per-file move/verification/journal/database critical section completes even
+if cancellation is requested. Interrupted or uncertain operations are never
+automatically retried: inspect the recorded history and filesystem and rescan
+the archive before proposing more work. Stale execution locks need inspection;
+they are not automatically stolen. Restoration and permanent deletion are not
+implemented, and moving logical bytes to the Bin does not imply reclaimed space.
 
 ### Operation history and portable archive identity
 
 The **Operation history** view under File Operations reads history from local or
 network storage independently of the inventory database. Local dry-run proposals above remain
-local snapshots; they are not evidence of completed filesystem operations and
-are not silently converted or published to operation history.
+local snapshots; they are not evidence of completed filesystem operations.
+Only explicitly approved execution publishes an operation manifest and journal.
 
 An explicit registration action initializes one archive per Bin:
 
@@ -248,9 +375,9 @@ platform-incompatible paths must not be resolved. These are a separate portable
 format from existing absolute-path local proposals. One operation manifest records
 the plan; its append-only JSON-lines journal records intents and actual completed
 actions. The reader does not infer a completed move from a planned destination.
-Future execution must persist intent before mutation and durable confirmation
-after verification; no filesystem executor or operation journal writer is enabled
-in this increment.
+Execution writes and flushes intent before mutation, and records completion only
+after verifying the result. Operation IDs reuse the approved proposal ID, so an
+existing operation cannot be silently overwritten or executed again.
 
 Refresh reads history metadata off the main thread, caches unchanged parsed records
 where safe and publishes complete snapshots without clearing the previous display
@@ -260,10 +387,10 @@ Only confirmed journal transitions contribute to event totals or current recorde
 Bin occupancy. Move/restore/move cycles count as movement events, not distinct
 content identities. Physical storage space reclaimed remains unknown.
 
-The portable filesystem layer cannot promise power-loss durability from a
-buffer flush or an atomic rename alone. Storage-specific persistence, exclusive
-execution locking and crash reconciliation must be established before enabling
-actual moves or restoration. No AI, hashing or permanent deletion is added.
+The portable filesystem layer cannot promise storage/server power-loss durability
+from a flush or rename alone. Execution uses platform flushes and exclusive
+cooperating-writer locks, but unknown outcomes still require reconciliation.
+No independent AI review, hashing, restoration or permanent deletion is added.
 
 #### History JSON format 1
 

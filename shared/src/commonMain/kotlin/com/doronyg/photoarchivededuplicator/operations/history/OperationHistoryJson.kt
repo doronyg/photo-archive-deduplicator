@@ -1,6 +1,7 @@
 package com.doronyg.photoarchivededuplicator.operations.history
 
 import kotlinx.coroutines.CancellationException
+import com.doronyg.photoarchivededuplicator.operations.BIN_DIRECTORY_MARKER_NAME
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
@@ -48,6 +49,8 @@ private fun portable(value: String): String = value.also {
     resolvePortablePath("/".toPath(), it)
     require(it.split('/').none { segment ->
         segment.equals(HISTORY_DIRECTORY_NAME, ignoreCase = true) ||
+            segment.equals(BIN_DIRECTORY_MARKER_NAME, ignoreCase = true) ||
+            segment.startsWith("$BIN_DIRECTORY_MARKER_NAME.", ignoreCase = true) ||
             segment.equals(ARCHIVE_MARKER_NAME, ignoreCase = true) ||
             segment.startsWith("$ARCHIVE_MARKER_NAME.", ignoreCase = true)
     }) { "Operation path targets reserved application metadata" }

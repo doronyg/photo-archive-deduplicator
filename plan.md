@@ -746,8 +746,8 @@ loads only requested sources and keeps their complete group decisions separate.
 #### File Operations: saved dry-run proposals
 
 The configurable DeduplicatorGarbageBin preserves each file's full original path
-beneath the Bin, with no source archive root to configure. Operation/file IDs
-exist only in the database, not the Bin layout. Registered Bin roots are mandatory archive exclusions, including
+beneath the Bin, with no source archive root needed for dry runs. Operation/file IDs
+are not inserted into photo destination paths. Registered Bin roots are mandatory archive exclusions, including
 already inventoried content and roots inside the archive. Previous roots remain
 excluded after configuration changes. Whole groups containing a PROTECTED member
 are excluded from every deletion category.
@@ -755,13 +755,41 @@ are excluded from every deletion category.
 Users select existing recommendations and prepare a saved proposal in the File
 Operations tab. It records exact candidates/destinations, original survivors,
 complete group evidence and metadata-validation findings. It performs no content
-reads, hashing, rescoring, AI calls or filesystem writes. AI review remains Not
-reviewed, and approval, moves, restoration and permanent deletion are unavailable.
+reads, hashing, rescoring, AI calls or filesystem writes. Independent AI review
+is not implemented; its absence is explicitly disclosed when approving real runs.
+Restoration and permanent deletion remain unavailable.
 Missing Bin directories do not block a dry run. The UI suggests an editable Bin
 location, presents each file's suggested stay/move destination, provides copyable
 results and keeps saved evidence collapsed until opened.
 
 #### Operation history infrastructure
+
+Passed dry runs can explicitly prepare destination directories without moving
+photos. Preparation verifies the archive/Bin registration and writes a
+`.deduplicator-bin-directory.json` mapping marker in the Bin and each destination
+ancestor. Scans discover markers and persist whole-subtree exclusions, skipping
+known Bins and never descending below a marked Bin. Inventory browsing, duplicate
+analysis and retention scoring use stored exclusions without filesystem sweeps;
+externally added markers take effect at the next scan. Directory preparation
+does not approve moves or count as completed file operations.
+
+Passed dry runs can now execute after an explicit file-count approval. The
+executor verifies archive/Bin identity, fresh recommendations and metadata, and
+same-filesystem capability before moving any photos. Per-file checks stay
+targeted, with no whole-inventory filesystem sweep. Moves never overwrite and
+have no cross-filesystem copy/delete fallback. An immutable portable manifest and
+flushed intent/completion journal preserve evidence independently of inventory.
+Confirmed completed moves remove only the matching source inventory, EXIF,
+profile scores/factors and directory count; the retained copies stay unchanged.
+Execution stops on the first failure or uncertain result, leaves later files
+untouched, and reports database postprocessing failures separately. Interrupted
+intents and stale locks require manual reconciliation, not automatic retries.
+Progress is throttled and the history view refreshes after execution.
+Completed-move counts and logical bytes are checkpointed per operation every 20
+moves and at the end, including failures and orderly cancellation. These
+best-effort JSON summaries are replaceable; journals remain authoritative.
+Statistics shows confirmed history totals separately from recommendation
+estimates and does not claim that Bin moves free physical storage.
 
 File Operations also provides history on local or network storage, separate from
 local dry-run proposals. Explicit registration writes archive/Bin identity metadata; each
@@ -770,8 +798,8 @@ and append-only JSON-lines events live under the Bin's `.deduplicator-history`
 directory, using archive-relative and Bin-relative paths rather than mount paths.
 Readers display malformed, unsupported and interrupted records, and aggregate
 confirmed events without claiming physical storage reclamation. Reads are off
-the main thread and publish stable snapshots on refresh. This increment has no
-operation executor, restoration or journal-writing controls.
+the main thread and publish stable snapshots on refresh. Restoration and
+permanent deletion controls remain unavailable.
 Provider-supplied file evidence is rendered generically without category-specific
 UI branches. Extend the input datasets only when a future category requires it.
 

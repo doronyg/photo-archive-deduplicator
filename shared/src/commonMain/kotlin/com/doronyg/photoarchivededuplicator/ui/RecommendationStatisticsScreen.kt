@@ -23,6 +23,9 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.doronyg.photoarchivededuplicator.exif.ExifQueueController
 import com.doronyg.photoarchivededuplicator.UiPreferences
+import com.doronyg.photoarchivededuplicator.operations.OperationHistoryController
+import com.doronyg.photoarchivededuplicator.strings.OperationHistoryStrings
+import okio.Path
 import com.doronyg.photoarchivededuplicator.strings.AppStrings
 import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificationController
 import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificationJobState
@@ -156,7 +159,10 @@ internal fun RecommendationStatisticsScreen(
     modifier: Modifier = Modifier,
     directoryClassifications: DirectoryClassificationController? = null,
     preferences: UiPreferences? = null,
+    operationHistory: OperationHistoryController? = null,
 ) {
+    val historyState = operationHistory?.state?.collectAsState()?.value
+    var historyBin by remember(repository) { mutableStateOf<Path?>(null) }
     val settings = preferences?.state?.collectAsState()?.value?.ollama
     val classificationContext = remember(settings) { settings?.let { runCatching { it.context() }.getOrNull() } }
     val classificationState = directoryClassifications?.state?.collectAsState()?.value ?: DirectoryClassificationJobState()
@@ -172,6 +178,10 @@ internal fun RecommendationStatisticsScreen(
     var error by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
     val blocked = scanning || queueState.isRunning
+    LaunchedEffect(operationHistory, refresh) {
+        historyBin = repository.binRoot()
+        if (historyBin != null && operationHistory?.state?.value?.busy == false) operationHistory.refresh()
+    }
 
     LaunchedEffect(service, queueKey, blocked, refresh, classificationState.revision) {
         val request = ++generation
@@ -203,7 +213,21 @@ internal fun RecommendationStatisticsScreen(
             loading -> Text(AppStrings.loading)
             error != null -> Text(error.orEmpty(), color = MaterialTheme.colorScheme.error)
             text != null -> SelectionContainer(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
-                Text(text.orEmpty(), fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (historyBin != null && historyState != null && historyState.binRoot == historyBin) {
+                        historyState.snapshot?.let { saved ->
+                            Text(operationHistoryStatisticsTitle(saved), style = MaterialTheme.typography.titleMedium)
+                            if (operationHistoryTotalsPartial(saved)) Text(OperationHistoryStrings.incomplete)
+                            operationHistoryStatisticsFields(saved).forEach { (label, value) ->
+                                Text(AppStrings.field(label, value))
+                            }
+                            Text(OperationHistoryStrings.eventCountNote, style = MaterialTheme.typography.bodySmall)
+                            Text(OperationHistoryStrings.physicalSpace, style = MaterialTheme.typography.bodySmall)
+                        }
+                        historyState.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                    }
+                    Text(text.orEmpty(), fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
+                }
             }
         }
     }

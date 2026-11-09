@@ -22,6 +22,8 @@ internal class FileOperationController(
     private val service: FileOperationService,
     private val admissionBlocked: () -> Boolean = { false },
     private val clock: () -> Long = { Clock.System.now().toEpochMilliseconds() },
+    private val prepareBinDirectories: (suspend (FileOperationProposal) -> BinDirectoryPreparationResult)? = null,
+    private val executeMoves: (suspend (FileOperationProposal, (FileExecutionProgress) -> Unit) -> FileExecutionResult)? = null,
 ) {
     private val control = Mutex()
     private val mutableState = MutableStateFlow(FileOperationState())
@@ -32,7 +34,7 @@ internal class FileOperationController(
             mutableState.update { it.copy(error = FileOperationFinding(FileOperationIssueCode.BUSY)) }
         } else {
             mutableState.update { it.copy(selectedGroups = groups.distinctBy { group -> group.key }.toList(),
-                proposal = null, error = null) }
+                proposal = null, error = null, directoryPreparation = null, executionProgress = null, executionResult = null) }
         }
     }
 
@@ -41,6 +43,7 @@ internal class FileOperationController(
     fun configureBin(path: String) = action(FileOperationIssueCode.CONFIGURATION_ERROR) {
         checkAdmission()
         repository.configureBinRoot(path.trim().toPath(), clock())
+        mutableState.update { it.copy(directoryPreparation = null) }
         refreshInAction()
     }
 
@@ -48,13 +51,68 @@ internal class FileOperationController(
         checkAdmission()
         val selected = mutableState.value.selectedGroups
         val proposal = service.createProposal(selected)
-        mutableState.update { it.copy(proposal = proposal) }
+        mutableState.update { it.copy(proposal = proposal, directoryPreparation = null, executionProgress = null, executionResult = null) }
         refreshInAction()
     }
 
     fun openProposal(id: String) = action(FileOperationIssueCode.PROPOSAL_ERROR) {
         val proposal = proposals.load(id)
-        mutableState.update { it.copy(proposal = proposal) }
+        mutableState.update { it.copy(proposal = proposal, directoryPreparation = null, executionProgress = null, executionResult = null) }
+    }
+
+    fun prepareDirectories(expectedProposalId: String) = action(FileOperationIssueCode.DIRECTORY_PREPARATION_ERROR) {
+        mutableState.update { it.copy(directoryPreparation = null) }
+        checkAdmission()
+        val proposal = checkNotNull(mutableState.value.proposal) { "Open a passed dry run first." }
+        check(proposal.id == expectedProposalId) { "The displayed proposal changed. Review it again." }
+        check(proposal.validationStatus == FileOperationValidationStatus.READY) { "The dry run needs attention." }
+        val prepare = checkNotNull(prepareBinDirectories) { "Directory preparation is unavailable." }
+        val result = repository.scanning {
+            checkAdmission()
+            check(repository.binRoot() == proposal.binRoot) { "The configured Bin changed. Create a new dry run." }
+            prepare(proposal)
+        }
+        mutableState.update { it.copy(directoryPreparation = result) }
+    }
+
+    fun runRealOperation(expectedProposalId: String) = action(FileOperationIssueCode.EXECUTION_ERROR) {
+        checkAdmission()
+        val proposal = checkNotNull(mutableState.value.proposal) { "Open a passed dry run first." }
+        check(proposal.id == expectedProposalId) { "The displayed proposal changed. Review it again." }
+        check(proposal.validationStatus == FileOperationValidationStatus.READY) { "The dry run needs attention." }
+        check(mutableState.value.executionResult?.operationId != proposal.id) {
+            "This proposal already ran. Review the results and create a new dry run."
+        }
+        val execute = checkNotNull(executeMoves) { "Real runs are unavailable." }
+        mutableState.update { it.copy(executionProgress = null, executionResult = null) }
+        var lastPublished: Long? = null
+        val result = repository.scanning {
+            checkAdmission()
+            check(repository.binRoot() == proposal.binRoot) { "The configured Bin changed. Create a new dry run." }
+            execute(proposal) { progress ->
+                val now = clock()
+                val previous = lastPublished
+                if (previous == null || progress.finished || now - previous >= 200) {
+                    mutableState.update { it.copy(executionProgress = progress) }
+                    lastPublished = now
+                }
+            }
+        }
+        val completed = result.items.count { it.status == FileMoveExecutionStatus.COMPLETED }
+        mutableState.update { it.copy(
+            executionResult = result,
+            executionProgress = FileExecutionProgress(
+                total = result.items.size,
+                completed = completed,
+                failed = result.items.count { item -> item.status == FileMoveExecutionStatus.FAILED },
+                uncertain = result.items.count { item -> item.status == FileMoveExecutionStatus.UNCERTAIN },
+                finished = true,
+                logicalBytesMoved = result.items.filter { item -> item.status == FileMoveExecutionStatus.COMPLETED }
+                    .sumOf { item -> item.move.sizeBytes },
+            ),
+            selectedGroups = if (completed > 0) emptyList() else it.selectedGroups,
+        ) }
+        refreshInAction()
     }
 
     private suspend fun refreshInAction() {
@@ -85,7 +143,8 @@ internal class FileOperationController(
                 Diagnostics.logger.e("FileOperations", "${errorCode.name}: ${failure.message}")
                 mutableState.update { it.copy(error = FileOperationFinding(errorCode, detail = failure.message)) }
             } finally {
-                mutableState.update { it.copy(busy = false) }
+                mutableState.update { it.copy(busy = false,
+                    executionProgress = it.executionProgress?.copy(finished = true)) }
                 control.unlock()
             }
         }

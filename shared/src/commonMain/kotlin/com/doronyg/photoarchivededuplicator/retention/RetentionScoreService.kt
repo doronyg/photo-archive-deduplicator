@@ -64,8 +64,9 @@ class RetentionScoreService internal constructor(
         groups: List<List<FileRecord>>,
         suspected: List<SuspectedDuplicateGroup>? = null,
     ): RetentionAssessmentResult {
+        val eligibleGroups = repository.eligibleRetentionGroups(groups)
         val context = currentCoroutineContext()
-        val files = groups.flatten()
+        val files = eligibleGroups.flatten()
         val paths = files.map { it.path }
         val scores = repository.fileScores(paths, scorer.identity, currentOnly = true).associateBy { it.input.path }
         val exif = repository.fileExif(paths, currentOnly = true).associateBy { it.input.path }
@@ -78,7 +79,7 @@ class RetentionScoreService internal constructor(
                     scorer.hasCurrentExifEvidence(score, file, exif[file.path])) put(file.path, score)
             }
         }
-        return RetentionAssessmentResult(present(groups, current), invalid.size)
+        return RetentionAssessmentResult(present(eligibleGroups, current), invalid.size)
     }
 
     suspend fun assess(
@@ -98,7 +99,7 @@ class RetentionScoreService internal constructor(
     ): RetentionAssessmentResult {
         val requestedAt = barrier.value
         return withContext(dispatcher) {
-            val groups = loadGroups()
+            val groups = repository.eligibleRetentionGroups(loadGroups())
             Diagnostics.logger.operation(LogTags.RETENTION, "assess groups=${groups.size} force=$force") {
                 assessment.withLock {
                     if (requestedAt.extracting || requestedAt.generation != barrier.value.generation) {

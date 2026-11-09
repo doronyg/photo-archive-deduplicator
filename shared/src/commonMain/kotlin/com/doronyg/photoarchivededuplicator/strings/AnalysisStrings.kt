@@ -98,7 +98,7 @@ internal object AnalysisStrings {
     fun exportPrompt(quotedPrompt: String) = "Prompt version: $quotedPrompt"
     fun exportMatches(matches: Boolean) = "Matches current saved settings: $matches"
 
-    const val statisticsTitle = "Recommendation statistics"
+    const val statisticsTitle = "Archive statistics"
     const val inventoryTitle = "Inventory files"
     const val inventoryDuplicateDefinition =
         "Possible duplicates count each file once across regular and suspected groups, including retained copies."
@@ -109,7 +109,7 @@ internal object AnalysisStrings {
         "$label: $total ${if (total == 1L) "file" else "files"} | " +
             "$duplicates ${if (duplicates == 1L) "possible duplicate" else "possible duplicates"} ($percentage)"
     fun percentage(whole: Int, fraction: Int) = "$whole.${fraction.toString().padStart(2, '0')}%"
-    const val statisticsScope = "All stored roots except excluded folders; independent of duplicate-tab filters."
+    const val statisticsScope = "Inventory and recommendations cover all stored roots except excluded folders, independently of duplicate-tab filters. Completed-operation totals come from the configured Bin's history."
     const val statisticsBlocked = "Statistics available when scanning and EXIF processing finish."
     const val statisticsUnits = "MB = 1,000,000 bytes. Sizes include every listed file, not estimated reclaimable space."
     const val cohortOverlap = "Regular and suspected sections can overlap; do not add their totals together."

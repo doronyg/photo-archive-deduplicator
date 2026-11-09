@@ -1,5 +1,6 @@
 package com.doronyg.photoarchivededuplicator.scan
 
+import com.doronyg.photoarchivededuplicator.IoLane
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
@@ -22,7 +23,12 @@ class ScanTestEnvironment : AutoCloseable {
     var beforeStatement: (String) -> Unit = {}
     val repository = newRepository()
 
-    fun newRepository() = DirectoryRepository(createFilesDatabase(IoGuardedDriver(driver, io) { beforeStatement(it) }), io)
+    internal fun newRepository(
+        markerExclusions: BinMarkerExclusions = BinMarkerExclusions(fs, IoLane("marker-test", io)),
+    ) = DirectoryRepository(
+        createFilesDatabase(IoGuardedDriver(driver, io) { beforeStatement(it) }), io,
+        markerExclusions = markerExclusions,
+    )
 
     fun test(body: suspend TestScope.() -> Unit) = runTest(testDispatcher, testBody = body)
 

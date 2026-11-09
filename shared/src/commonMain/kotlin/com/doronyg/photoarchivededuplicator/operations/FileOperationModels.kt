@@ -23,7 +23,7 @@ internal enum class FileOperationIssueCode {
     SURVIVOR_MISSING, SURVIVOR_CHANGED, SURVIVOR_IN_BIN, SURVIVOR_SELECTED,
     PROTECTED_GROUP, STALE_RECOMMENDATION, DESTINATION_EXISTS, DESTINATION_COLLISION,
     UNSAFE_PATH, FILESYSTEM_ERROR, BIN_ROOT_CHANGED, BIN_NOT_DIRECTORY, BIN_PARENT_UNAVAILABLE,
-    BUSY, CONFIGURATION_ERROR, PROPOSAL_ERROR,
+    BUSY, CONFIGURATION_ERROR, PROPOSAL_ERROR, DIRECTORY_PREPARATION_ERROR, EXECUTION_ERROR,
 }
 
 internal data class FileOperationFinding(
@@ -104,4 +104,7 @@ internal data class FileOperationState(
     val proposal: FileOperationProposal? = null,
     val busy: Boolean = false,
     val error: FileOperationFinding? = null,
+    val directoryPreparation: BinDirectoryPreparationResult? = null,
+    val executionProgress: FileExecutionProgress? = null,
+    val executionResult: FileExecutionResult? = null,
 )

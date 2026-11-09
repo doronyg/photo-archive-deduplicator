@@ -112,12 +112,46 @@ class DirectoryRepository internal constructor(
     private val database: FilesDatabase,
     ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val databaseLane: IoLane = IoLane("database-test", ioDispatcher),
+    private val markerExclusions: BinMarkerExclusions? = null,
 ) {
     private val directories = database.scanDirectoryQueries
     private val files = database.scanFileQueries
     private val excluded = database.directoryExclusionQueries
     private val bins = database.fileBinRootQueries
     private val scanSession = Mutex()
+
+    /** Discovery never activates a Bin or removes inventory; SQL hides registered trees. */
+    internal suspend fun registerDiscoveredBinRoots(roots: Collection<Path>) {
+        if (roots.isEmpty()) return
+        io("register discovered Bin markers") {
+            val known = registeredBinRootsInLane()
+            val newRoots = roots.map { it.inventoryPath() }.filter { root -> known.none { root.isInTree(it) } }
+            if (newRoots.isEmpty()) return@io
+            database.transaction {
+                newRoots.forEach { bins.register(it.toString(), 0) }
+            }
+        }
+    }
+
+    internal fun newBinMarkerPass(): BinMarkerExclusions.Pass? = markerExclusions?.newPass()
+
+    internal suspend fun discoverBinMarkers(
+        directories: Collection<Path>,
+        pass: BinMarkerExclusions.Pass? = null,
+    ) {
+        val markers = markerExclusions ?: return
+        registerDiscoveredBinRoots((pass ?: markers.newPass()).discover(directories))
+    }
+
+    internal suspend fun eligibleRetentionGroups(groups: List<List<FileRecord>>): List<List<FileRecord>> {
+        val exclusions = exclusions()
+        return groups.map { members ->
+            members.filterNot { file ->
+                file.path.isBinMarkerMetadata() || file.path.isHistoryMetadata() ||
+                    exclusions.any { file.path.isInTree(it.path) }
+            }
+        }
+    }
 
     internal suspend fun loadUiChoices(): UiChoices = io("load UI choices") { loadUiChoicesInLane(database) }
 
@@ -152,7 +186,8 @@ class DirectoryRepository internal constructor(
                 database.scanSessionQueries.clearSelection()
                 database.scanSessionQueries.beginSession(normalized.toString())
                 // Legacy resume creates only the session; completed roots must not be requeued.
-                if (newScan && exclusionsInLane().none { normalized.isInTree(it.path) }) {
+                if (newScan && !normalized.isBinMarkerMetadata() &&
+                    exclusionsInLane().none { normalized.isInTree(it.path) }) {
                     enqueue(normalized, parent = null, modifiedAt = null)
                 }
             }
@@ -309,7 +344,8 @@ class DirectoryRepository internal constructor(
     /** Queues [root] for scanning, re-queuing it if a previous scan already processed it. */
     suspend fun seedRoot(root: Path) = io("seedRoot transaction $root") {
         val normalized = root.inventoryPath()
-        if (!normalized.isHistoryMetadata() && exclusionsInLane().none { normalized.isInTree(it.path) }) {
+        if (!normalized.isHistoryMetadata() && !normalized.isBinMarkerMetadata() &&
+            exclusionsInLane().none { normalized.isInTree(it.path) }) {
             Diagnostics.logger.operation(LogTags.DATABASE, "transaction seedRoot $normalized") {
                 database.transaction { enqueue(normalized, parent = null, modifiedAt = null) }
             }
@@ -340,7 +376,8 @@ class DirectoryRepository internal constructor(
      */
     suspend fun recordListing(dir: Path, listing: DirectoryListing, scannedAt: Long) = io("recordListing transaction $dir") {
         val exclusions = exclusionsInLane()
-        fun protected(path: Path) = path.isHistoryMetadata() || exclusions.any { path.isInTree(it.path) }
+        fun protected(path: Path) = path.isHistoryMetadata() || path.isBinMarkerMetadata() ||
+            exclusions.any { path.isInTree(it.path) }
         if (protected(dir)) return@io
         Diagnostics.logger.operation(LogTags.DATABASE, "transaction recordListing $dir") { database.transaction {
             val dirKey = dir.toString()
@@ -440,6 +477,30 @@ class DirectoryRepository internal constructor(
 
     suspend fun file(path: Path): FileRecord? = io("file $path") {
         files.selectVisibleByPath(path.toString()).awaitAsOneOrNull()?.toRecord()
+    }
+
+    /** Called only after a filesystem move and its completed journal event are verified. */
+    internal suspend fun recordCompletedMove(expected: FileRecord) = io("record completed move ${expected.path}") {
+        database.transaction {
+            val key = expected.path.toString()
+            val current = files.selectByPath(key).awaitAsOneOrNull()?.toRecord()
+            if (current != null) {
+                check(FileScoreInput.from(current) == FileScoreInput.from(expected)) {
+                    "Inventory changed after moving ${expected.path}; rescan to reconcile."
+                }
+                val directory = checkNotNull(directories.selectByPath(current.directoryPath.toString()).awaitAsOneOrNull()) {
+                    "Moved file has no inventory directory; rescan to reconcile."
+                }
+                check(directory.fileCount > 0) { "Invalid directory file count; rescan to reconcile." }
+                files.deleteByPath(key)
+                directories.updateFileCount(directory.fileCount - 1, directory.path)
+            }
+            database.fileScoreQueries.selectForPaths(listOf(key), null, null, 0).awaitAsList().forEach {
+                database.fileScoreFactorQueries.deleteForScore(it.id)
+            }
+            database.fileScoreQueries.deleteForFile(key)
+            database.fileExifQueries.deleteForFile(key)
+        }
     }
 
     suspend fun allFiles(): List<FileRecord> = io("allFiles") {

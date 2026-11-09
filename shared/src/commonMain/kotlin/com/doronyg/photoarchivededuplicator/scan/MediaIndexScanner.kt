@@ -40,14 +40,27 @@ internal class MediaIndexScanner(
 
     private suspend fun scanRoot(root: Path, onEvent: suspend (ScanEvent) -> Unit) {
         val scanRoot = root.inventoryPath()
-        val exclusions = repository.exclusions()
-        if (scanRoot.isHistoryMetadata() || exclusions.any { scanRoot.isInTree(it.path) }) return
+        var exclusions = repository.exclusions()
+        if (scanRoot.isHistoryMetadata() || scanRoot.isBinMarkerMetadata() ||
+            exclusions.any { scanRoot.isInTree(it.path) }) return
+        val markers = repository.newBinMarkerPass()
+        repository.discoverBinMarkers(listOf(scanRoot), markers)
+        exclusions = repository.exclusions()
+        if (exclusions.any { scanRoot.isInTree(it.path) }) return
         repository.seedRoot(scanRoot)
-        val filesByFolder = Diagnostics.logger.operation(LogTags.MEDIA_INDEX, "source.items dispatch-to=$ioDispatcher") {
+        val items = Diagnostics.logger.operation(LogTags.MEDIA_INDEX, "source.items dispatch-to=$ioDispatcher") {
             withContext(ioDispatcher) { source.items() }
         }
             .map { it.copy(path = it.path.normalized()) }
-            .filter { !it.path.isHistoryMetadata() && it.path != scanRoot && it.path.isInTree(scanRoot) &&
+            .filter { !it.path.isHistoryMetadata() && !it.path.isBinMarkerMetadata() &&
+                it.path != scanRoot && it.path.isInTree(scanRoot) &&
+                exclusions.none { excluded -> it.path.isInTree(excluded.path) } }
+        // MediaStore does not index JSON markers. Probe accessible filesystem ancestors;
+        // inaccessible marker metadata fails the scan rather than admitting Bin photos.
+        repository.discoverBinMarkers(items.mapNotNull { it.path.parent }.distinct(), markers)
+        exclusions = repository.exclusions()
+        if (exclusions.any { scanRoot.isInTree(it.path) }) return
+        val filesByFolder = items.filter {
                 exclusions.none { excluded -> it.path.isInTree(excluded.path) } }
             .groupBy { it.path.parent!! }
         val subfoldersByFolder = subfolderTree(scanRoot, filesByFolder.keys)

@@ -91,6 +91,7 @@ fun InventoryApp(container: AppContainer, scanTarget: ScanTarget, pathActions: P
                     UiTab.entries.forEach { tab ->
                         Tab(
                             selected = selectedTab == tab,
+                            enabled = !fileOperationState.busy,
                             onClick = { container.uiPreferences.update { it.copy(selectedTab = tab) } },
                             text = { Text(tab.title) },
                         )
@@ -104,7 +105,8 @@ fun InventoryApp(container: AppContainer, scanTarget: ScanTarget, pathActions: P
                     UiTab.SUSPECTED_DUPLICATES -> SuspectedDuplicatesScreen(container.repository, container.retentionScores,
                         container.exifQueue, pathActions, container.uiPreferences, scanState is ScanState.Running, content, container.directoryClassifications)
                     UiTab.STATISTICS -> RecommendationStatisticsScreen(container.repository, container.retentionScores,
-                        container.exifQueue, scanState is ScanState.Running, content, container.directoryClassifications, container.uiPreferences)
+                        container.exifQueue, scanState is ScanState.Running, content, container.directoryClassifications,
+                        container.uiPreferences, container.operationHistory)
                     UiTab.DELETION_RECOMMENDATIONS -> DeletionRecommendationsScreen(container.repository, container.retentionScores,
                         container.exifQueue, pathActions, container.uiPreferences, scanState is ScanState.Running,
                         content, container.directoryClassifications, fileOperationsBusy = fileOperationState.busy,
@@ -115,9 +117,11 @@ fun InventoryApp(container: AppContainer, scanTarget: ScanTarget, pathActions: P
                         })
                     UiTab.FILE_OPERATIONS -> Column(content) {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            FilterChip(selected = !showingOperationHistory, onClick = { showingOperationHistory = false },
+                            FilterChip(selected = !showingOperationHistory, enabled = !fileOperationState.busy,
+                                onClick = { showingOperationHistory = false },
                                 label = { Text(OperationHistoryStrings.localProposals) })
-                            FilterChip(selected = showingOperationHistory, onClick = { showingOperationHistory = true },
+                            FilterChip(selected = showingOperationHistory, enabled = !fileOperationState.busy,
+                                onClick = { showingOperationHistory = true },
                                 label = { Text(OperationHistoryStrings.title) })
                         }
                         if (showingOperationHistory) {
@@ -127,7 +131,8 @@ fun InventoryApp(container: AppContainer, scanTarget: ScanTarget, pathActions: P
                                 modifier = Modifier.weight(1f))
                         } else {
                             FileOperationsScreen(container.fileOperations, container.uiPreferences, container.exifQueue,
-                                pathActions, scanState is ScanState.Running || operationHistoryState.busy, Modifier.weight(1f))
+                                pathActions, scanState is ScanState.Running || operationHistoryState.busy ||
+                                    classificationState.isRunning, Modifier.weight(1f))
                         }
                     }
                     UiTab.OLLAMA -> OllamaSettingsScreen(container.uiPreferences, container.directoryClassifications,

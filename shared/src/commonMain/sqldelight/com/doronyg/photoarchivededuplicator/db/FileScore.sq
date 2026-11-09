@@ -11,6 +11,9 @@ CREATE TABLE fileScore (
     UNIQUE(filePath, profileId)
 );
 
+deleteForFile:
+DELETE FROM fileScore WHERE filePath = :filePath;
+
 selectForPaths:
 SELECT s.id, s.filePath, s.directoryPath, s.inputSizeBytes, s.inputModifiedAt, s.inputCreatedAt,
        p.scoreType, p.algorithmId, p.algorithmVersion, p.configurationId, s.value, s.createdAt

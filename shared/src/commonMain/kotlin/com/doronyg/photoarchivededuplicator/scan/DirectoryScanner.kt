@@ -52,19 +52,29 @@ internal class DirectoryScanner(
     private val clock: () -> Long = { Clock.System.now().toEpochMilliseconds() },
     private val filesystemLane: IoLane = IoLane("filesystem-test", ioDispatcher),
 ) : InventoryScanner {
+    private val markerExclusions = BinMarkerExclusions(fileSystem, filesystemLane)
+
     override suspend fun startScan(root: Path, onEvent: suspend (ScanEvent) -> Unit) = repository.scanning {
-        if (root.isHistoryMetadata()) return@scanning
+        if (root.isHistoryMetadata() || root.isBinMarkerMetadata() || repository.isExcluded(root)) return@scanning
+        val markers = markerExclusions.newPass()
+        repository.registerDiscoveredBinRoots(markers.discover(listOf(root)))
         repository.seedRoot(root)
-        resumeScan(root.inventoryPath(), onEvent)
+        resumeScan(root.inventoryPath(), onEvent, markers)
     }
 
     /** Continues only the selected logical scan, leaving other roots' queues intact. */
     override suspend fun resume(onEvent: suspend (ScanEvent) -> Unit) = repository.scanning {
-        resumeScan(repository.resumableScanSession().root, onEvent)
+        resumeScan(repository.resumableScanSession().root, onEvent, markerExclusions.newPass())
     }
 
-    private suspend fun resumeScan(root: Path, onEvent: suspend (ScanEvent) -> Unit) {
-        if (root.isHistoryMetadata()) return
+    private suspend fun resumeScan(
+        root: Path,
+        onEvent: suspend (ScanEvent) -> Unit,
+        markers: BinMarkerExclusions.Pass,
+    ) {
+        if (root.isHistoryMetadata() || root.isBinMarkerMetadata() || repository.isExcluded(root)) return
+        repository.registerDiscoveredBinRoots(markers.discover(listOf(root)))
+        if (repository.isExcluded(root)) return
         repository.resetInterrupted(root)
         onEvent(ScanEvent.Started(pendingDirectories = repository.pendingScanCount(root)))
         while (true) {
@@ -74,16 +84,26 @@ internal class DirectoryScanner(
                 currentCoroutineContext().ensureActive()
                 if (repository.isExcluded(dir)) continue
                 onEvent(ScanEvent.DirectoryStarted(dir))
-                scanDirectory(dir, onEvent)
+                scanDirectory(dir, onEvent, markers)
             }
         }
     }
 
-    private suspend fun scanDirectory(dir: Path, onEvent: suspend (ScanEvent) -> Unit) {
+    private suspend fun scanDirectory(
+        dir: Path,
+        onEvent: suspend (ScanEvent) -> Unit,
+        markers: BinMarkerExclusions.Pass,
+    ) {
         repository.markInProgress(dir)
         val exclusions = repository.exclusions()
         val listing = try {
-            filesystemLane.run("readListing $dir") { readListing(dir, exclusions) }
+            val read = filesystemLane.run("readListing $dir") { readListing(dir, exclusions) }
+            repository.registerDiscoveredBinRoots(markers.discover(listOf(dir) + read.subdirectories.map { it.path }))
+            val currentExclusions = repository.exclusions()
+            DirectoryListing(
+                read.subdirectories.filterNot { entry -> currentExclusions.any { entry.path.isInTree(it.path) } },
+                read.files.filterNot { entry -> currentExclusions.any { entry.path.isInTree(it.path) } },
+            )
         } catch (e: IOException) {
             val record = repository.recordFailure(dir, config.maxAttempts)
             val willRetry = record.status == DirectoryStatus.PENDING
@@ -101,7 +121,8 @@ internal class DirectoryScanner(
         val files = mutableListOf<DirectoryListing.Entry>()
         for (child in Diagnostics.logger.operation(LogTags.FILE_SYSTEM, "list $dir") { fileSystem.list(dir) }) {
             currentCoroutineContext().ensureActive()
-            if (child.isHistoryMetadata() || exclusions.any { child.isInTree(it.path) }) continue
+            if (child.isHistoryMetadata() || child.isBinMarkerMetadata() ||
+                exclusions.any { child.isInTree(it.path) }) continue
             // Entries can vanish between list() and metadata(); skip them
             val metadata = Diagnostics.logger.operation(LogTags.FILE_SYSTEM, "metadataOrNull $child") {
                 fileSystem.metadataOrNull(child)

@@ -56,7 +56,67 @@ internal class FileOperationService(
             }
         }
 
-    private suspend fun createInSession(selected: List<SelectedDeletionGroup>): FileOperationProposal {
+    /** Caller holds the scan session for validation and subsequent execution. */
+    suspend fun revalidateForExecution(proposal: FileOperationProposal): DirectoryClassificationContext? =
+        withContext(dispatcher) {
+            if (admissionBlocked()) throw FileOperationException(FileOperationFinding(FileOperationIssueCode.BUSY))
+            if (proposal.validationStatus != FileOperationValidationStatus.READY || proposal.archiveRoot != null)
+                throw FileOperationException(FileOperationFinding(FileOperationIssueCode.STALE_RECOMMENDATION))
+            if (repository.binRoot() != proposal.binRoot)
+                throw FileOperationException(FileOperationFinding(FileOperationIssueCode.BIN_ROOT_CHANGED))
+            val context = classificationContext()
+            val fresh = currentRecommendations(context)
+            val selection = proposal.groups.map { group ->
+                fresh[group.key] ?: throw FileOperationException(
+                    FileOperationFinding(FileOperationIssueCode.STALE_RECOMMENDATION, detail = group.categoryName))
+            }
+            val current = createInSession(selection, save = false, freshRecommendations = fresh)
+            val finding = current.findings.firstOrNull() ?: current.moves.flatMap { it.findings }.firstOrNull()
+            if (finding != null) throw FileOperationException(finding)
+            if (current.groups != proposal.groups || current.moves != proposal.moves || classificationContext() != context)
+                throw FileOperationException(FileOperationFinding(FileOperationIssueCode.STALE_RECOMMENDATION))
+            context
+        }
+
+    suspend fun validateBeforeMove(
+        proposal: FileOperationProposal,
+        move: ProposedFileMove,
+        expectedContext: DirectoryClassificationContext?,
+    ) {
+        if (admissionBlocked()) throw FileOperationException(FileOperationFinding(FileOperationIssueCode.BUSY))
+        if (repository.binRoot() != proposal.binRoot)
+            throw FileOperationException(FileOperationFinding(FileOperationIssueCode.BIN_ROOT_CHANGED))
+        if (classificationContext() != expectedContext)
+            throw FileOperationException(FileOperationFinding(FileOperationIssueCode.STALE_RECOMMENDATION))
+        check(move in proposal.moves) { "Move is not part of the approved proposal" }
+        val groups = proposal.groups.filter { group -> group.members.any { it.file.path == move.sourcePath } }
+        check(groups.isNotEmpty()) { "Move has no saved recommendation group" }
+        val members = groups.flatMap { it.members }.distinctBy { it.file.path }
+        val classifications = expectedContext?.let {
+            repository.directoryClassifications(members.map { member -> member.file.directoryPath }.distinct(), it)
+                .associateBy { record -> record.directoryPath }
+        }.orEmpty()
+        if (members.any { it.classification == DirectoryClassification.PROTECTED } ||
+            classifications.values.any { it.classification == DirectoryClassification.PROTECTED })
+            throw FileOperationException(FileOperationFinding(FileOperationIssueCode.PROTECTED_GROUP, move.sourcePath))
+        if (members.any {
+            operationClassificationEvidence(classifications[it.file.directoryPath]) != it.evidence["classification"]
+        }) throw FileOperationException(FileOperationFinding(FileOperationIssueCode.STALE_RECOMMENDATION, move.sourcePath))
+        val exclusions = repository.exclusions()
+        if (exclusions.any { move.sourcePath.isInTree(it.path) || move.survivorPath?.isInTree(it.path) == true })
+            throw FileOperationException(FileOperationFinding(FileOperationIssueCode.UNSAFE_PATH, move.sourcePath))
+    }
+
+    private suspend fun currentRecommendations(context: DirectoryClassificationContext?) =
+        DeletionRecommendationService(repository, retention, dispatcher, context).load()
+            .categories.flatMap { category -> category.groups.map { SelectedDeletionGroup(category.category, it) } }
+            .associateBy { it.key }
+
+    private suspend fun createInSession(
+        selected: List<SelectedDeletionGroup>,
+        save: Boolean = true,
+        freshRecommendations: Map<String, SelectedDeletionGroup>? = null,
+    ): FileOperationProposal {
         if (selected.isEmpty())
             throw FileOperationException(FileOperationFinding(FileOperationIssueCode.EMPTY_SELECTION))
         val binRoot = repository.binRoot()
@@ -65,9 +125,7 @@ internal class FileOperationService(
         val context = classificationContext()
         val selection = selected.distinctBy { it.key }
         val createdAt = clock()
-        val fresh = DeletionRecommendationService(repository, retention, dispatcher, context).load()
-            .categories.flatMap { category -> category.groups.map { SelectedDeletionGroup(category.category, it) } }
-            .associateBy { it.key }
+        val fresh = freshRecommendations ?: currentRecommendations(context)
         val findings = mutableListOf<FileOperationFinding>()
         for (group in selection) {
             if (fresh[group.key] != group)
@@ -153,7 +211,7 @@ internal class FileOperationService(
                 .associateBy { record -> record.directoryPath } }.orEmpty()) != classifications)
             findings += FileOperationFinding(FileOperationIssueCode.STALE_RECOMMENDATION)
         return FileOperationProposal(nextId(), createdAt, clock(), null, binRoot, groups, moves,
-            findings.distinct()).also { proposals.save(it) }
+            findings.distinct()).also { if (save) proposals.save(it) }
     }
 
     private inner class MetadataInspection {

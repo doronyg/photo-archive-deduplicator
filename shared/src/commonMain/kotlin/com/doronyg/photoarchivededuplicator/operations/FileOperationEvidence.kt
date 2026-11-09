@@ -52,7 +52,11 @@ internal fun operationEvidence(
             }) }
         })
     } } ?: JsonNull)
-    put("classification", classification?.let { saved -> buildJsonObject {
+    put("classification", operationClassificationEvidence(classification))
+}
+
+internal fun operationClassificationEvidence(classification: DirectoryClassificationRecord?): JsonElement =
+    classification?.let { saved -> buildJsonObject {
         put("directoryPath", saved.directoryPath.toString())
         put("originalPath", saved.originalPath)
         put("classification", saved.classification.name)
@@ -60,5 +64,4 @@ internal fun operationEvidence(
         put("model", saved.context.model)
         put("promptVersion", saved.context.promptVersion)
         put("classifiedAt", saved.classifiedAt)
-    } } ?: JsonNull)
-}
+    } } ?: JsonNull

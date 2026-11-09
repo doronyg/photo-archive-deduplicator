@@ -51,6 +51,69 @@ class FileOperationServiceTest {
             fileSystem, f.dispatcher, clock = { 100 }, nextId = { "proposal-1" })
 
     @Test
+    fun executionRevalidationChecksTheSavedPlanWithoutCreatingAnotherProposal() = concurrencyTest { f ->
+        val fixture = seed(f)
+        val service = service(f, fixture)
+        val proposal = service.createProposal(listOf(fixture.selected))
+        assertNull(service.revalidateForExecution(proposal))
+        assertEquals(1, fixture.proposals.recent().size)
+        assertEquals(proposal, fixture.proposals.load(proposal.id))
+        f.fakeFs.write(proposal.moves.single().sourcePath) { writeUtf8("changed") }
+        val failure = assertFailsWith<FileOperationException> { service.revalidateForExecution(proposal) }
+        assertEquals(FileOperationIssueCode.SOURCE_CHANGED, failure.finding.code)
+        assertEquals(1, fixture.proposals.recent().size)
+    }
+
+    @Test
+    fun executionRejectsChangedRecommendationsAndNewlyProtectedGroups() = concurrencyTest { f ->
+        val fixture = seed(f)
+        val context = OllamaSettings("http://ollama.test", "model").context()
+        val service = FileOperationService(f.repository, fixture.proposals, fixture.retention, f.lane,
+            f.fakeFs, f.dispatcher, classificationContext = { context },
+            clock = { 100 }, nextId = { "approved" })
+        val proposal = service.createProposal(listOf(fixture.selected))
+        assertEquals(context, service.revalidateForExecution(proposal))
+        f.repository.saveDirectoryClassification(DirectoryClassificationRecord(
+            f.root / "Family", (f.root / "Family").toString(), DirectoryClassification.PROTECTED, context, 5))
+        val failure = assertFailsWith<FileOperationException> {
+            service.validateBeforeMove(proposal, proposal.moves.single(), context)
+        }
+        assertEquals(FileOperationIssueCode.PROTECTED_GROUP, failure.finding.code)
+        assertFailsWith<FileOperationException> { service.revalidateForExecution(proposal) }
+        assertFalse(f.fakeFs.exists(fixture.bin))
+    }
+
+    @Test
+    fun confirmedMoveInventoryUpdateRemovesOnlyTheMatchingSourceAndItsEvidence() = concurrencyTest { f ->
+        val fixture = seed(f)
+        val source = fixture.selected.group.candidates.single().advice.file
+        val keeper = fixture.selected.group.survivors.single().advice.file
+        val sourceScore = f.repository.fileScores(listOf(source.path)).single()
+        assertTrue(f.repository.saveFileScore(sourceScore.copy(
+            identity = sourceScore.identity.copy(configurationId = "historical-profile"))))
+        val retainedScores = f.repository.fileScores(listOf(keeper.path))
+        val retainedExif = f.repository.fileExif(listOf(keeper.path))
+        assertEquals(2, f.repository.fileScores(listOf(source.path)).size)
+        f.repository.recordCompletedMove(source)
+        assertNull(f.repository.file(source.path))
+        assertNotNull(f.repository.file(keeper.path))
+        assertTrue(f.repository.fileExif(listOf(source.path)).isEmpty())
+        assertTrue(f.repository.fileScores(listOf(source.path)).isEmpty())
+        assertEquals(retainedScores, f.repository.fileScores(listOf(keeper.path)))
+        assertEquals(retainedExif, f.repository.fileExif(listOf(keeper.path)))
+        assertEquals(1, f.repository.directory(source.directoryPath)?.fileCount)
+        assertEquals(1L, f.repository.summary().fileCount)
+        assertTrue(f.repository.suspectedDuplicates().isEmpty())
+        f.repository.recordCompletedMove(source)
+        assertEquals(1, f.repository.directory(source.directoryPath)?.fileCount)
+        val current = assertNotNull(f.repository.file(keeper.path))
+        assertFailsWith<IllegalStateException> {
+            f.repository.recordCompletedMove(current.copy(sizeBytes = current.sizeBytes + 1))
+        }
+        assertNotNull(f.repository.file(keeper.path))
+    }
+
+    @Test
     fun persistsExactCandidatesSurvivorsAndEvidenceWithoutChangingFilesOrReassessing() = concurrencyTest { f ->
         val fixture = seed(f)
         val beforePaths = f.fakeFs.listRecursively(f.root).toList()

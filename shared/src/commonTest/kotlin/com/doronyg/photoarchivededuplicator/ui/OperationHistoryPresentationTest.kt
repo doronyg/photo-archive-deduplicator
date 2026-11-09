@@ -63,7 +63,7 @@ class OperationHistoryPresentationTest {
         )
         assertEquals(strings.verified, operationHistoryMappingStatus(state, archive.toString(), bin))
         assertEquals(strings.verified, operationHistoryMappingStatus(state, "  $archive  ", bin))
-        assertTrue("remain disabled" in operationHistoryMappingStatus(state, archive.toString(), bin))
+        assertTrue("Approve file moves" in operationHistoryMappingStatus(state, archive.toString(), bin))
         val unverifiedStates = listOf(
             state.copy(binding = null),
             state.copy(snapshot = null),
@@ -178,6 +178,7 @@ class OperationHistoryPresentationTest {
         assertTrue("writes identity metadata" in strings.registrationNote)
         assertTrue("does not move files" in strings.registrationNote)
         assertTrue("Create missing" in strings.registrationConfirmation)
-        assertTrue("No moves, restoration" in strings.actionsDisabled)
+        assertTrue("Real runs are started from Local dry runs" in strings.actionsDisabled)
+        assertTrue("Restoration, independent AI review, and permanent deletion are not implemented" in strings.actionsDisabled)
     }
 }

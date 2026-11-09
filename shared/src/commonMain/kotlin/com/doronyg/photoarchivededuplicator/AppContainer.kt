@@ -2,6 +2,7 @@ package com.doronyg.photoarchivededuplicator
 
 import app.cash.sqldelight.db.SqlDriver
 import com.doronyg.photoarchivededuplicator.scan.DirectoryRepository
+import com.doronyg.photoarchivededuplicator.scan.BinMarkerExclusions
 import com.doronyg.photoarchivededuplicator.scan.InventoryScanner
 import com.doronyg.photoarchivededuplicator.scan.ScanController
 import com.doronyg.photoarchivededuplicator.scan.createFilesDatabase
@@ -19,6 +20,13 @@ import com.doronyg.photoarchivededuplicator.classification.ollamaBaseUrl
 import com.doronyg.photoarchivededuplicator.operations.FileOperationController
 import com.doronyg.photoarchivededuplicator.operations.FileOperationRepository
 import com.doronyg.photoarchivededuplicator.operations.FileOperationService
+import com.doronyg.photoarchivededuplicator.operations.BinDirectoryPreparer
+import com.doronyg.photoarchivededuplicator.operations.FileOperationExecutor
+import com.doronyg.photoarchivededuplicator.operations.FileMoveIo
+import com.doronyg.photoarchivededuplicator.operations.platformFileMoveIo
+import com.doronyg.photoarchivededuplicator.operations.FileOperationProposal
+import com.doronyg.photoarchivededuplicator.operations.history.ArchiveBinding
+import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificationContext
 import com.doronyg.photoarchivededuplicator.operations.OperationHistoryController
 import com.doronyg.photoarchivededuplicator.operations.history.OperationHistoryStore
 import com.doronyg.photoarchivededuplicator.scan.ScanState
@@ -35,6 +43,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import okio.FileSystem
+import okio.Path.Companion.toPath
 
 /**
  * Owns the app's long-lived objects. Create exactly one per process (in the platform
@@ -51,6 +60,8 @@ class AppContainer internal constructor(
     initialUiChoices: UiChoices = UiChoices(),
     createExifSource: (IoLane) -> ExifSource = { FileSystemExifSource(FileSystem.SYSTEM, it) },
     createOllamaClient: () -> HttpClient = ::createOllamaHttpClient,
+    fileSystem: FileSystem = FileSystem.SYSTEM,
+    moveIo: FileMoveIo = platformFileMoveIo(),
 ) {
     /** Lives as long as the app; scans run here, not in a composition scope. */
     private val appJob = SupervisorJob()
@@ -59,7 +70,8 @@ class AppContainer internal constructor(
     private var closed = false
 
     private val database = createFilesDatabase(driver)
-    val repository = DirectoryRepository(database, databaseLane = databaseLane)
+    val repository = DirectoryRepository(database, databaseLane = databaseLane,
+        markerExclusions = BinMarkerExclusions(fileSystem, filesystemLane))
     private val ollamaClient = lazy(createOllamaClient)
     val directoryClassifications = DirectoryClassificationController(appScope,
         DirectoryClassifier { directory, context -> OllamaDirectoryClassifier(ollamaClient.value).classify(directory, context) },
@@ -78,17 +90,57 @@ class AppContainer internal constructor(
         })
     val uiPreferences = UiPreferences(initialUiChoices, appScope, repository::saveUiChoices)
     private val operationProposals = FileOperationRepository(database, databaseLane)
+    private val operationHistoryStore = OperationHistoryStore(filesystemLane, fileSystem, workerDispatcher)
+    private val binDirectoryPreparer = BinDirectoryPreparer(filesystemLane, fileSystem, workerDispatcher)
+    private val fileOperationExecutor = FileOperationExecutor(filesystemLane, moveIo, fileSystem, workerDispatcher)
     private fun operationBlocked(): Boolean = scanController.state.value is ScanState.Running ||
         exifQueue.state.value.isRunning || directoryClassifications.state.value.isRunning
-    internal val fileOperations = FileOperationController(appScope, repository, operationProposals,
-        FileOperationService(repository, operationProposals, retentionScores, filesystemLane,
+    private val fileOperationService =
+        FileOperationService(repository, operationProposals, retentionScores, filesystemLane, fileSystem,
             dispatcher = workerDispatcher, classificationContext = {
                 val settings = uiPreferences.state.value.ollama
                 if (settings.baseUrl.isBlank() && settings.model.isBlank()) null else settings.context()
-            }, admissionBlocked = ::operationBlocked),
-        admissionBlocked = ::operationBlocked)
+            }, admissionBlocked = ::operationBlocked)
+    internal val fileOperations = FileOperationController(appScope, repository, operationProposals, fileOperationService,
+        admissionBlocked = ::operationBlocked, prepareBinDirectories = { proposal ->
+            binDirectoryPreparer.prepare(proposal, operationBinding(proposal))
+        }, executeMoves = { proposal, progress ->
+            val binding = operationBinding(proposal)
+            var context: DirectoryClassificationContext? = null
+            var validated = false
+            try {
+                fileOperationExecutor.execute(proposal, binding,
+                    validate = {
+                        context = fileOperationService.revalidateForExecution(proposal)
+                        validated = true
+                    },
+                    beforeMove = {
+                        check(validated) { "Execution has not been validated" }
+                        fileOperationService.validateBeforeMove(proposal, it, context)
+                    },
+                    recordMove = repository::recordCompletedMove,
+                    onProgress = progress,
+                )
+            } finally {
+                operationHistory.refresh()
+            }
+        })
     internal val operationHistory = OperationHistoryController(appScope, repository, uiPreferences,
-        OperationHistoryStore(filesystemLane, dispatcher = workerDispatcher), admissionBlocked = ::operationBlocked)
+        operationHistoryStore, admissionBlocked = ::operationBlocked)
+
+    private suspend fun operationBinding(proposal: FileOperationProposal): ArchiveBinding {
+        val saved = uiPreferences.state.value
+        check(saved.operationHistoryArchiveRoot.isNotBlank() && saved.operationHistoryArchiveId.isNotBlank() &&
+            saved.operationHistoryRegistrationToken.isNotBlank()) {
+            "Register or connect the archive in Operation history before preparing or moving files."
+        }
+        val binding = operationHistoryStore.verify(saved.operationHistoryArchiveRoot.toPath(), proposal.binRoot)
+        check(binding.identity.archiveId == saved.operationHistoryArchiveId &&
+            binding.identity.registrationToken == saved.operationHistoryRegistrationToken) {
+            "Archive identity changed. Connect the archive again in Operation history."
+        }
+        return binding
+    }
 
     internal suspend fun availableOllamaModels(baseUrl: String): List<String> {
         val server = ollamaBaseUrl(baseUrl)

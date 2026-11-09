@@ -6,10 +6,14 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Button
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -37,6 +41,8 @@ import com.doronyg.photoarchivededuplicator.operations.FileOperationMember
 import com.doronyg.photoarchivededuplicator.operations.FileOperationProposal
 import com.doronyg.photoarchivededuplicator.operations.FileOperationFinding
 import com.doronyg.photoarchivededuplicator.operations.FileOperationState
+import com.doronyg.photoarchivededuplicator.operations.FileOperationValidationStatus
+import com.doronyg.photoarchivededuplicator.operations.FileMoveExecutionStatus
 import com.doronyg.photoarchivededuplicator.operations.ProposedFileMove
 import com.doronyg.photoarchivededuplicator.strings.AppStrings
 import okio.Path
@@ -184,6 +190,9 @@ internal fun FileOperationsScreen(
     }
     var binInput by remember(state.binRoot) { mutableStateOf(suggestedBin) }
     var binEdited by remember(state.binRoot) { mutableStateOf(false) }
+    var preparationProposal by remember { mutableStateOf<FileOperationProposal?>(null) }
+    var executionProposal by remember { mutableStateOf<FileOperationProposal?>(null) }
+    var executionApproved by remember(executionProposal?.id) { mutableStateOf(false) }
     LaunchedEffect(suggestedBin) {
         if (!binEdited) binInput = suggestedBin
     }
@@ -262,6 +271,29 @@ internal fun FileOperationsScreen(
                         Text(strings.summary(proposal.groups.size.toLong(), proposal.moves.size.toLong(),
                             formatBytes(proposal.candidateBytes)))
                         CopyFileOperationResults(proposal)
+                        Text(strings.preparationNote, style = MaterialTheme.typography.bodySmall)
+                        OutlinedButton(
+                            enabled = writesEnabled && proposal.validationStatus == FileOperationValidationStatus.READY &&
+                                state.executionResult?.operationId != proposal.id,
+                            onClick = { preparationProposal = proposal },
+                        ) { Text(strings.prepareDirectories) }
+                        Text(strings.preparationNotApproval, style = MaterialTheme.typography.bodySmall)
+                        state.directoryPreparation?.let {
+                            Text(strings.preparedDirectories(it.createdDirectories, it.writtenMarkers, it.checkedDirectories))
+                        }
+                        Button(
+                            enabled = writesEnabled && proposal.validationStatus == FileOperationValidationStatus.READY &&
+                                state.executionResult?.operationId != proposal.id,
+                            onClick = { executionProposal = proposal },
+                        ) { Text(strings.realRun) }
+                        state.executionProgress?.let { progress ->
+                            Text(if (progress.finished) strings.executionFinished else strings.executionRunning,
+                                style = MaterialTheme.typography.titleMedium)
+                            Text(strings.executionCounts(progress.total, progress.completed, progress.failed, progress.uncertain,
+                                progress.total - progress.completed - progress.failed - progress.uncertain))
+                            Text(AppStrings.field(strings.logicalBytesMoved, formatBytes(progress.logicalBytesMoved)))
+                            progress.currentSource?.let { Text(it.toString(), style = MaterialTheme.typography.bodySmall) }
+                        }
                     }
                 }
                 item(key = "history-heading") {
@@ -284,6 +316,31 @@ internal fun FileOperationsScreen(
                     }
                 }
                 items(proposal.findings) { Text(strings.finding(it), color = MaterialTheme.colorScheme.error) }
+                state.executionResult?.takeIf { it.operationId == proposal.id }?.let { result ->
+                    item(key = "execution-heading:${result.operationId}") {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(strings.executionResults, style = MaterialTheme.typography.titleMedium)
+                            result.statisticsError?.let {
+                                Text("${strings.statisticsSaveError}\n$it", color = MaterialTheme.colorScheme.error)
+                            }
+                            if (result.items.any { it.status == FileMoveExecutionStatus.UNCERTAIN || it.postProcessingError != null })
+                                Text(strings.reconcileRun, color = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                    items(result.items, key = { "execution:${result.operationId}:${it.move.sourcePath}" }) { item ->
+                        Card(Modifier.fillMaxWidth()) {
+                            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(strings.executionStatus(item.status), style = MaterialTheme.typography.titleSmall)
+                                Text(AppStrings.field(strings.source, item.move.sourcePath.toString()))
+                                Text(AppStrings.field(strings.destination, item.move.destinationPath?.toString() ?: strings.unmapped))
+                                item.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                                item.postProcessingError?.let {
+                                    Text(AppStrings.field(strings.inventoryUpdateError, it), color = MaterialTheme.colorScheme.error)
+                                }
+                            }
+                        }
+                    }
+                }
                 proposal.groups.forEach { group ->
                     item(key = "proposal-group:${proposal.id}:${group.key}") {
                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -301,6 +358,56 @@ internal fun FileOperationsScreen(
             }
         }
         ResultsScrollbar(listState, Modifier.fillMaxHeight())
+    }
+    preparationProposal?.let { proposal ->
+        AlertDialog(
+            onDismissRequest = { preparationProposal = null },
+            title = { Text(strings.confirmPreparation) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(AppStrings.field(strings.binRoot, proposal.binRoot.toString()))
+                    Text(strings.preparationNote)
+                    Text(strings.preparationNotApproval)
+                }
+            },
+            confirmButton = {
+                TextButton(enabled = writesEnabled, onClick = {
+                    preparationProposal = null
+                    controller.prepareDirectories(proposal.id)
+                }) { Text(strings.prepareDirectories) }
+            },
+            dismissButton = {
+                TextButton(onClick = { preparationProposal = null }) { Text(AppStrings.cancel) }
+            },
+        )
+    }
+    executionProposal?.let { proposal ->
+        AlertDialog(
+            onDismissRequest = { executionProposal = null },
+            title = { Text(strings.confirmRealRun) },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(strings.summary(proposal.groups.size.toLong(), proposal.moves.size.toLong(), formatBytes(proposal.candidateBytes)))
+                    Text(AppStrings.field(strings.binRoot, proposal.binRoot.toString()))
+                    Text(strings.realRunChecks)
+                    Text(strings.realRunAiNote)
+                    Text(strings.realRunHistory)
+                    Row {
+                        Checkbox(checked = executionApproved, onCheckedChange = { executionApproved = it })
+                        Text(strings.approveMoves(proposal.moves.size))
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(enabled = writesEnabled && executionApproved, onClick = {
+                    executionProposal = null
+                    controller.runRealOperation(proposal.id)
+                }) { Text(strings.realRun) }
+            },
+            dismissButton = {
+                TextButton(onClick = { executionProposal = null }) { Text(AppStrings.cancel) }
+            },
+        )
     }
 }
 
