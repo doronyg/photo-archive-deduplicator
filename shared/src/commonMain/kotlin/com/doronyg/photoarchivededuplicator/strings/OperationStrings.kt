@@ -4,6 +4,7 @@ import com.doronyg.photoarchivededuplicator.operations.FileOperationFinding
 import com.doronyg.photoarchivededuplicator.operations.FileOperationIssueCode
 import com.doronyg.photoarchivededuplicator.operations.FileOperationValidationStatus
 import com.doronyg.photoarchivededuplicator.operations.FileMoveExecutionStatus
+import com.doronyg.photoarchivededuplicator.operations.FileExecutionPhase
 import com.doronyg.photoarchivededuplicator.recommendation.FileRecommendationRole
 
 internal object OperationStrings {
@@ -32,6 +33,10 @@ internal object OperationStrings {
     const val reconcileRun = "This run needs reconciliation. Check Operation history and the source/Bin locations before retrying. Rescan the archive if inventory updates failed."
     const val executionFinished = "Execution finished"
     const val executionRunning = "Moving approved files..."
+    const val cancelOperation = "Cancel operation"
+    const val stoppingOperation = "Stopping after the current file and saving results..."
+    const val executionCancelled = "Operation cancelled"
+    const val cancellationNote = "Cancellation finishes the current file and saves the partial batch. Completed moves are not rolled back. A filesystem call can delay stopping."
     const val inventoryUpdateError = "Inventory update needs reconciliation"
     const val statisticsSaveError = "Statistics checkpoint could not be saved. Confirmed moves remain recorded in Operation history."
     const val logicalBytesMoved = "Logical bytes moved to Bin (not storage reclaimed)"
@@ -83,7 +88,22 @@ internal object OperationStrings {
     fun eligibleMoves(eligible: Int, total: Int, bytes: String) =
         "Eligible for execution: $eligible of $total proposed files | up to $bytes"
     fun executionCounts(total: Int, completed: Int, failed: Int, uncertain: Int, remaining: Int) =
-        "$completed/$total moved and verified; $failed failed; $uncertain uncertain; $remaining not started."
+        "$completed/$total moved and durably recorded; $failed failed/skipped; $uncertain uncertain; $remaining not started."
+    fun verifiedMoves(count: Int) = "$count moves verified, including any awaiting journal confirmation."
+    fun executionTime(elapsed: String, remaining: String?) =
+        "Elapsed: $elapsed" + (remaining?.let { " | Estimated remaining: $it" } ?: "")
+    fun journalBatchNote(count: Int) =
+        "Journal records are flushed in batches of up to $count files. A crash may require reconciling the current batch."
+    fun executionPhase(phase: FileExecutionPhase) = when (phase) {
+        FileExecutionPhase.PREPARING -> "Preparing and validating the operation..."
+        FileExecutionPhase.SAVING_INTENTS -> "Saving move intents..."
+        FileExecutionPhase.MOVING -> executionRunning
+        FileExecutionPhase.VERIFYING -> "Verifying the moved file..."
+        FileExecutionPhase.SAVING_RESULTS -> "Saving batch results..."
+        FileExecutionPhase.UPDATING_INVENTORY -> "Updating inventory and statistics..."
+        FileExecutionPhase.FINISHED -> executionFinished
+        FileExecutionPhase.CANCELLED -> executionCancelled
+    }
     fun executionStatus(status: FileMoveExecutionStatus) = when (status) {
         FileMoveExecutionStatus.COMPLETED -> "Moved and verified"
         FileMoveExecutionStatus.FAILED -> "Not moved"

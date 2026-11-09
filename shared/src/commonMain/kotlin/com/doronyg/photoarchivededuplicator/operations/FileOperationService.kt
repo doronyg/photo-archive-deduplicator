@@ -58,8 +58,12 @@ internal class FileOperationService(
         }
 
     /** Caller holds the scan session for validation and subsequent execution. */
-    suspend fun revalidateForExecution(proposal: FileOperationProposal): FileOperationExecutionValidation =
+    suspend fun revalidateForExecution(
+        proposal: FileOperationProposal,
+        checkCancellation: () -> Unit = {},
+    ): FileOperationExecutionValidation =
         withContext(dispatcher) {
+            checkCancellation()
             if (admissionBlocked()) throw FileOperationException(FileOperationFinding(FileOperationIssueCode.BUSY), global = true)
             if (!proposal.canExecute || proposal.archiveRoot != null)
                 throw FileOperationException(FileOperationFinding(FileOperationIssueCode.STALE_RECOMMENDATION), global = true)
@@ -67,6 +71,7 @@ internal class FileOperationService(
                 throw FileOperationException(FileOperationFinding(FileOperationIssueCode.BIN_ROOT_CHANGED), global = true)
             val context = classificationContext()
             val fresh = currentRecommendations(context)
+            checkCancellation()
             val current = snapshotGroups(proposal.groups.mapNotNull { fresh[it.key] }, context)
                 .associateBy { it.key }
             val classifications = context?.let {
@@ -77,6 +82,7 @@ internal class FileOperationService(
             val failures = linkedMapOf<String, List<FileOperationFinding>>()
             val eligible = proposal.executionEligibility
             for (group in proposal.groups) {
+                checkCancellation()
                 val problems = group.findings + group.members.flatMap { eligible.rejected[it.file.path].orEmpty() }
                 val snapshot = current[group.key]
                 val protected = if (group.members.any {
@@ -95,11 +101,12 @@ internal class FileOperationService(
             }
             val global = mutableListOf<FileOperationFinding>()
             val checked = validateMetadata(proposal.groups, proposal.moves, proposal.binRoot,
-                repository.registeredBinRoots(), global)
+                repository.registeredBinRoots(), global, checkCancellation)
             global.firstOrNull()?.let { throw FileOperationException(it, global = true) }
             val bySource = checked.associateBy { it.sourcePath }
             val endSnapshots = snapshotGroups(proposal.groups.mapNotNull { fresh[it.key] }, context).associateBy { it.key }
             for (group in proposal.groups) {
+                checkCancellation()
                 failures[group.key] = (failures[group.key].orEmpty() +
                     group.members.flatMap { bySource[it.file.path]?.findings.orEmpty() } +
                     if (endSnapshots[group.key] != current[group.key])
@@ -267,6 +274,7 @@ internal class FileOperationService(
         binRoot: Path,
         bins: List<Path>,
         findings: MutableList<FileOperationFinding>,
+        checkCancellation: () -> Unit = {},
     ): List<ProposedFileMove> {
         val sourcePaths = moves.mapTo(mutableSetOf()) { it.sourcePath }
         val keptMembers = groups.flatMap { it.members }.filter {
@@ -282,7 +290,7 @@ internal class FileOperationService(
         Diagnostics.logger.i("FileOperations",
             "Planning metadata pass for ${keptPaths.size} retained files and ${moves.size} candidates")
         return filesystemLane.run("validate dry-run proposal metadata") {
-            val inspector = OperationMetadataInspection(fileSystem, onProgress = { progress ->
+            val inspector = OperationMetadataInspection(fileSystem, checkCancellation = checkCancellation, onProgress = { progress ->
                 Diagnostics.logger.i("FileOperations",
                     "Dry-run metadata ${if (progress.finished) "finished" else "progress"}: " +
                         "${progress.completed}/${progress.total} planned paths; ${progress.metadataReads} filesystem reads; " +
@@ -304,6 +312,7 @@ internal class FileOperationService(
             inspector.checkAncestors(binRoot, findings)
             for ((file) in keptMembers.distinctBy { it.file.path }) {
                 currentCoroutineContext().ensureActive()
+                checkCancellation()
                 val problems = mutableListOf<FileOperationFinding>()
                 if (file.path in sourcePaths)
                     problems += FileOperationFinding(FileOperationIssueCode.SURVIVOR_SELECTED, file.path)
@@ -323,6 +332,7 @@ internal class FileOperationService(
                 findingsBySource.getOrPut(member.file.path) { mutableListOf() }.addAll(groupKeeperFindings[group.key].orEmpty())
             moves.map { move ->
                 currentCoroutineContext().ensureActive()
+                checkCancellation()
                 val path = move.sourcePath
                 val itemFindings = (move.findings + findingsBySource[path].orEmpty()).toMutableList()
                 val destination = move.destinationPath

@@ -794,7 +794,16 @@ candidates while independent groups continue. Missing or failed moves do not
 count or alter inventory/cache records. Global errors, uncertain outcomes and
 journal or database reconciliation failures stop the whole run. Interrupted
 intents and stale locks require manual reconciliation, not automatic retries.
-Progress is throttled and the history view refreshes after execution.
+Journal flushing is bounded by `JOURNAL_BATCH_SIZE = 50`, separate from manifest
+batch sizes: force all window intents, perform sequential verified moves, then
+force individual terminal records together before inventory/statistics updates.
+A crash can leave the current window requiring manual reconciliation.
+The Cancel operation button stops after the current file, finalizes the partial
+window and unused intents, and releases locks without rolling back completed moves.
+Blocking filesystem calls can delay stopping. Live progress remains visible while
+scrolling and distinguishes verified moves from durably recorded moves, with phase,
+path, counts, logical bytes, elapsed time and approximate ETA. Phase/count changes
+publish immediately; redundant progress is throttled. History refreshes after execution.
 Both Deletion Recommendations and File Operations support Select all and Clear
 selection, including off-screen groups. Recommendation selection is scoped to the
 current category; File Operations retains its available group pool when cleared.

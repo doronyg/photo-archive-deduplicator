@@ -20,6 +20,8 @@ import kotlin.time.Clock
 import kotlin.time.Instant
 import kotlin.uuid.Uuid
 
+internal const val JOURNAL_BATCH_SIZE = 50
+
 /** Executes only reviewed renames. No recovery, hashing, photo-content IO or copy/delete fallback. */
 internal class FileOperationExecutor(
     private val filesystemLane: IoLane,
@@ -36,7 +38,16 @@ internal class FileOperationExecutor(
         beforeMove: suspend (ProposedFileMove) -> Unit,
         recordMove: suspend (FileRecord) -> Unit,
         onProgress: (FileExecutionProgress) -> Unit = {},
+        control: FileExecutionControl = FileExecutionControl(),
     ): FileExecutionResult = withContext(dispatcher) {
+        val startedAt = clock()
+        onProgress(FileExecutionProgress(total = proposal.moves.size, phase = FileExecutionPhase.PREPARING))
+        if (control.isCancellationRequested) {
+            onProgress(FileExecutionProgress(total = proposal.moves.size, phase = FileExecutionPhase.CANCELLED,
+                finished = true, elapsedMillis = (clock() - startedAt).coerceAtLeast(0)))
+            return@withContext FileExecutionResult(proposal.id,
+                proposal.moves.map { FileMoveExecutionResult(it, FileMoveExecutionStatus.NOT_STARTED) }, cancelled = true)
+        }
         val reviewed = review(proposal, binding)
         val plans = plan(reviewed, binding)
         val results = proposal.moves.map { move ->
@@ -84,6 +95,18 @@ internal class FileOperationExecutor(
         var completedMoves = 0L
         var uncertainMoves = 0
         var logicalBytesMoved = 0L
+        var verifiedMoves = 0
+        var cancelled = false
+        fun progress(phase: FileExecutionPhase, source: Path? = null, finished: Boolean = false) {
+            onProgress(FileExecutionProgress(total = results.size, completed = completedMoves.toInt(),
+                failed = failedMoves, uncertain = uncertainMoves, currentSource = source, finished = finished,
+                logicalBytesMoved = logicalBytesMoved, phase = phase, verified = verifiedMoves,
+                elapsedMillis = (clock() - startedAt).coerceAtLeast(0), remaining = remainingMoves))
+        }
+        suspend fun checkCancellation() {
+            currentCoroutineContext().ensureActive()
+            control.checkCancellation()
+        }
         val statisticsErrors = linkedMapOf<String, String>()
         suspend fun checkpoint(finished: Boolean) {
             val plan = requireNotNull(activePlan)
@@ -113,7 +136,9 @@ internal class FileOperationExecutor(
             }
         }
         val resultItems = try {
+            checkCancellation()
             filesystemLane.run("acquire archive and Bin execution locks") {
+                control.checkCancellation()
                 verifyBinding(binding)
                 for (lock in listOf(archiveLock, binLock)) {
                     require(fileSystem.metadataOrNull(lock) == null) { "Execution lock exists; inspect before retrying: $lock" }
@@ -133,16 +158,21 @@ internal class FileOperationExecutor(
                 fileSystem.createDirectories(runs)
                 fileSystem.createDirectory(runs / proposal.id, mustCreate = true)
             }
+            checkCancellation()
             validate()
+            checkCancellation()
             if (reviewed.canExecute) {
                 val preparation = BinDirectoryPreparer(filesystemLane, fileSystem, dispatcher)
-                    .prepareEligibleGroups(reviewed.copy(moves = reviewed.executionEligibility.moves), binding)
+                    .prepareEligibleGroups(reviewed.copy(moves = reviewed.executionEligibility.moves), binding,
+                        checkCancellation = control::checkCancellation)
                 preparation.rejected.forEach { (key, findings) -> rejectGroups(listOf(key), findingsText(findings)) }
             }
+            checkCancellation()
             filesystemLane.run("persist immutable execution manifest") {
                 verifyBinding(binding)
                 // Persist every validated batch before the first photo move.
                 for (plan in plans) {
+                    control.checkCancellation()
                     safeDirectory(requireNotNull(plan.directory.parent), required = false)
                     fileSystem.createDirectories(requireNotNull(plan.directory.parent))
                     fileSystem.createDirectory(plan.directory, mustCreate = true)
@@ -150,49 +180,172 @@ internal class FileOperationExecutor(
                     writeNew(plan.directory / "events.jsonl", "")
                 }
             }
-            onProgress(FileExecutionProgress(total = results.size, failed = failedMoves,
-                finished = remainingMoves == 0))
             batches@ for (plan in plans) {
+                checkCancellation()
                 activePlan = plan
                 statisticsReady = true
                 batchCompleted = 0
                 batchBytes = 0
                 val journal = Journal(plan.directory / "events.jsonl")
-                for (item in plan.items) {
-                    val index = indices.getValue(item.move.sourcePath).single()
-                    if (results[index].status != FileMoveExecutionStatus.NOT_STARTED) continue
-                    currentCoroutineContext().ensureActive()
-                    // Once an intent could exist, finish establishing its known outcome even
-                    // when the owning UI scope is cancelled. Cancellation is observed between files.
-                    val result = withContext(NonCancellable) {
-                        executeItem(item, binding, journal, beforeMove, recordMove).also {
-                            if (it.status == FileMoveExecutionStatus.COMPLETED) {
-                                completedMoves++
-                                logicalBytesMoved += item.file.sizeBytes
-                                batchCompleted++
-                                batchBytes += item.file.sizeBytes
-                                if (batchCompleted % STATISTICS_BATCH_SIZE == 0L) checkpoint(finished = false)
+                var cursor = 0
+                while (cursor < plan.items.size) {
+                    checkCancellation()
+                    val window = mutableListOf<Item>()
+                    while (cursor < plan.items.size && window.size < JOURNAL_BATCH_SIZE) {
+                        val item = plan.items[cursor++]
+                        if (results[indices.getValue(item.move.sourcePath).single()].status == FileMoveExecutionStatus.NOT_STARTED)
+                            window += item
+                    }
+                    if (window.isEmpty()) continue
+                    val attempts = window.associate { it.id to historyId(nextId()) }
+                    val outcomes = mutableMapOf<String, FileMoveExecutionResult>()
+                    var stop = false
+                    var windowFailure: Throwable? = null
+                    var intentsDurable = false
+                    progress(FileExecutionPhase.SAVING_INTENTS)
+                    try {
+                        withContext(NonCancellable) {
+                            filesystemLane.run("flush reviewed move intents") {
+                                journal.appendAll(window.map { Event(it.id, attempts.getValue(it.id), "INTENT") })
+                                intentsDurable = true
                             }
                         }
+                    } catch (failure: Exception) {
+                        if (failure is CancellationException) {
+                            if (intentsDurable) withContext(NonCancellable) {
+                                try {
+                                    filesystemLane.run("finalize cancelled unattempted intents") {
+                                        journal.appendAll(window.map {
+                                            Event(it.id, attempts.getValue(it.id), "FAILED", "Not attempted: cancelled")
+                                        })
+                                    }
+                                } catch (cleanupFailure: Throwable) {
+                                    failure.addSuppressed(cleanupFailure)
+                                }
+                            }
+                            throw failure
+                        }
+                        for (item in window) {
+                            val index = indices.getValue(item.move.sourcePath).single()
+                            results[index] = FileMoveExecutionResult(item.move, FileMoveExecutionStatus.FAILED,
+                                failure.message, postProcessingError = "Intent journal was not flushed; reconciliation required")
+                            failedMoves++
+                            remainingMoves--
+                        }
+                        break@batches
                     }
-                    results[index] = result
-                    remainingMoves--
-                    if (result.status == FileMoveExecutionStatus.FAILED) {
-                        failedMoves++
-                        rejectGroups(item.groupKeys, result.error ?: "Group execution failed")
+                    try {
+                        for (item in window) {
+                            checkCancellation()
+                            val index = indices.getValue(item.move.sourcePath).single()
+                            if (results[index].status != FileMoveExecutionStatus.NOT_STARTED) continue
+                            progress(FileExecutionPhase.MOVING, item.move.sourcePath)
+                            // Only one native move and its verification are cancellation-shielded.
+                            withContext(NonCancellable) {
+                                val result = executeItem(item, binding, beforeMove, control) {
+                                    progress(FileExecutionPhase.VERIFYING, item.move.sourcePath)
+                                }
+                                // Store before leaving NonCancellable: returning to a cancelled
+                                // dispatcher may throw before the caller can receive this result.
+                                outcomes[item.id] = result
+                                results[index] = result
+                                remainingMoves--
+                                if (result.status == FileMoveExecutionStatus.COMPLETED) verifiedMoves++
+                                if (result.status == FileMoveExecutionStatus.FAILED) {
+                                    failedMoves++
+                                    rejectGroups(item.groupKeys, result.error ?: "Group execution failed")
+                                }
+                                if (result.status == FileMoveExecutionStatus.UNCERTAIN) {
+                                    uncertainMoves++
+                                    stop = true
+                                }
+                            }
+                            if (stop) break
+                        }
+                    } catch (failure: Throwable) {
+                        windowFailure = failure
+                    } finally {
+                        try {
+                          withContext(NonCancellable) {
+                            fun cleanupProgress(phase: FileExecutionPhase, source: Path? = null) {
+                                try {
+                                    progress(phase, source)
+                                } catch (failure: Throwable) {
+                                    stop = true
+                                    val original = windowFailure
+                                    if (original == null) windowFailure = failure else original.addSuppressed(failure)
+                                }
+                            }
+                            val reason = if (control.isCancellationRequested || windowFailure is CancellationException)
+                                "Not attempted: cancelled" else "Not attempted: execution stopped"
+                            val events = window.mapNotNull { item ->
+                                val index = indices.getValue(item.move.sourcePath).single()
+                                val outcome = outcomes[item.id]
+                                when (outcome?.status) {
+                                    FileMoveExecutionStatus.UNCERTAIN -> null
+                                    FileMoveExecutionStatus.COMPLETED ->
+                                        Event(item.id, attempts.getValue(item.id), "COMPLETED")
+                                    else -> Event(item.id, attempts.getValue(item.id), "FAILED",
+                                        (outcome?.error ?: results[index].error?.let { "Not attempted: group rejected: $it" }
+                                            ?: reason).take(ERROR_LIMIT))
+                                }
+                            }
+                            var terminalsDurable = false
+                            try {
+                                cleanupProgress(FileExecutionPhase.SAVING_RESULTS)
+                                filesystemLane.run("flush reviewed move outcomes") { journal.appendAll(events) }
+                                terminalsDurable = true
+                            } catch (failure: Throwable) {
+                                stop = true
+                                windowFailure?.addSuppressed(failure)
+                                for (item in window) {
+                                    val outcome = outcomes[item.id]
+                                    if (outcome?.status == FileMoveExecutionStatus.UNCERTAIN) continue
+                                    val index = indices.getValue(item.move.sourcePath).single()
+                                    if (results[index].status == FileMoveExecutionStatus.NOT_STARTED) remainingMoves--
+                                    if (outcome?.status == FileMoveExecutionStatus.FAILED ||
+                                        results[index].status == FileMoveExecutionStatus.FAILED) failedMoves--
+                                    results[index] = FileMoveExecutionResult(item.move, FileMoveExecutionStatus.UNCERTAIN,
+                                        failure.message, postProcessingError = "Result journal was not flushed; reconciliation required")
+                                    uncertainMoves++
+                                }
+                            }
+                            if (terminalsDurable) {
+                                cleanupProgress(FileExecutionPhase.UPDATING_INVENTORY)
+                                for (item in window) {
+                                    if (outcomes[item.id]?.status != FileMoveExecutionStatus.COMPLETED) continue
+                                    val index = indices.getValue(item.move.sourcePath).single()
+                                    completedMoves++
+                                    logicalBytesMoved += item.file.sizeBytes
+                                    batchCompleted++
+                                    batchBytes += item.file.sizeBytes
+                                    try {
+                                        recordMove(item.file)
+                                    } catch (failure: Throwable) {
+                                        stop = true
+                                        results[index] = results[index].copy(postProcessingError = failure.message ?: failure.toString())
+                                        if (failure is CancellationException && windowFailure == null) windowFailure = failure
+                                    }
+                                    if (batchCompleted % STATISTICS_BATCH_SIZE == 0L) {
+                                        try {
+                                            checkpoint(finished = false)
+                                        } catch (failure: Throwable) {
+                                            stop = true
+                                            val original = windowFailure
+                                            if (original == null) windowFailure = failure else original.addSuppressed(failure)
+                                        }
+                                    }
+                                    cleanupProgress(FileExecutionPhase.UPDATING_INVENTORY, item.move.sourcePath)
+                                }
+                            }
+                          }
+                        } catch (cleanupFailure: Throwable) {
+                            val original = windowFailure
+                            if (original == null) windowFailure = cleanupFailure else original.addSuppressed(cleanupFailure)
+                        }
                     }
-                    if (result.status == FileMoveExecutionStatus.UNCERTAIN) uncertainMoves++
-                    val stop = result.status == FileMoveExecutionStatus.UNCERTAIN || result.postProcessingError != null
-                    onProgress(FileExecutionProgress(
-                        total = results.size,
-                        completed = completedMoves.toInt(),
-                        failed = failedMoves,
-                        uncertain = uncertainMoves,
-                        currentSource = item.move.sourcePath,
-                        finished = stop || remainingMoves == 0,
-                        logicalBytesMoved = logicalBytesMoved,
-                    ))
-                    currentCoroutineContext().ensureActive()
+                    windowFailure?.let { throw it }
+                    checkCancellation()
                     if (stop) break@batches
                 }
                 withContext(NonCancellable) { checkpoint(finished = true) }
@@ -200,8 +353,14 @@ internal class FileOperationExecutor(
             }
             results.toList()
         } catch (failure: Throwable) {
-            executionFailure = failure
-            throw failure
+            if (failure is CancellationException && control.isCancellationRequested &&
+                currentCoroutineContext().isActive) {
+                cancelled = true
+                results.toList()
+            } else {
+                executionFailure = failure
+                throw failure
+            }
         } finally {
             try {
                 withContext(NonCancellable) {
@@ -227,24 +386,25 @@ internal class FileOperationExecutor(
                 original.addSuppressed(cleanupFailure)
             }
         }
+        progress(if (cancelled) FileExecutionPhase.CANCELLED else FileExecutionPhase.FINISHED, finished = true)
         FileExecutionResult(proposal.id, resultItems,
-            statisticsErrors.entries.joinToString("\n") { (id, detail) -> "$id: $detail" }.ifEmpty { null })
+            statisticsErrors.entries.joinToString("\n") { (id, detail) -> "$id: $detail" }.ifEmpty { null },
+            cancelled = cancelled)
     }
 
     private suspend fun executeItem(
-        item: Item, binding: ArchiveBinding, journal: Journal,
-        beforeMove: suspend (ProposedFileMove) -> Unit, recordMove: suspend (FileRecord) -> Unit,
+        item: Item, binding: ArchiveBinding,
+        beforeMove: suspend (ProposedFileMove) -> Unit, control: FileExecutionControl,
+        onVerifying: () -> Unit,
     ): FileMoveExecutionResult {
         val move = item.move
-        val attempt = historyId(nextId())
-        var intentFlushed = false
-        var intentAttempted = false
         var renameInvoked = false
         var moveReturned = false
-        var completed = false
         try {
+            control.checkCancellation()
             beforeMove(move)
-            filesystemLane.run("move reviewed file with flushed journal") {
+            control.checkCancellation()
+            filesystemLane.run("move reviewed file with flushed intents") {
                 try {
                     verifyBinding(binding)
                 } catch (failure: Exception) {
@@ -252,19 +412,16 @@ internal class FileOperationExecutor(
                         detail = failure.message), global = true)
                 }
                 preflight(item, binding)
-                intentAttempted = true
-                journal.append(item.id, attempt, "INTENT")
-                intentFlushed = true
+                control.checkCancellation()
                 renameInvoked = true
                 moveIo.moveNoReplace(move.sourcePath, requireNotNull(move.destinationPath))
                 moveReturned = true
+                onVerifying()
                 require(fileSystem.metadataOrNull(move.sourcePath) == null) { "Original still exists after rename" }
                 safeDirectory(requireNotNull(move.destinationPath.parent), required = true)
                 require(matches(fileSystem.metadataOrNull(move.destinationPath), item.file, creationTime = false)) {
                     "Destination metadata does not confirm the reviewed move"
                 }
-                journal.append(item.id, attempt, "COMPLETED")
-                completed = true
             }
         } catch (failure: Exception) {
             if (failure is CancellationException) throw failure
@@ -286,31 +443,11 @@ internal class FileOperationExecutor(
                 detail += "; outcome verification failed: ${verificationFailure.message}"
                 false
             }
-            var failed = noEffect && !moveReturned
-            if (failed && intentFlushed) {
-                try {
-                    filesystemLane.run("record proven no-effect failure") {
-                        journal.append(item.id, attempt, "FAILED", detail.take(ERROR_LIMIT))
-                    }
-                } catch (journalFailure: Exception) {
-                    if (journalFailure is CancellationException) throw journalFailure
-                    detail += "; failure journal not flushed: ${journalFailure.message}"
-                    failed = false
-                }
-            }
+            val failed = noEffect && !moveReturned
             return FileMoveExecutionResult(move,
-                if (failed) FileMoveExecutionStatus.FAILED else FileMoveExecutionStatus.UNCERTAIN, detail,
-                postProcessingError = if (intentAttempted && !intentFlushed) "Intent journal was not flushed; reconciliation required" else null)
+                if (failed) FileMoveExecutionStatus.FAILED else FileMoveExecutionStatus.UNCERTAIN, detail)
         }
-        check(completed)
-        return try {
-            recordMove(item.file)
-            FileMoveExecutionResult(move, FileMoveExecutionStatus.COMPLETED)
-        } catch (failure: Exception) {
-            if (failure is CancellationException) throw failure
-            FileMoveExecutionResult(move, FileMoveExecutionStatus.COMPLETED,
-                postProcessingError = failure.message ?: failure.toString())
-        }
+        return FileMoveExecutionResult(move, FileMoveExecutionStatus.COMPLETED)
     }
 
     private data class Item(
@@ -668,33 +805,36 @@ internal class FileOperationExecutor(
         moveIo.flushFile(path)
     }
 
+    private data class Event(val item: String, val attempt: String, val state: String, val error: String? = null)
+
     private inner class Journal(private val path: Path) {
         private var sequence = 0L
         private var bytes = 0L
-        fun append(item: String, attempt: String, state: String, error: String? = null) {
-            val line = buildJsonObject {
+        fun appendAll(events: List<Event>) {
+            if (events.isEmpty()) return
+            val text = events.mapIndexed { index, event -> buildJsonObject {
                 put("formatVersion", 1)
                 put("eventId", historyId(nextId()))
-                put("sequence", sequence + 1)
-                put("itemId", item)
-                put("attemptId", attempt)
+                put("sequence", sequence + index + 1)
+                put("itemId", event.item)
+                put("attemptId", event.attempt)
                 put("action", "MOVE")
-                put("state", state)
+                put("state", event.state)
                 put("occurredAt", timestamp(clock()))
-                put("error", error)
-            }.toString() + "\n"
-            val size = line.encodeUtf8().size
+                put("error", event.error)
+            }.toString() + "\n" }.joinToString("")
+            val size = text.encodeUtf8().size
             require(bytes + size <= JOURNAL_LIMIT) { "Journal exceeds reader limit" }
             val previousBytes = bytes
             try {
-                fileSystem.appendingSink(path).buffer().use { it.writeUtf8(line); it.flush() }
+                fileSystem.appendingSink(path).buffer().use { it.writeUtf8(text); it.flush() }
                 moveIo.flushFile(path)
-                sequence++
+                sequence += events.size
                 bytes += size
             } catch (failure: Exception) {
                 // An unflushed terminal record must not advertise certainty on a later
                 // read. Best-effort truncation preserves the already-flushed INTENT.
-                if (state != "INTENT") {
+                if (events.any { it.state != "INTENT" }) {
                     try {
                         fileSystem.openReadWrite(path, mustExist = true).use { it.resize(previousBytes) }
                         moveIo.flushFile(path)

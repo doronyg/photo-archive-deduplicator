@@ -9,6 +9,8 @@ import com.doronyg.photoarchivededuplicator.operations.FileOperationIssueCode
 import com.doronyg.photoarchivededuplicator.operations.FileOperationState
 import com.doronyg.photoarchivededuplicator.operations.FileOperationValidationStatus
 import com.doronyg.photoarchivededuplicator.operations.FileMoveExecutionStatus
+import com.doronyg.photoarchivededuplicator.operations.FileExecutionPhase
+import com.doronyg.photoarchivededuplicator.operations.FileExecutionProgress
 import com.doronyg.photoarchivededuplicator.operations.ProposedFileMove
 import com.doronyg.photoarchivededuplicator.operations.SelectedDeletionGroup
 import com.doronyg.photoarchivededuplicator.recommendation.DeletionCategoryResults
@@ -33,6 +35,24 @@ import kotlin.test.assertTrue
 
 class FileOperationPresentationTest {
     private val strings = AppStrings.operations
+
+    @Test
+    fun liveProgressDistinguishesVerifiedFromRecordedAndEstimatesOnlyAfterEnoughMoves() {
+        val progress = FileExecutionProgress(total = 100, completed = 0, verified = 10,
+            remaining = 90, elapsedMillis = 25_000, phase = FileExecutionPhase.MOVING)
+        assertEquals(225_000L, fileExecutionEtaMillis(progress, progress.elapsedMillis))
+        assertEquals(270_000L, fileExecutionEtaMillis(progress, 30_000))
+        assertEquals(null, fileExecutionEtaMillis(progress.copy(verified = 2), 25_000))
+        assertEquals(null, fileExecutionEtaMillis(progress.copy(finished = true), 25_000))
+        assertEquals(null, fileExecutionEtaMillis(progress.copy(phase = FileExecutionPhase.PREPARING), 25_000))
+        assertEquals(0L, fileExecutionEtaMillis(progress.copy(remaining = 0), 25_000))
+        assertTrue(strings.executionCounts(100, 0, 0, 0, 90).contains("durably recorded"))
+        assertTrue(strings.verifiedMoves(10).contains("10"))
+        FileExecutionPhase.entries.forEach { assertTrue(strings.executionPhase(it).isNotBlank()) }
+        assertTrue(strings.stoppingOperation.contains("current file"))
+        assertTrue(strings.cancellationNote.contains("not rolled back"))
+        assertTrue(strings.journalBatchNote(50).contains("50"))
+    }
 
     @Test
     fun binSuggestionUsesConfigurationThenScanThenCommonMemberDirectory() {

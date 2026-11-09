@@ -27,6 +27,162 @@ import okio.fakefilesystem.FakeFileSystem
 import kotlin.test.*
 
 class FileOperationExecutorTest {
+    @Test fun journalWindowsForceAllIntentsBeforeMovingAndAllResultsBeforeInventory() = runTest {
+        val f = Fixture(this)
+        f.initialize(51)
+        f.moveFailure = {
+            val lines = f.journal().lineSequence().filter { it.isNotBlank() }.toList()
+            assertEquals(if (f.moveCount <= 50) 50 else 51, lines.count { it.contains("\"INTENT\"") })
+            assertEquals(if (f.moveCount <= 50) 0 else 50, f.recorded.size)
+            assertEquals(if (f.moveCount <= 50) 2 else 4, f.flushed.count { it.name == "events.jsonl" })
+        }
+        val progress = mutableListOf<FileExecutionProgress>()
+        val result = f.execute(record = {
+            assertEquals(if (f.moveCount <= 50) 50 else 51,
+                f.journal().lineSequence().count { it.contains("\"COMPLETED\"") })
+            assertEquals(if (f.moveCount <= 50) 3 else 5, f.flushed.count { it.name == "events.jsonl" })
+            f.recorded += it
+        }, progress = { progress += it })
+        assertEquals(51, result.items.count { it.status == FileMoveExecutionStatus.COMPLETED })
+        assertEquals(5, f.flushed.count { it.name == "events.jsonl" })
+        val firstResults = progress.first { it.phase == FileExecutionPhase.SAVING_RESULTS }
+        assertEquals(50, firstResults.verified)
+        assertEquals(0, firstResults.completed)
+        assertEquals(1, firstResults.remaining)
+        assertEquals(0, progress.last().remaining)
+    }
+
+    @Test fun cooperativeCancellationFinalizesPreIntendedItemsWithoutPendingHistory() = runTest {
+        val f = Fixture(this)
+        f.initialize(3)
+        val control = FileExecutionControl()
+        f.moveFailure = { control.requestCancellation() }
+        val result = f.executor().execute(f.proposal, f.binding, {}, {}, { f.recorded += it }, control = control)
+        assertTrue(result.cancelled)
+        assertEquals(listOf(FileMoveExecutionStatus.COMPLETED, FileMoveExecutionStatus.NOT_STARTED,
+            FileMoveExecutionStatus.NOT_STARTED), result.items.map { it.status })
+        assertEquals(1, f.recorded.size)
+        assertTrue(f.history().items.none { it.moveStatus == OperationHistoryMoveStatus.PENDING })
+        assertEquals(2, f.journal().lineSequence().count { it.contains("Not attempted: cancelled") })
+    }
+
+    @Test fun tokenCancellationBeforeOrDuringValidationNeverMoves() = runTest {
+        for (preCancelled in listOf(true, false)) {
+            val f = Fixture(this)
+            f.initialize(2)
+            val control = FileExecutionControl()
+            if (preCancelled) control.requestCancellation()
+            val result = f.executor().execute(f.proposal, f.binding,
+                { control.requestCancellation() }, {}, {}, control = control)
+            assertTrue(result.cancelled)
+            assertTrue(result.items.all { it.status == FileMoveExecutionStatus.NOT_STARTED })
+            assertEquals(0, f.moveCount)
+            f.assertUnlocked()
+        }
+    }
+
+    @Test fun cancellationDuringDirectoryPreparationReturnsNormallyAndReleasesPreparationLock() = runTest {
+        val f = Fixture(this)
+        f.initialize(2)
+        val control = FileExecutionControl()
+        val guarded = object : ForwardingFileSystem(f.fs) {
+            override fun onPathParameter(path: Path, functionName: String, parameterName: String): Path {
+                if (path.name == BIN_DIRECTORY_MARKER_NAME && functionName == "sink") control.requestCancellation()
+                return path
+            }
+        }
+        val result = f.executor(guarded).execute(f.proposal, f.binding, {}, {}, {}, control = control)
+        assertTrue(result.cancelled)
+        assertEquals(0, f.moveCount)
+        assertTrue(result.items.all { it.status == FileMoveExecutionStatus.NOT_STARTED })
+        assertFalse(f.fs.exists(f.bin / "$HISTORY_DIRECTORY_NAME/.directory-preparation.lock"))
+        f.assertUnlocked()
+    }
+
+    @Test fun uncertainMiddleMoveCommitsKnownSuccessAndClosesOnlyUnattemptedIntents() = runTest {
+        val f = Fixture(this)
+        f.initialize(4)
+        f.moveFailure = {
+            if (f.moveCount == 2) {
+                val move = f.proposal.moves[1]
+                f.fs.atomicMove(move.sourcePath, move.destinationPath!!)
+                throw IOException("unknown native outcome")
+            }
+        }
+        val result = f.execute()
+        assertEquals(listOf(FileMoveExecutionStatus.COMPLETED, FileMoveExecutionStatus.UNCERTAIN,
+            FileMoveExecutionStatus.NOT_STARTED, FileMoveExecutionStatus.NOT_STARTED), result.items.map { it.status })
+        assertEquals(1, f.recorded.size)
+        assertEquals(listOf(OperationHistoryMoveStatus.COMPLETED, OperationHistoryMoveStatus.PENDING,
+            OperationHistoryMoveStatus.FAILED, OperationHistoryMoveStatus.FAILED), f.history().items.map { it.moveStatus })
+    }
+
+    @Test fun failedSecondWindowResultFlushNeverTruncatesFirstDurableWindow() = runTest {
+        val f = Fixture(this)
+        f.initialize(51)
+        var flushes = 0
+        f.flushFailure = { it.name == "events.jsonl" && ++flushes == 5 }
+        val progress = mutableListOf<FileExecutionProgress>()
+        val result = f.execute(progress = { progress += it })
+        assertEquals(50, result.items.count { it.status == FileMoveExecutionStatus.COMPLETED })
+        assertEquals(FileMoveExecutionStatus.UNCERTAIN, result.items.last().status)
+        assertEquals(50, f.recorded.size)
+        assertEquals(50, progress.last().completed)
+        assertEquals(250L, progress.last().logicalBytesMoved)
+        assertEquals(0, progress.last().remaining)
+        assertEquals(50, f.history().items.count { it.confirmedInBin })
+        assertEquals(OperationHistoryMoveStatus.PENDING, f.history().items.last().moveStatus)
+        f.assertUnlocked()
+    }
+
+    @Test fun globalValidationFailureAfterKnownMoveFinalizesWindowThenPropagatesOriginal() = runTest {
+        val f = Fixture(this)
+        f.initialize(3)
+        val failure = FileOperationException(
+            FileOperationFinding(FileOperationIssueCode.BIN_ROOT_CHANGED), global = true)
+        val caught = assertFailsWith<FileOperationException> {
+            f.execute(before = {
+                if (it.sourcePath == f.proposal.moves[1].sourcePath) throw failure
+            })
+        }
+        assertSame(failure, caught)
+        assertEquals(1, f.moveCount)
+        assertEquals(1, f.recorded.size)
+        assertEquals(listOf(OperationHistoryMoveStatus.COMPLETED, OperationHistoryMoveStatus.FAILED,
+            OperationHistoryMoveStatus.FAILED), f.history().items.map { it.moveStatus })
+        f.assertUnlocked()
+    }
+
+    @Test fun progressFailureDuringResultSavingStillFlushesAndUpdatesKnownMoves() = runTest {
+        val f = Fixture(this)
+        f.initialize(2)
+        val failure = IllegalStateException("progress observer failed")
+        val caught = assertFailsWith<IllegalStateException> {
+            f.execute(progress = { if (it.phase == FileExecutionPhase.SAVING_RESULTS) throw failure })
+        }
+        assertEquals(failure.message, caught.message)
+        assertEquals(2, f.recorded.size)
+        assertEquals(2, f.history().items.count { it.confirmedInBin })
+        f.assertUnlocked()
+    }
+
+    @Test fun externalCancellationDuringIntentFlushClosesEveryDurableIntentWithoutMoving() = runTest {
+        val f = Fixture(this)
+        f.initialize(3)
+        lateinit var job: Job
+        var flushes = 0
+        f.flushFailure = {
+            if (it.name == "events.jsonl" && ++flushes == 2) job.cancel()
+            false
+        }
+        job = launch { f.execute() }
+        job.join()
+        assertTrue(job.isCancelled)
+        assertEquals(0, f.moveCount)
+        assertTrue(f.history().items.all { it.moveStatus == OperationHistoryMoveStatus.FAILED })
+        f.assertUnlocked()
+    }
+
     @Test fun fileDirectoryPathConflictsRejectOnlyAffectedGroups() = runTest {
         val f = Fixture(this)
         f.initialize(3)
@@ -69,7 +225,7 @@ class FileOperationExecutorTest {
         assertEquals(503, result.items.size)
         assertEquals(FileMoveExecutionStatus.FAILED, result.items.first().status)
         assertEquals(502, result.items.count { it.status == FileMoveExecutionStatus.COMPLETED })
-        assertEquals(1, progress.first().failed)
+        assertTrue(progress.any { it.failed == 1 })
         assertEquals(2510L, progress.last().logicalBytesMoved)
         assertTrue(progress.dropLast(1).none { it.finished })
         assertTrue(progress.last().finished)
@@ -313,7 +469,7 @@ class FileOperationExecutorTest {
         assertEquals(1001, f.recorded.size)
         assertEquals(1001, progress.last().completed)
         assertEquals(5005L, progress.last().logicalBytesMoved)
-        assertEquals((0..1001).toList(), progress.map { it.completed })
+        assertEquals((0..1001).toList(), progress.map { it.completed }.distinct())
         val directories = f.fs.list(f.bin / "$HISTORY_DIRECTORY_NAME/operations")
         assertEquals(3, directories.size)
         val entries = directories.map { directory ->
@@ -344,19 +500,20 @@ class FileOperationExecutorTest {
                 }
             }
             val result = f.execute(record = {
-                if (mode == 2 && f.moveCount == 501) error("inventory failure")
+                if (mode == 2 && it.path == f.proposal.moves[500].sourcePath) error("inventory failure")
                 f.recorded += it
             })
-            assertEquals(501, f.moveCount)
-            assertEquals(if (mode == 2) 501 else 500,
+            assertEquals(if (mode == 2) 502 else 501, f.moveCount)
+            assertEquals(if (mode == 2) 502 else 500,
                 result.items.count { it.status == FileMoveExecutionStatus.COMPLETED })
-            assertEquals(if (mode == 0) FileMoveExecutionStatus.FAILED else FileMoveExecutionStatus.NOT_STARTED,
+            assertEquals(if (mode == 0) FileMoveExecutionStatus.FAILED else if (mode == 2)
+                FileMoveExecutionStatus.COMPLETED else FileMoveExecutionStatus.NOT_STARTED,
                 result.items.last().status)
             assertEquals(listOf(FileMoveExecutionStatus.FAILED, FileMoveExecutionStatus.UNCERTAIN,
                 FileMoveExecutionStatus.COMPLETED)[mode], result.items[500].status)
             val statistics = historyObject(f.fs.read(
                 f.bin / "$HISTORY_DIRECTORY_NAME/operations/${f.proposal.id}-batch-002/statistics.json") { readUtf8() })
-            assertEquals(if (mode == 2) 1L else 0L, statistics.historyLong("completedMoves"))
+            assertEquals(if (mode == 2) 2L else 0L, statistics.historyLong("completedMoves"))
             assertTrue(statistics.getValue("finished").jsonPrimitive.boolean)
             assertFailsWith<IllegalArgumentException> { f.execute() }
             f.assertUnlocked()
@@ -489,8 +646,8 @@ class FileOperationExecutorTest {
         f.execute(record = { error("inventory unavailable") })
         val saved = historyObject(f.fs.read(
             f.bin / "$HISTORY_DIRECTORY_NAME/operations/${f.proposal.id}/statistics.json") { readUtf8() })
-        assertEquals(1L, saved.historyLong("completedMoves"))
-        assertEquals(5L, saved.historyLong("logicalBytesMoved"))
+        assertEquals(2L, saved.historyLong("completedMoves"))
+        assertEquals(10L, saved.historyLong("logicalBytesMoved"))
     }
 
     @Test fun statisticsWriteFailureDoesNotStopMovesAndRemainsVisible() = runTest {
@@ -602,7 +759,8 @@ class FileOperationExecutorTest {
         f.proposal.moves.forEach { assertFalse(f.fs.exists(it.sourcePath)); assertTrue(f.fs.exists(it.destinationPath!!)) }
         assertTrue(f.fs.exists(f.archive / "keep.jpg"))
         assertEquals(2, f.history().items.count { it.confirmedInBin })
-        assertEquals(3, progress.size)
+        assertTrue(progress.any { it.phase == FileExecutionPhase.SAVING_INTENTS })
+        assertTrue(progress.any { it.phase == FileExecutionPhase.SAVING_RESULTS })
         assertTrue(progress.last().finished)
         f.assertUnlocked()
         f.fs.checkNoOpenFiles()
@@ -699,9 +857,33 @@ class FileOperationExecutorTest {
         val result = f.execute(record = { error("database disconnected") })
         assertEquals(FileMoveExecutionStatus.COMPLETED, result.items.first().status)
         assertEquals("database disconnected", result.items.first().postProcessingError)
-        assertEquals(FileMoveExecutionStatus.NOT_STARTED, result.items.last().status)
-        assertEquals(1, f.moveCount)
+        assertEquals(FileMoveExecutionStatus.COMPLETED, result.items.last().status)
+        assertEquals(2, f.moveCount)
         assertTrue(f.history().items.first().confirmedInBin)
+    }
+
+    @Test fun inventoryFailureCountsEntireDurableWindowAndAttemptsAllItsCleanupBeforeStoppingMoves() = runTest {
+        val f = Fixture(this)
+        f.initialize(51)
+        var updates = 0
+        val progress = mutableListOf<FileExecutionProgress>()
+        val result = f.execute(record = {
+            updates++
+            if (updates == 1) error("first inventory update failed")
+            f.recorded += it
+        }, progress = { progress += it })
+        assertEquals(50, f.moveCount)
+        assertEquals(50, updates)
+        assertEquals(49, f.recorded.size)
+        assertEquals(50, result.items.count { it.status == FileMoveExecutionStatus.COMPLETED })
+        assertEquals("first inventory update failed", result.items.first().postProcessingError)
+        assertEquals(FileMoveExecutionStatus.NOT_STARTED, result.items.last().status)
+        assertEquals(50, f.history().items.count { it.confirmedInBin })
+        assertEquals(OperationHistoryMoveStatus.NOT_STARTED, f.history().items.last().moveStatus)
+        assertEquals(50, progress.last().completed)
+        assertEquals(250L, progress.last().logicalBytesMoved)
+        assertEquals(1, progress.last().remaining)
+        f.assertUnlocked()
     }
 
     @Test fun duplicateExecutionAndExistingLocksAreNeverTakenOver() = runTest {
@@ -738,7 +920,7 @@ class FileOperationExecutorTest {
         assertEquals(1, f.moveCount)
         assertEquals(1, f.recorded.size)
         assertEquals(OperationHistoryMoveStatus.COMPLETED, f.history().items.first().moveStatus)
-        assertEquals(OperationHistoryMoveStatus.NOT_STARTED, f.history().items.last().moveStatus)
+        assertEquals(OperationHistoryMoveStatus.FAILED, f.history().items.last().moveStatus)
         val statistics = historyObject(f.fs.read(
             f.bin / "$HISTORY_DIRECTORY_NAME/operations/${f.proposal.id}/statistics.json") { readUtf8() })
         assertEquals(1L, statistics.historyLong("completedMoves"))
@@ -773,7 +955,8 @@ class FileOperationExecutorTest {
         })
         assertNotEquals(FileMoveExecutionStatus.COMPLETED, result.items.single().status)
         assertEquals(0, f.moveCount)
-        assertFalse(f.journal().contains("INTENT"))
+        assertTrue(f.journal().contains("INTENT"))
+        assertEquals(OperationHistoryMoveStatus.FAILED, f.history().items.single().moveStatus)
         f.assertUnlocked()
 
         val linked = Fixture(this)

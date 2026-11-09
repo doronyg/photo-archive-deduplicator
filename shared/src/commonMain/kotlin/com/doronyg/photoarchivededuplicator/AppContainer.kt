@@ -104,13 +104,13 @@ class AppContainer internal constructor(
     internal val fileOperations = FileOperationController(appScope, repository, operationProposals, fileOperationService,
         admissionBlocked = ::operationBlocked, prepareBinDirectories = { proposal ->
             binDirectoryPreparer.prepare(proposal, operationBinding(proposal))
-        }, executeMoves = { proposal, progress ->
+        }, executeMoves = { proposal, progress, control ->
             val binding = operationBinding(proposal)
             var validateMove: (suspend (ProposedFileMove) -> Unit)? = null
             try {
                 fileOperationExecutor.execute(proposal, binding,
                     validate = {
-                        val validation = fileOperationService.revalidateForExecution(proposal)
+                        val validation = fileOperationService.revalidateForExecution(proposal, control::checkCancellation)
                         validateMove = fileOperationService.executionMoveValidator(proposal, validation)
                     },
                     beforeMove = {
@@ -118,6 +118,7 @@ class AppContainer internal constructor(
                     },
                     recordMove = repository::recordCompletedMove,
                     onProgress = progress,
+                    control = control,
                 )
             } finally {
                 operationHistory.refresh()

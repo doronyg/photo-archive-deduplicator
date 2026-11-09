@@ -2,6 +2,8 @@ package com.doronyg.photoarchivededuplicator.operations
 
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import okio.ForwardingFileSystem
@@ -15,6 +17,26 @@ import kotlin.time.ExperimentalTime
 import kotlin.time.TestTimeSource
 
 class OperationMetadataInspectionTest {
+    @Test
+    fun cooperativeCancellationStopsPreparationWithoutCancellingTheCaller() = runTest {
+        val fs = FakeFileSystem()
+        val control = FileExecutionControl()
+        var reads = 0
+        val guarded = object : ForwardingFileSystem(fs) {
+            override fun onPathParameter(path: Path, functionName: String, parameterName: String): Path {
+                if (++reads == 2) control.requestCancellation()
+                return path
+            }
+        }
+        assertFailsWith<CancellationException> {
+            OperationMetadataInspection(guarded, checkCancellation = control::checkCancellation)
+                .prepare(List(100) { "/photo-$it.jpg".toPath() })
+        }
+        assertEquals(2, reads)
+        assertTrue(coroutineContext.isActive)
+        fs.checkNoOpenFiles()
+    }
+
     @Test
     fun cancellationStopsThePlannedPassBetweenMetadataCalls() = runTest {
         val fs = FakeFileSystem()

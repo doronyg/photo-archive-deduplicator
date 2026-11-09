@@ -23,6 +23,7 @@ internal data class OperationMetadataProgress(
 internal class OperationMetadataInspection(
     private val fileSystem: FileSystem,
     private val timeSource: TimeSource = TimeSource.Monotonic,
+    private val checkCancellation: () -> Unit = {},
     private val onProgress: (OperationMetadataProgress) -> Unit = {},
 ) {
     private class Node(val path: Path, val parent: Node?) {
@@ -44,12 +45,14 @@ internal class OperationMetadataInspection(
     private var prepared = false
 
     suspend fun prepare(paths: Iterable<Path>) {
+        checkCancellation()
         check(!prepared && observations.isEmpty()) { "Create a fresh metadata inspection for each run" }
         val context = currentCoroutineContext()
         val nodes = mutableMapOf<Path, Node>()
         val roots = mutableListOf<Node>()
         for (path in paths) {
             context.ensureActive()
+            checkCancellation()
             val missing = mutableListOf<Path>()
             var ancestor: Path? = path
             while (ancestor != null && ancestor !in nodes) {
@@ -77,6 +80,7 @@ internal class OperationMetadataInspection(
         roots.sortedByDescending { it.name }.forEach { stack.addLast(it) }
         while (stack.isNotEmpty()) {
             context.ensureActive()
+            checkCancellation()
             val node = stack.removeLast()
             val parent = node.parent?.let { observations.getValue(it.path) }
             val problem = node.parent?.let { parent?.childProblem(it.path) }

@@ -1,6 +1,7 @@
 package com.doronyg.photoarchivededuplicator.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -16,6 +17,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -31,6 +33,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.doronyg.photoarchivededuplicator.PathActions
 import com.doronyg.photoarchivededuplicator.UiPreferences
@@ -45,6 +48,9 @@ import com.doronyg.photoarchivededuplicator.operations.FileOperationState
 import com.doronyg.photoarchivededuplicator.operations.FileOperationValidationStatus
 import com.doronyg.photoarchivededuplicator.operations.FileMoveExecutionStatus
 import com.doronyg.photoarchivededuplicator.operations.ProposedFileMove
+import com.doronyg.photoarchivededuplicator.operations.FileExecutionPhase
+import com.doronyg.photoarchivededuplicator.operations.FileExecutionProgress
+import com.doronyg.photoarchivededuplicator.operations.JOURNAL_BATCH_SIZE
 import com.doronyg.photoarchivededuplicator.strings.AppStrings
 import okio.Path
 import okio.Path.Companion.toPath
@@ -53,8 +59,16 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.time.TimeSource
+
+internal fun fileExecutionEtaMillis(progress: FileExecutionProgress, elapsedMillis: Long): Long? {
+    if (progress.finished || progress.phase == FileExecutionPhase.PREPARING ||
+        progress.verified < 3 || elapsedMillis <= 0) return null
+    return (elapsedMillis.toDouble() / progress.verified * progress.remaining.coerceAtLeast(0)).toLong()
+}
 
 internal fun fileOperationBinSuggestion(configured: Path?, scanRoot: String, sources: List<Path>): String {
     configured?.let { return it.toString() }
@@ -183,6 +197,7 @@ internal suspend fun formatFileOperationResults(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun FileOperationsScreen(
     controller: FileOperationController,
@@ -218,6 +233,9 @@ internal fun FileOperationsScreen(
 
     Row(modifier) {
         LazyColumn(Modifier.weight(1f), state = listState, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            if (state.executionProgress != null) stickyHeader(key = "execution-progress") {
+                OperationExecutionProgress(state, controller)
+            }
             item(key = "configuration") {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(AppStrings.fileOperationsTab, style = MaterialTheme.typography.titleLarge)
@@ -238,7 +256,9 @@ internal fun FileOperationsScreen(
                     ) { Text(strings.saveBin) }
                     Text(strings.configureNote, style = MaterialTheme.typography.bodySmall)
                     Text(strings.mappingNote, style = MaterialTheme.typography.bodySmall)
-                    if (state.busy) Text(strings.busy)
+                    if (state.busy) {
+                        if (state.executionProgress == null) Text(strings.busy)
+                    }
                     else if (!writesEnabled) Text(strings.waiting)
                     state.error?.let { Text(strings.finding(it), color = MaterialTheme.colorScheme.error) }
                 }
@@ -317,14 +337,6 @@ internal fun FileOperationsScreen(
                                 state.executionResult?.operationId != proposal.id,
                             onClick = { executionProposal = proposal },
                         ) { Text(strings.realRun) }
-                        state.executionProgress?.let { progress ->
-                            Text(if (progress.finished) strings.executionFinished else strings.executionRunning,
-                                style = MaterialTheme.typography.titleMedium)
-                            Text(strings.executionCounts(progress.total, progress.completed, progress.failed, progress.uncertain,
-                                progress.total - progress.completed - progress.failed - progress.uncertain))
-                            Text(AppStrings.field(strings.logicalBytesMoved, formatBytes(progress.logicalBytesMoved)))
-                            progress.currentSource?.let { Text(it.toString(), style = MaterialTheme.typography.bodySmall) }
-                        }
                     }
                 }
                 item(key = "history-heading") {
@@ -429,6 +441,7 @@ internal fun FileOperationsScreen(
                     Text(strings.realRunAiNote)
                     Text(strings.realRunHistory)
                     Text(strings.batchExecutionNote)
+                    Text(strings.journalBatchNote(JOURNAL_BATCH_SIZE))
                     Row {
                         Checkbox(checked = executionApproved, onCheckedChange = { executionApproved = it })
                         Text(strings.approveMoves(proposal.executionEligibility.moves.size))
@@ -445,6 +458,52 @@ internal fun FileOperationsScreen(
                 TextButton(onClick = { executionProposal = null }) { Text(AppStrings.cancel) }
             },
         )
+    }
+}
+
+@Composable
+private fun OperationExecutionProgress(state: FileOperationState, controller: FileOperationController) {
+    val progress = state.executionProgress ?: return
+    val strings = AppStrings.operations
+    var sinceUpdate by remember(progress) { mutableStateOf(0L) }
+    LaunchedEffect(progress, state.busy) {
+        if (state.busy && !progress.finished) {
+            val started = TimeSource.Monotonic.markNow()
+            while (true) {
+                delay(1000)
+                sinceUpdate = started.elapsedNow().inWholeMilliseconds
+            }
+        }
+    }
+    val elapsed = progress.elapsedMillis + sinceUpdate
+    val estimate = if (state.cancellationRequested) null else fileExecutionEtaMillis(progress, elapsed)
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(if (state.cancellationRequested && !progress.finished) strings.stoppingOperation
+                    else if (progress.finished && progress.phase != FileExecutionPhase.CANCELLED) strings.executionFinished
+                    else strings.executionPhase(progress.phase),
+                    modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                if (state.busy && !progress.finished) OutlinedButton(
+                    enabled = !state.cancellationRequested, onClick = controller::cancelOperation,
+                ) { Text(strings.cancelOperation) }
+            }
+            if (progress.total > 0) LinearProgressIndicator(
+                progress = { ((progress.total - progress.remaining).toFloat() / progress.total).coerceIn(0f, 1f) },
+                modifier = Modifier.fillMaxWidth())
+            Text(strings.executionCounts(progress.total, progress.completed, progress.failed, progress.uncertain, progress.remaining))
+            Text(strings.verifiedMoves(progress.verified), style = MaterialTheme.typography.bodySmall)
+            Text(AppStrings.field(strings.logicalBytesMoved, formatBytes(progress.logicalBytesMoved)))
+            Text(strings.executionTime(formatElapsed(elapsed), estimate?.let(::formatElapsed)),
+                style = MaterialTheme.typography.bodySmall)
+            progress.currentSource?.let {
+                Text(it.toString(), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
+            }
+            if (state.busy && !progress.finished) Text(strings.cancellationNote, style = MaterialTheme.typography.bodySmall)
+            if (state.executionResult?.items?.any {
+                it.status == FileMoveExecutionStatus.UNCERTAIN || it.postProcessingError != null
+            } == true) Text(strings.reconcileRun, color = MaterialTheme.colorScheme.error)
+        }
     }
 }
 

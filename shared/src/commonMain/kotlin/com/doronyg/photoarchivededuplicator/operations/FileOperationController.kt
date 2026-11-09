@@ -23,11 +23,20 @@ internal class FileOperationController(
     private val admissionBlocked: () -> Boolean = { false },
     private val clock: () -> Long = { Clock.System.now().toEpochMilliseconds() },
     private val prepareBinDirectories: (suspend (FileOperationProposal) -> BinDirectoryPreparationResult)? = null,
-    private val executeMoves: (suspend (FileOperationProposal, (FileExecutionProgress) -> Unit) -> FileExecutionResult)? = null,
+    private val executeMoves: (suspend (FileOperationProposal, (FileExecutionProgress) -> Unit, FileExecutionControl) -> FileExecutionResult)? = null,
 ) {
     private val control = Mutex()
     private val mutableState = MutableStateFlow(FileOperationState())
+    private val activeExecution = MutableStateFlow<FileExecutionControl?>(null)
     val state: StateFlow<FileOperationState> = mutableState.asStateFlow()
+
+    fun cancelOperation() {
+        val execution = activeExecution.value ?: return
+        execution.requestCancellation()
+        mutableState.update {
+            if (activeExecution.value === execution && it.busy) it.copy(cancellationRequested = true) else it
+        }
+    }
 
     fun selectGroups(groups: List<SelectedDeletionGroup>) {
         if (mutableState.value.busy) {
@@ -110,19 +119,39 @@ internal class FileOperationController(
             "This proposal already ran. Review the results and create a new dry run."
         }
         val execute = checkNotNull(executeMoves) { "Real runs are unavailable." }
-        mutableState.update { it.copy(executionProgress = null, executionResult = null) }
+        val execution = FileExecutionControl()
+        val startedAt = clock()
+        activeExecution.value = execution
+        mutableState.update { it.copy(executionProgress = FileExecutionProgress(
+            total = proposal.moves.size, phase = FileExecutionPhase.PREPARING),
+            executionResult = null, cancellationRequested = false) }
         var lastPublished: Long? = null
-        val result = repository.scanning {
-            checkAdmission()
-            check(repository.binRoot() == proposal.binRoot) { "The configured Bin changed. Create a new dry run." }
-            execute(proposal) { progress ->
-                val now = clock()
-                val previous = lastPublished
-                if (previous == null || progress.finished || now - previous >= 200) {
-                    mutableState.update { it.copy(executionProgress = progress) }
-                    lastPublished = now
+        val result = try {
+            repository.scanning {
+                if (execution.isCancellationRequested) {
+                    FileExecutionResult(proposal.id, proposal.moves.map {
+                        FileMoveExecutionResult(it, FileMoveExecutionStatus.NOT_STARTED)
+                    }, cancelled = true)
+                } else {
+                    checkAdmission()
+                    check(repository.binRoot() == proposal.binRoot) { "The configured Bin changed. Create a new dry run." }
+                    execute(proposal, { progress ->
+                        val now = clock()
+                        val previous = lastPublished
+                        val shown = mutableState.value.executionProgress
+                        if (previous == null || progress.finished || shown?.phase != progress.phase ||
+                            shown?.completed != progress.completed || shown?.verified != progress.verified ||
+                            shown?.failed != progress.failed || shown?.uncertain != progress.uncertain ||
+                            now - previous >= 200) {
+                            mutableState.update { it.copy(executionProgress =
+                                progress.copy(elapsedMillis = (now - startedAt).coerceAtLeast(0))) }
+                            lastPublished = now
+                        }
+                    }, execution)
                 }
             }
+        } finally {
+            activeExecution.value = null
         }
         val completed = result.items.count { it.status == FileMoveExecutionStatus.COMPLETED }
         mutableState.update { it.copy(
@@ -135,6 +164,9 @@ internal class FileOperationController(
                 finished = true,
                 logicalBytesMoved = result.items.filter { item -> item.status == FileMoveExecutionStatus.COMPLETED }
                     .sumOf { item -> item.move.sizeBytes },
+                phase = if (result.cancelled) FileExecutionPhase.CANCELLED else FileExecutionPhase.FINISHED,
+                verified = maxOf(completed, it.executionProgress?.verified ?: 0),
+                elapsedMillis = (clock() - startedAt).coerceAtLeast(0),
             ),
             selectedGroups = if (completed > 0) emptyList() else it.selectedGroups,
             availableGroups = if (completed > 0) emptyList() else it.availableGroups,
@@ -171,6 +203,7 @@ internal class FileOperationController(
                 mutableState.update { it.copy(error = FileOperationFinding(errorCode, detail = failure.message)) }
             } finally {
                 mutableState.update { it.copy(busy = false,
+                    cancellationRequested = false,
                     executionProgress = it.executionProgress?.copy(finished = true)) }
                 control.unlock()
             }

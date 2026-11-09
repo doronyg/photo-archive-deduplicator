@@ -7,12 +7,69 @@ import com.doronyg.photoarchivededuplicator.scan.FileRecord
 import com.doronyg.photoarchivededuplicator.recommendation.*
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
 import okio.Path.Companion.toPath
 import kotlin.test.*
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class FileOperationControllerTest {
+    @Test
+    fun cancellationIsCooperativeAndKeepsPartialResultsAndPhaseChanges() = concurrencyTest { f ->
+        val proposals = FileOperationRepository(createFilesDatabase(f.driver), f.lane)
+        val bin = "/Bin".toPath()
+        f.repository.configureBinRoot(bin, 1)
+        val moves = listOf("a", "b").map { name ->
+            ProposedFileMove("/archive/$name.jpg".toPath(), "archive/$name.jpg".toPath(),
+                bin / "archive/$name.jpg", "/archive/keep.jpg".toPath(), 5, emptyList())
+        }
+        val proposal = FileOperationProposal("cancelled-run", 1, 1, null, bin, emptyList(), moves, emptyList())
+        proposals.save(proposal)
+        val entered = CompletableDeferred<FileExecutionControl>()
+        val finish = CompletableDeferred<Unit>()
+        val controller = FileOperationController(this, f.repository, proposals,
+            FileOperationService(f.repository, proposals, RetentionScoreService(f.repository, dispatcher = f.dispatcher),
+                f.lane, f.fakeFs, f.dispatcher), clock = { 1000 },
+            executeMoves = { reviewed, progress, control ->
+                progress(FileExecutionProgress(2, phase = FileExecutionPhase.MOVING))
+                progress(FileExecutionProgress(2, verified = 1, phase = FileExecutionPhase.SAVING_RESULTS))
+                entered.complete(control)
+                finish.await()
+                assertTrue(control.isCancellationRequested)
+                FileExecutionResult(reviewed.id, listOf(
+                    FileMoveExecutionResult(moves.first(), FileMoveExecutionStatus.COMPLETED),
+                    FileMoveExecutionResult(moves.last(), FileMoveExecutionStatus.NOT_STARTED)), cancelled = true)
+            })
+        controller.openProposal(proposal.id)
+        advanceUntilIdle()
+        controller.runRealOperation(proposal.id)
+        runCurrent()
+        assertTrue(entered.isCompleted)
+        assertEquals(FileExecutionPhase.SAVING_RESULTS, controller.state.value.executionProgress?.phase,
+            "Phase changes must not be hidden by count-update throttling")
+        assertEquals(1, controller.state.value.executionProgress?.verified)
+        assertEquals(0, controller.state.value.executionProgress?.completed)
+        controller.cancelOperation()
+        controller.cancelOperation()
+        assertTrue(entered.await().isCancellationRequested)
+        assertTrue(controller.state.value.cancellationRequested)
+        assertTrue(controller.state.value.busy, "Cancelling must wait for safe finalization")
+        assertNull(controller.state.value.executionResult)
+        finish.complete(Unit)
+        advanceUntilIdle()
+        assertFalse(controller.state.value.busy)
+        assertFalse(controller.state.value.cancellationRequested)
+        assertNull(controller.state.value.error)
+        assertTrue(controller.state.value.executionResult?.cancelled == true)
+        assertEquals(FileExecutionPhase.CANCELLED, controller.state.value.executionProgress?.phase)
+        assertEquals(1, controller.state.value.executionProgress?.completed)
+        assertEquals(5L, controller.state.value.executionProgress?.logicalBytesMoved)
+        val finalState = controller.state.value
+        controller.cancelOperation()
+        assertEquals(finalState, controller.state.value, "Cancellation after completion must be harmless")
+    }
+
     @Test
     fun partiallyValidDryRunExecutesEligibleGroupsButGlobalErrorsStillBlock() = concurrencyTest { f ->
         val proposals = FileOperationRepository(createFilesDatabase(f.driver), f.lane)
@@ -37,7 +94,7 @@ class FileOperationControllerTest {
         val controller = FileOperationController(this, f.repository, proposals,
             FileOperationService(f.repository, proposals, RetentionScoreService(f.repository, dispatcher = f.dispatcher),
                 f.lane, f.fakeFs, f.dispatcher),
-            executeMoves = { reviewed, _ ->
+            executeMoves = { reviewed, _, _ ->
                 calls++
                 assertEquals(listOf(moves.last()), reviewed.executionEligibility.moves)
                 FileExecutionResult(reviewed.id, listOf(
@@ -133,7 +190,7 @@ class FileOperationControllerTest {
         val result = FileExecutionResult(proposal.id, listOf(
             FileMoveExecutionResult(proposal.moves.single(), FileMoveExecutionStatus.COMPLETED)))
         val controller = FileOperationController(this, f.repository, proposals, service,
-            executeMoves = { approved, progress ->
+            executeMoves = { approved, progress, _ ->
                 calls++
                 assertEquals(proposal, approved)
                 assertFailsWith<IllegalStateException> { f.repository.configureBinRoot("/Other".toPath(), 2) }

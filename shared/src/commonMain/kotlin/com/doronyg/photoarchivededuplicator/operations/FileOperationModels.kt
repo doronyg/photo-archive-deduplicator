@@ -170,4 +170,5 @@ internal data class FileOperationState(
     val executionProgress: FileExecutionProgress? = null,
     val executionResult: FileExecutionResult? = null,
     val availableGroups: List<SelectedDeletionGroup> = emptyList(),
+    val cancellationRequested: Boolean = false,
 )

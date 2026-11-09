@@ -141,6 +141,15 @@ class FileOperationRealRunIntegrationTest {
 
     @Test
     fun approvedDryRunMovesOnceRecordsHistoryAndUpdatesInventoryWithoutARescan() = runTest(timeout = 15.seconds) {
+        assertApprovedExecution(cancelAfterFirst = false)
+    }
+
+    @Test
+    fun cancellingFromTheControllerFinishesCurrentMoveAndClosesUnusedIntents() = runTest(timeout = 15.seconds) {
+        assertApprovedExecution(cancelAfterFirst = true)
+    }
+
+    private suspend fun TestScope.assertApprovedExecution(cancelAfterFirst: Boolean) {
         val fs = FakeFileSystem()
         val dispatcher = StandardTestDispatcher(testScheduler)
         val root = "/archive".toPath()
@@ -148,12 +157,14 @@ class FileOperationRealRunIntegrationTest {
         val bin = "/Bin".toPath()
         fs.createDirectories(directory)
         var moved = 0
+        var afterMove: () -> Unit = {}
         val io = object : FileMoveIo {
             override fun sameFileSystem(source: Path, destinationDirectory: Path) = true
             override fun moveNoReplace(source: Path, destination: Path) {
                 check(!fs.exists(destination))
                 fs.atomicMove(source, destination)
                 moved++
+                if (cancelAfterFirst && moved == 1) afterMove()
             }
             override fun flushFile(path: Path) = Unit
         }
@@ -162,13 +173,16 @@ class FileOperationRealRunIntegrationTest {
             createScanner = { repository, lane -> DirectoryScanner(fs, repository, filesystemLane = lane) },
             createExifSource = { ExifSource { error("Real runs must not extract photo contents") } },
             fileSystem = fs, moveIo = io)
+        afterMove = container.fileOperations::cancelOperation
         try {
-            for (name in listOf("IMG.JPG", "IMG-001.JPG"))
+            val names = if (cancelAfterFirst) listOf("IMG.JPG", "IMG-001.JPG", "IMG-002.JPG")
+                else listOf("IMG.JPG", "IMG-001.JPG")
+            for (name in names)
                 fs.write(directory / name) { writeUtf8("a".repeat(120_001)) }
             container.repository.seedRoot(root)
             container.repository.recordListing(root,
                 DirectoryListing(listOf(DirectoryListing.Entry(directory, 0, null)), emptyList()), 1)
-            container.repository.recordListing(directory, DirectoryListing(emptyList(), listOf("IMG.JPG", "IMG-001.JPG").map {
+            container.repository.recordListing(directory, DirectoryListing(emptyList(), names.map {
                 val path = directory / it
                 val metadata = fs.metadata(path)
                 DirectoryListing.Entry(path, metadata.size!!, metadata.lastModifiedAtMillis, metadata.createdAtMillis)
@@ -195,7 +209,7 @@ class FileOperationRealRunIntegrationTest {
             assertNull(container.fileOperations.state.value.error)
             val proposal = assertNotNull(container.fileOperations.state.value.proposal)
             assertEquals(FileOperationValidationStatus.READY, proposal.validationStatus)
-            val move = proposal.moves.single()
+            val move = proposal.moves.first()
             assertEquals(0, moved)
             assertTrue(fs.exists(move.sourcePath))
             assertFalse(fs.exists(move.destinationPath!!))
@@ -207,8 +221,18 @@ class FileOperationRealRunIntegrationTest {
             assertEquals(1, moved)
             assertTrue(container.fileOperations.state.value.availableGroups.isEmpty())
             val result = assertNotNull(container.fileOperations.state.value.executionResult)
-            assertEquals(FileMoveExecutionStatus.COMPLETED, result.items.single().status)
-            assertNull(result.items.single().postProcessingError)
+            assertEquals(cancelAfterFirst, result.cancelled)
+            val completed = result.items.single { it.status == FileMoveExecutionStatus.COMPLETED }
+            assertNull(completed.postProcessingError)
+            if (cancelAfterFirst) {
+                val untouched = result.items.single { it.status == FileMoveExecutionStatus.NOT_STARTED }.move
+                assertTrue(fs.exists(untouched.sourcePath))
+                assertFalse(fs.exists(untouched.destinationPath!!))
+                assertNotNull(container.repository.file(untouched.sourcePath))
+                assertTrue(container.repository.fileExif(listOf(untouched.sourcePath)).isNotEmpty())
+                assertEquals(FileExecutionPhase.CANCELLED, container.fileOperations.state.value.executionProgress?.phase)
+                assertFalse(container.fileOperations.state.value.cancellationRequested)
+            }
             assertNull(result.statisticsError)
             assertEquals(120_001L, container.fileOperations.state.value.executionProgress?.logicalBytesMoved)
             val savedStatistics = historyObject(fs.read(
@@ -220,15 +244,19 @@ class FileOperationRealRunIntegrationTest {
             assertNull(container.repository.file(move.sourcePath))
             assertTrue(container.repository.fileExif(listOf(move.sourcePath)).isEmpty())
             assertTrue(container.repository.fileScores(listOf(move.sourcePath)).isEmpty())
-            assertEquals(1L, container.repository.summary().fileCount)
-            assertEquals(1, container.repository.directory(directory)?.fileCount)
-            assertTrue(container.repository.suspectedDuplicates().isEmpty())
+            assertEquals((names.size - 1).toLong(), container.repository.summary().fileCount)
+            assertEquals(names.size - 1, container.repository.directory(directory)?.fileCount)
+            assertEquals(!cancelAfterFirst, container.repository.suspectedDuplicates().isEmpty())
             val history = assertNotNull(container.operationHistory.state.value.snapshot)
             assertEquals(1L, history.statistics.completedMoves)
             assertEquals(120_001L, history.statistics.logicalBytesMoved)
             assertEquals(1L, history.statistics.filesInBin)
-            assertEquals(OperationHistoryMoveStatus.COMPLETED, history.operations.single().items.single().moveStatus)
-            assertNotNull(history.operations.single().items.single().movedAt)
+            val completedHistory = history.operations.single().items.single {
+                it.moveStatus == OperationHistoryMoveStatus.COMPLETED
+            }
+            assertNotNull(completedHistory.movedAt)
+            assertTrue(history.operations.single().items.none { it.moveStatus == OperationHistoryMoveStatus.PENDING })
+            assertFalse(history.operations.single().incomplete)
 
             container.fileOperations.openProposal(proposal.id)
             advanceUntilIdle()

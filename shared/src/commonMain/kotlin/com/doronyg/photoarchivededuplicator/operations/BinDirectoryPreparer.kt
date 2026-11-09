@@ -38,11 +38,13 @@ internal class BinDirectoryPreparer(
     suspend fun prepareEligibleGroups(
         proposal: FileOperationProposal,
         binding: ArchiveBinding,
+        checkCancellation: () -> Unit = {},
     ): BinDirectoryPreparationReport = withContext(dispatcher) {
         fun global(failure: Exception): Nothing = throw FileOperationException(
             FileOperationFinding(FileOperationIssueCode.DIRECTORY_PREPARATION_ERROR,
                 detail = failure.message), global = true)
         try {
+            checkCancellation()
             require(proposal.findings.isEmpty()) { "The proposal has global validation errors" }
             require(proposal.binRoot == binding.binRoot) { "The configured Bin differs from the dry run" }
             require(binding.archiveRoot.isAbsolute && binding.archiveRoot == binding.archiveRoot.normalized() &&
@@ -83,6 +85,7 @@ internal class BinDirectoryPreparer(
             }
             val destinationSources = mutableMapOf<String, MutableSet<Path>>()
             for (group in proposal.groups) {
+                checkCancellation()
                 val problems = (group.findings +
                     group.members.flatMap { eligible.rejected[it.file.path].orEmpty() }).distinct()
                 if (problems.isNotEmpty()) {
@@ -126,6 +129,7 @@ internal class BinDirectoryPreparer(
                 reject(paths.flatMap { owners[it].orEmpty() },
                     FileOperationFinding(FileOperationIssueCode.DESTINATION_COLLISION, paths.first()))
             filesystemLane.run("prepare eligible Bin directories and mapping markers") {
+                checkCancellation()
                 val observations = mutableMapOf<Path, FileMetadata?>()
                 fun inspect(path: Path): FileMetadata? {
                     require(generateSequence(path) { it.parent }.none { it in sourcePaths }) {
@@ -174,9 +178,11 @@ internal class BinDirectoryPreparer(
                     val rootMarker = allPlans[binding.binRoot]
                     if (rootMarker != null && markerExists(binding.binRoot, rootMarker)) existing += binding.binRoot
                     for ((key, moves) in groupMoves) {
+                        checkCancellation()
                         if (key in rejected) continue
                         try {
                             for (move in moves) {
+                                checkCancellation()
                                 require(!move.sourcePath.isHistoryMetadata() && !move.sourcePath.isBinMarkerMetadata()) {
                                     "A proposed path targets reserved application metadata"
                                 }
@@ -194,6 +200,7 @@ internal class BinDirectoryPreparer(
                     val ordered = allPlans.toList().sortedBy { it.first.segments.size }
                     for ((path, expected) in ordered) {
                         currentCoroutineContext().ensureActive()
+                        checkCancellation()
                         if (path == binding.binRoot || owners[path].orEmpty().all { it in rejected }) continue
                         try {
                             if (markerExists(path, expected)) existing += path
@@ -205,6 +212,7 @@ internal class BinDirectoryPreparer(
                     }
                     for ((path, marker) in ordered) {
                         currentCoroutineContext().ensureActive()
+                        checkCancellation()
                         if (owners[path].orEmpty().all { it in rejected }) continue
                         try {
                             if (inspect(path) == null) {

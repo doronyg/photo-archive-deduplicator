@@ -336,13 +336,37 @@ rename as a copy/delete operation. Java's atomic rename is not a race-proof
 no-clobber primitive, so destination-absence checks rely on that cooperation.
 
 The executor prepares the mapped Bin directories, publishes an immutable portable
-manifest and flushes each move intent before changing a photo's location. It
-checks that the source disappeared and the destination has the expected regular
-file metadata before flushing a completed event. Only then does one inventory
+manifest and processes sequential journal windows of up to 50 files.
+`JOURNAL_BATCH_SIZE` in `FileOperationExecutor.kt` is the code-level setting,
+independent of the 500-move history batch and statistics checkpoint interval.
+The executor writes the window's individual intent records and forces the journal
+once before moving any of those files. Each rename is verified by checking that
+the source disappeared and the destination has the expected regular file metadata.
+Per-file completion/failure records are then written and forced together.
+Only after that result flush does each successful move's inventory
 transaction remove the matching source record, its cached EXIF and all profile
 scores/factors, and decrement the original directory's file count. Retained
 files and other cached records are untouched. History and statistics refresh
-after the run; progress updates are throttled instead of republishing every event.
+after the run. The live progress panel remains visible while scrolling, showing
+the phase, current path, verified versus durably recorded moves, remaining files,
+logical bytes, elapsed time and an approximate ETA after enough moves. Counts and
+phase changes publish immediately; redundant updates are throttled.
+
+**Cancel operation** requests a cooperative stop, including during preparation.
+It finishes the current file's outcome, flushes the partial window's results,
+and completes confirmed inventory/statistics updates before releasing locks.
+It does not finish all 50 moves or roll back completed moves. Unused pre-recorded
+intents receive failure records explicitly explaining that they were not attempted;
+the live result keeps cancelled unstarted files as not started. Blocking filesystem
+calls can delay cancellation. Finalization errors require reconciliation rather
+than being presented as a clean cancellation.
+
+A process kill or power failure can leave up to the current journal window's
+files needing reconciliation, even when some renames succeeded. Their intended
+source/destination paths were recorded before mutation. Completed records awaiting
+the result flush are not counted as durably confirmed progress and do not trigger
+inventory cleanup. This reduces forced journal flushes without changing the
+per-file version 1 history format. No automatic crash recovery is introduced.
 
 Large approved selections are automatically split into bounded history batches,
 with at most 500 moves and a reader-compatible manifest/journal size per batch,
@@ -376,8 +400,9 @@ Global errors, uncertain outcomes, journal failures and inventory reconciliation
 errors stop the whole run. A possibly changed location is uncertain and leaves
 the intent pending. A confirmed move whose database update
 fails stays completed in history and reports a separate reconciliation error.
-The per-file move/verification/journal/database critical section completes even
-if cancellation is requested. Interrupted or uncertain operations are never
+The current move/verification and partial-window finalization complete even
+if cancellation is requested; the whole window is not non-cancellable.
+Interrupted or uncertain operations are never
 automatically retried: inspect the recorded history and filesystem and rescan
 the archive before proposing more work. Stale execution locks need inspection;
 they are not automatically stolen. Restoration and permanent deletion are not
