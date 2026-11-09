@@ -32,16 +32,20 @@ internal class NioFileMoveIo(
     }
 
     override fun moveNoReplace(source: Path, destination: Path) {
-        val sourcePath = checkedPath(source)
-        val destinationPath = checkedPath(destination)
-        requireRegularFile(sourcePath)
-        val directory = destinationPath.parent
-            ?: throw FileSystemException(destinationPath.toString(), null, "Destination has no parent")
-        requireDirectoryTree(directory)
-        requireAbsent(destinationPath)
-        // Check at the mutation boundary, even when callers already ran the probe.
-        if (fileStore(sourcePath) != fileStore(directory)) {
-            throw FileSystemException(sourcePath.toString(), destinationPath.toString(), "Cross-filesystem move refused")
+        val (sourcePath, destinationPath) = try {
+            val sourcePath = checkedPath(source)
+            val destinationPath = checkedPath(destination)
+            requireRegularFile(sourcePath)
+            val directory = destinationPath.parent
+                ?: throw FileSystemException(destinationPath.toString(), null, "Destination has no parent")
+            requireDirectoryTree(directory)
+            requireAbsent(destinationPath)
+            if (fileStore(sourcePath) != fileStore(directory)) {
+                throw FileSystemException(sourcePath.toString(), destinationPath.toString(), "Cross-filesystem move refused")
+            }
+            sourcePath to destinationPath
+        } catch (failure: Exception) {
+            throw FileMoveRejectedException(failure.message ?: failure.toString(), failure)
         }
         // A plain move can copy/delete after EXDEV even when visible FileStores match.
         // Destination preflight and cooperating-writer locks are required separately.

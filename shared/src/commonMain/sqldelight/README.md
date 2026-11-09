@@ -196,10 +196,29 @@ are reported as conflicts.
 
 Dry runs perform metadata reads only. They neither create the Bin nor read file
 contents, extract EXIF, rescore files, call Ollama, move files or delete anything.
-Passed checks describe observations at the recorded time, not approval to move.
+Filesystem validation plans only retained and destination paths, not candidate
+source locations, and walks that planned tree depth-first, parents before children. Each
+unique path is probed at most once per pass; cached ancestor verdicts make later
+file checks constant-time. A missing parent makes its descendants missing without
+further filesystem calls. Symlinks, non-directory ancestors and metadata errors
+block descendant probes and remain visible findings. No directory listing or
+whole-archive scan is introduced. Logs report phase changes, metadata progress at
+most once per second, and final read/skipped counts. The pass remains serialized
+on the filesystem lane, with cancellation checked between paths. Each new dry run
+or execution revalidation gets a fresh cache; actual moves still have fresh
+mutation-boundary checks.
+Candidate availability is checked only when attempting an actual move. A missing
+candidate does not invalidate a dry run. Group-local findings reject that entire
+group and any groups sharing its candidates, without blocking independent groups.
+Global configuration findings still block the whole proposal.
+Passed checks describe retained/destination observations at the recorded time,
+not source availability or approval to move.
 Snapshots use a versioned JSON payload; history summaries load independently of
 the larger evidence payload. Stored proposals remain unchanged when configuration,
 cached evidence or recommendation algorithms change.
+Older snapshots without group findings remain readable; their saved all-or-nothing
+summary status is accepted while execution eligibility is derived from their
+unchanged saved findings.
 
 Migration `9.sqm` (version 10) makes the legacy proposal archive-root field
 optional without changing any existing proposal, mapping or evidence. New proposals
@@ -288,17 +307,26 @@ archive. Ordinary database browsing does not require marker access.
 
 ### Approved real runs
 
-Open a passed dry run and choose **Run approved moves**. The confirmation shows
-the exact saved file count, logical bytes and Bin, and requires a separate
+**Select all** and **Clear selection** in Deletion Recommendations apply to the
+current category, including off-screen groups, without changing selections in
+other categories. File Operations offers the same controls for all groups sent
+from recommendations, plus individual group checkboxes. Clearing selection keeps
+those groups available to reselect. Changing selection discards only the displayed
+dry run; saved proposals remain unchanged. Bulk selection does not approve moves.
+Large lists retain lazy rendering rather than composing every selected group.
+
+Open a dry run with eligible groups and choose **Run approved moves**. The confirmation shows
+the eligible file-count upper bound, logical bytes and Bin, and requires a separate
 approval checkbox. Connect or register the archive under **Operation history**
 first. Preparation alone is neither approval nor a completed operation.
 
 Execution holds the inventory scan/configuration mutex and cooperating archive/Bin
 execution locks. It revalidates the current recommendations, saved evidence,
-protection rules and metadata once, then performs targeted source, survivor,
-destination and configuration checks before each move. It does not rescan the
-whole archive per file or introduce full-file hashing. Every candidate must be
-on the same filesystem as its destination before the first photo is moved.
+protection rules and retained/destination metadata, then performs targeted survivor,
+destination and configuration checks before each move. It does not preflight
+candidate source locations, rescan the whole archive per file or introduce
+full-file hashing. The move primitive checks source safety and same-filesystem
+capability at the mutation boundary.
 Cross-filesystem moves are rejected; there is no copy/delete fallback.
 Existing destination files are never replaced.
 Do not concurrently modify the source paths, Bin or mount configuration from
@@ -316,11 +344,22 @@ scores/factors, and decrement the original directory's file count. Retained
 files and other cached records are untouched. History and statistics refresh
 after the run; progress updates are throttled instead of republishing every event.
 
-Each operation also overwrites a small `statistics.json` summary after every 20
+Large approved selections are automatically split into bounded history batches,
+with at most 500 moves and a reader-compatible manifest/journal size per batch,
+without extra per-group or per-batch approvals. Global identity/configuration checks
+and group-level recommendation, retained-copy and destination validation precede
+photo moves, and
+archive/Bin locks cover the entire approved run. Progress and results describe the
+whole selection, including rejected groups. Invalid groups and known no-effect
+move failures skip that group's remaining candidates; independent groups continue,
+including across batch boundaries. Per-file validation indexes the approved groups once rather
+than searching the entire selection for each move.
+
+Each history batch (or single small operation) overwrites a small `statistics.json` summary after every 20
 confirmed moves and at the end, including failure or orderly cancellation. It
 records `formatVersion`, operation/archive IDs, `updatedAt`, `completedMoves`,
 `logicalBytesMoved` and `finished` (execution stopped, not necessarily successful).
-These are cumulative per-operation totals, not increments; failed, uncertain and
+These are cumulative per-batch totals, not increments; failed, uncertain and
 unstarted moves do not count, but confirmed moves count even if inventory updates
 fail. This replaceable checkpoint uses ordinary buffered writes, without extra
 forced flushes or recovery machinery. A write failure is logged and shown without
@@ -329,9 +368,13 @@ checkpoints never change history totals. The Statistics tab displays confirmed
 history totals separately from recommendation estimates; logical bytes moved
 are not physical storage reclaimed.
 
-Execution stops on the first failure. A confirmed unchanged source is a failed
-move; a possibly changed location is uncertain and leaves the intent pending.
-Remaining candidates are not started. A confirmed move whose database update
+Missing sources and other confirmed no-effect failures are reported without
+completed-move counts, logical bytes or inventory/cache cleanup. Rejected paths
+that cannot be represented safely in portable history remain in the execution
+report rather than being written into an invalid manifest.
+Global errors, uncertain outcomes, journal failures and inventory reconciliation
+errors stop the whole run. A possibly changed location is uncertain and leaves
+the intent pending. A confirmed move whose database update
 fails stays completed in history and reports a separate reconciliation error.
 The per-file move/verification/journal/database critical section completes even
 if cancellation is requested. Interrupted or uncertain operations are never
@@ -354,6 +397,7 @@ An explicit registration action initializes one archive per Bin:
 <Bin>/.deduplicator-history/bin.json
 <Bin>/.deduplicator-history/operations/<operation-id>/manifest.json
 <Bin>/.deduplicator-history/operations/<operation-id>/events.jsonl
+<Bin>/.deduplicator-history/runs/<approved-proposal-id>/
 ```
 
 Registration writes identity metadata only, never archive-file contents. The
@@ -376,8 +420,14 @@ format from existing absolute-path local proposals. One operation manifest recor
 the plan; its append-only JSON-lines journal records intents and actual completed
 actions. The reader does not infer a completed move from a planned destination.
 Execution writes and flushes intent before mutation, and records completion only
-after verifying the result. Operation IDs reuse the approved proposal ID, so an
-existing operation cannot be silently overwritten or executed again.
+after verifying the result. Small operations reuse the approved proposal ID.
+Large runs use flat `<proposal-id>-batch-001` history entries with
+`approvedProposalId`, `batchIndex` and `batchCount` provenance. Exceptionally long
+proposal IDs use a compact random UUID prefix while preserving the original ID
+inside every batch manifest. A persistent exclusive `runs/<approved-proposal-id>`
+directory reserves the entire approved run, even if interrupted before its first
+completed batch. Reservations are not automatically removed or resumed, and no
+existing batch is overwritten. Inspect failed runs before creating a fresh dry run.
 
 Refresh reads history metadata off the main thread, caches unchanged parsed records
 where safe and publishes complete snapshots without clearing the previous display

@@ -63,7 +63,7 @@ class OperationHistoryPresentationTest {
         )
         assertEquals(strings.verified, operationHistoryMappingStatus(state, archive.toString(), bin))
         assertEquals(strings.verified, operationHistoryMappingStatus(state, "  $archive  ", bin))
-        assertTrue("Approve file moves" in operationHistoryMappingStatus(state, archive.toString(), bin))
+        assertTrue("Approve eligible file moves" in operationHistoryMappingStatus(state, archive.toString(), bin))
         val unverifiedStates = listOf(
             state.copy(binding = null),
             state.copy(snapshot = null),

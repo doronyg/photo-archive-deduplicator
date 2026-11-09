@@ -4,6 +4,9 @@ import com.doronyg.photoarchivededuplicator.IoLane
 import com.doronyg.photoarchivededuplicator.operations.history.ArchiveBinding
 import com.doronyg.photoarchivededuplicator.operations.history.OperationHistoryStore
 import com.doronyg.photoarchivededuplicator.scan.TrackingIoDispatcher
+import com.doronyg.photoarchivededuplicator.scan.FileRecord
+import com.doronyg.photoarchivededuplicator.recommendation.FileRecommendationRole
+import kotlinx.serialization.json.JsonObject
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runTest
 import okio.ForwardingFileSystem
@@ -25,6 +28,127 @@ class BinDirectoryPreparerTest {
         return FileOperationProposal("proposal", 1, 1, null, binding.binRoot, emptyList(),
             listOf(ProposedFileMove(source, destination.relativeTo(binding.binRoot), destination,
                 archive / "kept.jpg", 5, emptyList())), emptyList())
+    }
+
+    private fun groupedProposal(binding: ArchiveBinding, vararg folders: String): FileOperationProposal {
+        val plans = folders.map { proposal(binding, archive / it / "photo.jpg") }
+        val groups = plans.mapIndexed { index, plan ->
+            val source = plan.moves.single().sourcePath
+            FileOperationGroup("group-$index", "category", "Category", "", 100,
+                listOf(FileOperationMember(FileRecord(source, requireNotNull(source.parent), source.name,
+                    "jpg", 5, null, 1), FileRecommendationRole.REDUNDANT_CANDIDATE,
+                    "", 100, archive / "kept.jpg", null, null, JsonObject(emptyMap()))))
+        }
+        return plans.first().copy(groups = groups, moves = plans.flatMap { it.moves })
+    }
+
+    @Test
+    fun executionPreparationRejectsOnlyTheBadGroupAndDoesNotTouchPhotosOrOverwriteMarkers() = runTest {
+        val fs = FakeFileSystem()
+        fs.createDirectories(archive / "Bad")
+        fs.createDirectories(archive / "Good")
+        fs.write(archive / "Bad/photo.jpg") { writeUtf8("bad photo") }
+        fs.write(archive / "Good/photo.jpg") { writeUtf8("good photo") }
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val lane = IoLane("preparation", dispatcher)
+        val binding = OperationHistoryStore(lane, fs, dispatcher).register(archive, bin)
+        fs.createDirectories(bin / "archive/Bad")
+        val badMarker = bin / "archive/Bad" / BIN_DIRECTORY_MARKER_NAME
+        fs.write(badMarker) { writeUtf8("{partial") }
+        var locks = 0
+        val guarded = object : ForwardingFileSystem(fs) {
+            override fun onPathParameter(path: Path, functionName: String, parameterName: String): Path {
+                assertFalse(path == archive / "Bad/photo.jpg" || path == archive / "Good/photo.jpg",
+                    "Preparation must not inspect selected source paths")
+                if (functionName in setOf("source", "sink", "openReadOnly", "openReadWrite"))
+                    check(!path.name.endsWith(".jpg")) { "Photo contents must not be accessed" }
+                if (functionName == "createDirectory" && path.name == ".directory-preparation.lock") locks++
+                return path
+            }
+        }
+        val report = BinDirectoryPreparer(lane, guarded, dispatcher)
+            .prepareEligibleGroups(groupedProposal(binding, "Bad", "Good"), binding)
+        assertEquals(setOf("group-0"), report.rejected.keys)
+        assertEquals(listOf("group-1"), report.preparedProposal.groups.map { it.key })
+        assertEquals(listOf(archive / "Good/photo.jpg"), report.preparedProposal.moves.map { it.sourcePath })
+        assertTrue(fs.exists(bin / "archive/Good" / BIN_DIRECTORY_MARKER_NAME))
+        assertEquals("{partial", fs.read(badMarker) { readUtf8() })
+        assertEquals("bad photo", fs.read(archive / "Bad/photo.jpg") { readUtf8() })
+        assertEquals("good photo", fs.read(archive / "Good/photo.jpg") { readUtf8() })
+        assertFalse(fs.exists(bin / "archive/Good/photo.jpg"))
+        assertEquals(1, locks)
+        fs.checkNoOpenFiles()
+    }
+
+    @Test
+    fun sharedAncestorFailureRejectsItsDependentsButNotADisjointTree() = runTest {
+        val fs = FakeFileSystem()
+        fs.createDirectory(archive)
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val lane = IoLane("preparation", dispatcher)
+        val binding = OperationHistoryStore(lane, fs, dispatcher).register(archive, bin)
+        fs.createDirectories(bin / "archive")
+        fs.write(bin / "archive/Bad") { writeUtf8("not a directory") }
+        val report = BinDirectoryPreparer(lane, fs, dispatcher)
+            .prepareEligibleGroups(groupedProposal(binding, "Bad/A", "Bad/B", "Good"), binding)
+        assertEquals(setOf("group-0", "group-1"), report.rejected.keys)
+        assertEquals(listOf("group-2"), report.preparedProposal.groups.map { it.key })
+        assertTrue(fs.exists(bin / "archive/Good" / BIN_DIRECTORY_MARKER_NAME))
+        assertEquals("not a directory", fs.read(bin / "archive/Bad") { readUtf8() })
+    }
+
+    @Test
+    fun failedChildMarkerWriteIsLocalAndItsPartialMarkerIsNeverOverwrittenOnRetry() = runTest {
+        val fs = FakeFileSystem()
+        fs.createDirectory(archive)
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val lane = IoLane("preparation", dispatcher)
+        val binding = OperationHistoryStore(lane, fs, dispatcher).register(archive, bin)
+        val badMarker = bin / "archive/Bad" / BIN_DIRECTORY_MARKER_NAME
+        val failing = object : ForwardingFileSystem(fs) {
+            override fun sink(file: Path, mustCreate: Boolean): Sink {
+                val sink = super.sink(file, mustCreate)
+                return if (file != badMarker) sink else object : ForwardingSink(sink) {
+                    override fun write(source: Buffer, byteCount: Long) {
+                        super.write(source, minOf(8L, byteCount))
+                        throw IOException("Disconnected during child marker write")
+                    }
+                }
+            }
+        }
+        val proposal = groupedProposal(binding, "Bad", "Good")
+        val report = BinDirectoryPreparer(lane, failing, dispatcher).prepareEligibleGroups(proposal, binding)
+        assertEquals(setOf("group-0"), report.rejected.keys)
+        assertTrue(fs.exists(bin / "archive/Good" / BIN_DIRECTORY_MARKER_NAME))
+        val partial = fs.read(badMarker) { readUtf8() }
+        assertTrue(partial.isNotEmpty())
+        val retry = BinDirectoryPreparer(lane, fs, dispatcher).prepareEligibleGroups(proposal, binding)
+        assertEquals(setOf("group-0"), retry.rejected.keys)
+        assertEquals(partial, fs.read(badMarker) { readUtf8() })
+        assertFalse(fs.exists(bin / ".deduplicator-history/.directory-preparation.lock"))
+        fs.checkNoOpenFiles()
+    }
+
+    @Test
+    fun executionPreparationTreatsRootMarkerAndIdentityFailuresAsGlobal() = runTest {
+        val fs = FakeFileSystem()
+        fs.createDirectory(archive)
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val lane = IoLane("preparation", dispatcher)
+        val binding = OperationHistoryStore(lane, fs, dispatcher).register(archive, bin)
+        val proposal = groupedProposal(binding, "Bad", "Good")
+        fs.write(bin / BIN_DIRECTORY_MARKER_NAME) { writeUtf8("{partial") }
+        val preparer = BinDirectoryPreparer(lane, fs, dispatcher)
+        assertTrue(assertFailsWith<FileOperationException> {
+            preparer.prepareEligibleGroups(proposal, binding)
+        }.global)
+        assertFalse(fs.exists(bin / "archive"))
+        fs.delete(bin / BIN_DIRECTORY_MARKER_NAME)
+        fs.write(archive / ".photo-archive-id.json") { writeUtf8("{changed") }
+        assertTrue(assertFailsWith<FileOperationException> {
+            preparer.prepareEligibleGroups(proposal, binding)
+        }.global)
+        assertFalse(fs.exists(bin / "archive"))
     }
 
     @Test

@@ -3,7 +3,6 @@ package com.doronyg.photoarchivededuplicator.operations
 import okio.Path
 import okio.Path.Companion.toPath
 import java.net.URI
-import java.nio.file.FileAlreadyExistsException
 import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.FileSystemException
 import java.nio.file.FileSystems
@@ -20,6 +19,18 @@ import kotlin.test.assertTrue
 
 class FileMoveIoTest {
     private val io = platformFileMoveIo()
+
+    @Test
+    fun missingSourceIsExplicitlyRejectedBeforeNativeRenameAndPreservesCause() = fixture { root ->
+        var renamed = false
+        val guarded = NioFileMoveIo(move = { _, _, _ -> renamed = true })
+        val failure = assertFailsWith<FileMoveRejectedException> {
+            guarded.moveNoReplace(root.resolve("missing.jpg").okio(), root.resolve("out.jpg").okio())
+        }
+        assertTrue(failure.cause is NoSuchFileException)
+        assertFalse(renamed)
+        assertFalse(Files.exists(root.resolve("out.jpg"), NOFOLLOW_LINKS))
+    }
 
     @Test
     fun sameFilesystemMovePreservesBytesAndRemovesSource() = fixture { root ->
@@ -56,14 +67,14 @@ class FileMoveIoTest {
     fun existingDestinationIsNeverChanged() = fixture { root ->
         val source = Files.writeString(root.resolve("source.jpg"), "source")
         val destination = Files.writeString(root.resolve("destination.jpg"), "keep")
-        assertFailsWith<FileAlreadyExistsException> {
+        assertFailsWith<FileMoveRejectedException> {
             io.moveNoReplace(source.okio(), destination.okio())
         }
         assertEquals("source", Files.readString(source))
         assertEquals("keep", Files.readString(destination))
-        assertFailsWith<FileAlreadyExistsException> { io.moveNoReplace(source.okio(), source.okio()) }
+        assertFailsWith<FileMoveRejectedException> { io.moveNoReplace(source.okio(), source.okio()) }
         val directory = Files.createDirectory(root.resolve("directory"))
-        assertFailsWith<FileAlreadyExistsException> {
+        assertFailsWith<FileMoveRejectedException> {
             io.moveNoReplace(source.okio(), directory.okio())
         }
     }
@@ -80,7 +91,7 @@ class FileMoveIoTest {
             // Simulate separate mounted stores without writing outside the test fixture.
             val separateStores = NioFileMoveIo { if (it == source) sourceStore else otherStore }
             assertFalse(separateStores.sameFileSystem(source.okio(), directory.okio()))
-            assertFailsWith<FileSystemException> {
+            assertFailsWith<FileMoveRejectedException> {
                 separateStores.moveNoReplace(source.okio(), destination.okio())
             }
             var changedStore = false
@@ -89,7 +100,7 @@ class FileMoveIoTest {
             }
             assertTrue(changingStores.sameFileSystem(source.okio(), directory.okio()))
             changedStore = true
-            assertFailsWith<FileSystemException> {
+            assertFailsWith<FileMoveRejectedException> {
                 changingStores.moveNoReplace(source.okio(), destination.okio())
             }
             assertFalse(Files.exists(destination, NOFOLLOW_LINKS))
@@ -107,19 +118,19 @@ class FileMoveIoTest {
         } catch (_: UnsupportedOperationException) {
             return@fixture
         }
-        assertFailsWith<FileSystemException> { io.moveNoReplace(link.okio(), directory.resolve("photo").okio()) }
+        assertFailsWith<FileMoveRejectedException> { io.moveNoReplace(link.okio(), directory.resolve("photo").okio()) }
         assertFailsWith<FileSystemException> { io.sameFileSystem(link.okio(), directory.okio()) }
         assertFailsWith<FileSystemException> { io.flushFile(link.okio()) }
-        assertFailsWith<FileAlreadyExistsException> { io.moveNoReplace(source.okio(), link.okio()) }
+        assertFailsWith<FileMoveRejectedException> { io.moveNoReplace(source.okio(), link.okio()) }
         Files.delete(link)
         Files.createSymbolicLink(link, root.resolve("missing"))
-        assertFailsWith<FileAlreadyExistsException> { io.moveNoReplace(source.okio(), link.okio()) }
+        assertFailsWith<FileMoveRejectedException> { io.moveNoReplace(source.okio(), link.okio()) }
         Files.delete(link)
         Files.createSymbolicLink(link, directory)
         assertFailsWith<FileSystemException> { io.sameFileSystem(source.okio(), link.okio()) }
-        assertFailsWith<FileSystemException> { io.moveNoReplace(source.okio(), link.resolve("photo").okio()) }
+        assertFailsWith<FileMoveRejectedException> { io.moveNoReplace(source.okio(), link.resolve("photo").okio()) }
         Files.writeString(directory.resolve("nested.jpg"), "nested")
-        assertFailsWith<FileSystemException> {
+        assertFailsWith<FileMoveRejectedException> {
             io.moveNoReplace(link.resolve("nested.jpg").okio(), root.resolve("out.jpg").okio())
         }
         assertEquals("source", Files.readString(source))
@@ -132,11 +143,11 @@ class FileMoveIoTest {
         val directory = Files.createDirectory(root.resolve("bin"))
         val source = Files.writeString(root.resolve("source.jpg"), "source")
         assertFailsWith<NoSuchFileException> { io.sameFileSystem(missing, directory.okio()) }
-        assertFailsWith<NoSuchFileException> { io.moveNoReplace(missing, root.resolve("out").okio()) }
-        assertFailsWith<NoSuchFileException> {
+        assertFailsWith<FileMoveRejectedException> { io.moveNoReplace(missing, root.resolve("out").okio()) }
+        assertFailsWith<FileMoveRejectedException> {
             io.moveNoReplace(source.okio(), root.resolve("missing/out").okio())
         }
-        assertFailsWith<FileSystemException> {
+        assertFailsWith<FileMoveRejectedException> {
             io.moveNoReplace(directory.okio(), root.resolve("out").okio())
         }
         assertFailsWith<FileSystemException> { io.sameFileSystem(source.okio(), source.okio()) }
@@ -159,7 +170,7 @@ class FileMoveIoTest {
         val destination = root.resolve("out.jpg")
         val unsupported = NioFileMoveIo { throw UnsupportedOperationException("store unavailable") }
         assertFailsWith<UnsupportedOperationException> { unsupported.sameFileSystem(source.okio(), root.okio()) }
-        assertFailsWith<UnsupportedOperationException> { unsupported.moveNoReplace(source.okio(), destination.okio()) }
+        assertFailsWith<FileMoveRejectedException> { unsupported.moveNoReplace(source.okio(), destination.okio()) }
         assertEquals("source", Files.readString(source))
         assertFalse(Files.exists(destination, NOFOLLOW_LINKS))
     }

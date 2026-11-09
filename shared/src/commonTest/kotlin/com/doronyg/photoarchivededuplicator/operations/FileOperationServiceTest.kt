@@ -19,14 +19,16 @@ class FileOperationServiceTest {
         val bin: Path,
     )
 
-    private suspend fun seed(f: ConcurrencyFixture): Fixture {
-        val folder = f.root / "Family"
+    private suspend fun seed(f: ConcurrencyFixture, folderName: String = "Family"): Fixture {
+        val folder = f.root / folderName
         val bin = "/DeduplicatorGarbageBin".toPath()
-        val names = listOf("IMG.JPG", "IMG-001.JPG")
+        val prefix = if (folderName == "Family") "IMG" else folderName.uppercase()
+        val names = listOf("$prefix.JPG", "$prefix-001.JPG")
         for (name in names) f.write(folder / name, "a".repeat(120_001))
         f.repository.seedRoot(f.root)
         f.repository.recordListing(f.root, DirectoryListing(
-            listOf(DirectoryListing.Entry(folder, 0, null)), emptyList()), 1)
+            f.fakeFs.list(f.root).filter { f.fakeFs.metadata(it).isDirectory }
+                .map { DirectoryListing.Entry(it, 0, null) }, emptyList()), 1)
         f.repository.recordListing(folder, DirectoryListing(emptyList(), names.map { name ->
             val path = folder / name
             val metadata = f.fakeFs.metadata(path)
@@ -34,14 +36,17 @@ class FileOperationServiceTest {
         }), 2)
         f.repository.filesIn(folder).forEach { file ->
             f.repository.saveFileExif(ExifRecord(ExifInput.from(file), ExifReadResult(ExifStatus.EXTRACTED,
-                ExifMetadata(capturedAt = "2023:02:18 12:44:25", make = "Canon", model = "Camera",
+                ExifMetadata(capturedAt = if (folderName == "Family") "2023:02:18 12:44:25" else "2024:02:18 12:44:25",
+                    make = "Canon", model = "Camera",
                     width = 4000, height = 3000)), 3))
         }
         val retention = RetentionScoreService(f.repository, dispatcher = f.dispatcher)
         retention.assessSuspected(f.repository.suspectedDuplicates())
         val category = DeletionRecommendationService(f.repository, retention, f.dispatcher).load()
             .categories.single { it.category.id == "same-directory-metadata" }
-        val selected = SelectedDeletionGroup(category.category, category.groups.single())
+        val selected = SelectedDeletionGroup(category.category, category.groups.single {
+            it.recommendation.files.values.any { advice -> advice.file.directoryPath == folder }
+        })
         f.repository.configureBinRoot(bin, 4)
         return Fixture(retention, FileOperationRepository(createFilesDatabase(f.driver), f.lane), selected, bin)
     }
@@ -55,12 +60,24 @@ class FileOperationServiceTest {
         val fixture = seed(f)
         val service = service(f, fixture)
         val proposal = service.createProposal(listOf(fixture.selected))
-        assertNull(service.revalidateForExecution(proposal))
+        assertNull(service.revalidateForExecution(proposal).classificationContext)
+        var groupReads = 0
+        val countedGroups = object : AbstractList<FileOperationGroup>() {
+            override val size = proposal.groups.size
+            override fun get(index: Int): FileOperationGroup {
+                groupReads++
+                return proposal.groups[index]
+            }
+        }
+        val beforeMove = service.executionMoveValidator(proposal.copy(groups = countedGroups),
+            FileOperationExecutionValidation(null))
+        val initialReads = groupReads
+        repeat(3) { beforeMove(proposal.moves.single()) }
+        assertEquals(initialReads, groupReads, "Per-file validation must not rescan all approved groups")
         assertEquals(1, fixture.proposals.recent().size)
         assertEquals(proposal, fixture.proposals.load(proposal.id))
         f.fakeFs.write(proposal.moves.single().sourcePath) { writeUtf8("changed") }
-        val failure = assertFailsWith<FileOperationException> { service.revalidateForExecution(proposal) }
-        assertEquals(FileOperationIssueCode.SOURCE_CHANGED, failure.finding.code)
+        assertTrue(service.revalidateForExecution(proposal).groupFindings.isEmpty())
         assertEquals(1, fixture.proposals.recent().size)
     }
 
@@ -72,14 +89,18 @@ class FileOperationServiceTest {
             f.fakeFs, f.dispatcher, classificationContext = { context },
             clock = { 100 }, nextId = { "approved" })
         val proposal = service.createProposal(listOf(fixture.selected))
-        assertEquals(context, service.revalidateForExecution(proposal))
+        val validation = service.revalidateForExecution(proposal)
+        assertEquals(context, validation.classificationContext)
+        val beforeMove = service.executionMoveValidator(proposal, validation)
         f.repository.saveDirectoryClassification(DirectoryClassificationRecord(
             f.root / "Family", (f.root / "Family").toString(), DirectoryClassification.PROTECTED, context, 5))
         val failure = assertFailsWith<FileOperationException> {
-            service.validateBeforeMove(proposal, proposal.moves.single(), context)
+            beforeMove(proposal.moves.single())
         }
         assertEquals(FileOperationIssueCode.PROTECTED_GROUP, failure.finding.code)
-        assertFailsWith<FileOperationException> { service.revalidateForExecution(proposal) }
+        assertFalse(failure.global)
+        val stale = service.revalidateForExecution(proposal)
+        assertTrue(stale.groupFindings.getValue(proposal.groups.single().key).isNotEmpty())
         assertFalse(f.fakeFs.exists(fixture.bin))
     }
 
@@ -145,13 +166,16 @@ class FileOperationServiceTest {
         assertEquals(beforeFiles, beforeFiles.keys.associateWith { f.fakeFs.metadata(it).toString() })
         assertFalse(f.fakeFs.exists(fixture.bin))
         assertEquals(inspected.distinct().size, inspected.size, "Inspect shared parent paths only once per dry run")
+        assertEquals(5, inspected.size, "Do not stat candidate files or destinations beneath the missing Bin")
+        assertFalse(report.moves.single().sourcePath in inspected)
+        assertTrue(inspected.none { it != fixture.bin && it.isInTree(fixture.bin) })
         assertTrue(f.driver.statements.drop(start).all {
             it.startsWith("SELECT") || it.startsWith("WITH") || it.startsWith("INSERT INTO fileOperationProposal")
         })
     }
 
     @Test
-    fun destinationCollisionAndChangedSourceAreSavedAsFindingsNotMoves() = concurrencyTest { f ->
+    fun destinationCollisionIsSavedButChangedSourceIsNotInspected() = concurrencyTest { f ->
         val fixture = seed(f)
         val candidate = fixture.selected.group.candidates.single().advice.file.path
         val destination = fixture.bin / "archive" / "Family" / candidate.name
@@ -160,10 +184,26 @@ class FileOperationServiceTest {
         val report = service(f, fixture).createProposal(listOf(fixture.selected))
         assertEquals(FileOperationValidationStatus.NEEDS_ATTENTION, report.validationStatus)
         assertTrue(report.moves.single().findings.any { it.code == FileOperationIssueCode.DESTINATION_EXISTS })
-        assertTrue(report.moves.single().findings.any { it.code == FileOperationIssueCode.SOURCE_CHANGED })
+        assertTrue(report.moves.single().findings.none { it.code == FileOperationIssueCode.SOURCE_CHANGED })
         assertEquals("existing file", f.fakeFs.read(destination) { readUtf8() })
         assertEquals("changed", f.fakeFs.read(candidate) { readUtf8() })
         assertEquals(report, fixture.proposals.load(report.id))
+    }
+
+    @Test
+    fun executionRevalidationDoesNotReuseMissingDestinationObservationsFromTheDryRun() = concurrencyTest { f ->
+        val fixture = seed(f)
+        val service = service(f, fixture)
+        val proposal = service.createProposal(listOf(fixture.selected))
+        val destination = assertNotNull(proposal.moves.single().destinationPath)
+        f.write(destination, "created after dry run")
+        val validation = service.revalidateForExecution(proposal)
+        assertTrue(validation.groupFindings.values.flatten().any { it.code == FileOperationIssueCode.DESTINATION_EXISTS })
+        val failure = assertFailsWith<FileOperationException> {
+            service.executionMoveValidator(proposal, validation)(proposal.moves.single())
+        }
+        assertFalse(failure.global)
+        assertEquals("created after dry run", f.fakeFs.read(destination) { readUtf8() })
     }
 
     @Test
@@ -176,8 +216,9 @@ class FileOperationServiceTest {
         f.repository.saveFileExif(record.copy(readerVersion = "old"))
         val report = service(f, fixture).createProposal(listOf(fixture.selected))
         assertEquals(FileOperationValidationStatus.NEEDS_ATTENTION, report.validationStatus)
-        assertTrue(report.findings.any { it.code == FileOperationIssueCode.SURVIVOR_MISSING })
-        assertTrue(report.findings.any { it.code == FileOperationIssueCode.STALE_RECOMMENDATION })
+        assertTrue(report.moves.single().findings.any { it.code == FileOperationIssueCode.SURVIVOR_MISSING })
+        assertTrue(report.groups.single().findings.any { it.code == FileOperationIssueCode.STALE_RECOMMENDATION })
+        assertTrue(report.findings.isEmpty())
         assertEquals(keeper, report.moves.single().survivorPath)
     }
 
@@ -224,13 +265,14 @@ class FileOperationServiceTest {
             clock = { 100 }, nextId = { "protected" })
         val report = service.createProposal(listOf(fixture.selected))
         assertEquals(FileOperationValidationStatus.NEEDS_ATTENTION, report.validationStatus)
-        assertTrue(report.findings.any { it.code == FileOperationIssueCode.PROTECTED_GROUP })
-        assertTrue(report.findings.any { it.code == FileOperationIssueCode.STALE_RECOMMENDATION })
+        assertTrue(report.groups.single().findings.any { it.code == FileOperationIssueCode.PROTECTED_GROUP })
+        assertTrue(report.groups.single().findings.any { it.code == FileOperationIssueCode.STALE_RECOMMENDATION })
+        assertTrue(report.findings.isEmpty())
         assertTrue(report.groups.single().members.all { it.classification == DirectoryClassification.PROTECTED })
     }
 
     @Test
-    fun sourceSymlinkIsRejected() = concurrencyTest { f ->
+    fun sourceSymlinkIsNotInspectedUntilTheActualMove() = concurrencyTest { f ->
         val fixture = seed(f)
         f.fakeFs.allowSymlinks = true
         val candidate = fixture.selected.group.candidates.single().advice.file.path
@@ -239,8 +281,8 @@ class FileOperationServiceTest {
         f.fakeFs.delete(candidate)
         f.fakeFs.createSymlink(candidate, target)
         val report = service(f, fixture).createProposal(listOf(fixture.selected))
-        assertEquals(FileOperationValidationStatus.NEEDS_ATTENTION, report.validationStatus)
-        assertTrue(report.moves.single().findings.any { it.code == FileOperationIssueCode.SOURCE_NOT_REGULAR })
+        assertEquals(FileOperationValidationStatus.READY, report.validationStatus)
+        assertTrue(report.moves.single().findings.isEmpty())
     }
 
     @Test
@@ -254,6 +296,125 @@ class FileOperationServiceTest {
         assertTrue(report.moves.single().findings.any {
             it.code == FileOperationIssueCode.UNSAFE_PATH && it.path == fixture.bin / "archive"
         })
+    }
+
+    @Test
+    fun missingCandidateIsReadyAndNeverInspectedInEitherValidationPass() = concurrencyTest { f ->
+        val fixture = seed(f)
+        val candidate = fixture.selected.group.candidates.single().advice.file.path
+        f.fakeFs.delete(candidate)
+        val guarded = object : ForwardingFileSystem(f.fakeFs) {
+            override fun onPathParameter(path: Path, functionName: String, parameterName: String): Path {
+                assertNotEquals(candidate, path, "Service must leave candidate metadata to the move primitive")
+                return path
+            }
+        }
+        val service = service(f, fixture, guarded)
+        val proposal = service.createProposal(listOf(fixture.selected))
+        assertEquals(FileOperationValidationStatus.READY, proposal.validationStatus)
+        val validation = service.revalidateForExecution(proposal)
+        assertTrue(validation.groupFindings.isEmpty())
+        service.executionMoveValidator(proposal, validation)(proposal.moves.single())
+        assertNotNull(f.repository.file(candidate))
+        assertEquals(2L, f.repository.summary().fileCount)
+    }
+
+    @Test
+    fun sourceOnlyAncestorsAreNotProbedEvenWhenACandidateWouldBeADestinationAncestor() = concurrencyTest { f ->
+        val fixture = seed(f)
+        val candidate = fixture.selected.group.candidates.single()
+        val source = "/unmounted-source/photos/photo.jpg".toPath()
+        fun selection(path: Path): SelectedDeletionGroup {
+            val advice = candidate.advice.copy(file = candidate.advice.file.copy(
+                path = path, directoryPath = requireNotNull(path.parent), name = path.name))
+            val group = fixture.selected.group
+            return fixture.selected.copy(group = group.copy(
+                candidates = listOf(candidate.copy(advice = advice)),
+                recommendation = group.recommendation.copy(files =
+                    group.recommendation.files - candidate.advice.file.path + (path to advice))))
+        }
+        val guarded = object : ForwardingFileSystem(f.fakeFs) {
+            override fun onPathParameter(path: Path, functionName: String, parameterName: String): Path {
+                assertFalse(path.isInTree("/unmounted-source".toPath()), "Source-only tree must not be inspected")
+                return path
+            }
+        }
+        var id = 0
+        val service = FileOperationService(f.repository, fixture.proposals, fixture.retention, f.lane,
+            guarded, f.dispatcher, clock = { 100 }, nextId = { "source-tree-${id++}" })
+        service.createProposal(listOf(selection(source)))
+        f.repository.configureBinRoot("/unmounted-source/bin".toPath(), 6)
+        val report = service.createProposal(listOf(selection("/unmounted-source".toPath())))
+        assertTrue(report.findings.any { it.code == FileOperationIssueCode.UNSAFE_PATH })
+    }
+
+    @Test
+    fun missingKeeperAndStaleSelectionRejectOnlyTheirOwnGroup() = concurrencyTest { f ->
+        val bad = seed(f)
+        val good = seed(f, "Holiday")
+        val keeper = bad.selected.group.survivors.single().advice.file.path
+        f.fakeFs.delete(keeper)
+        val staleCandidate = bad.selected.group.candidates.single().advice.file.path
+        val exif = f.repository.fileExif(listOf(staleCandidate)).single()
+        f.repository.saveFileExif(exif.copy(readerVersion = "outdated"))
+        val report = service(f, good).createProposal(listOf(bad.selected, good.selected))
+        assertEquals(FileOperationValidationStatus.PARTIALLY_READY, report.validationStatus)
+        assertTrue(report.findings.isEmpty())
+        assertEquals(listOf(good.selected.group.candidates.single().advice.file.path),
+            report.executionEligibility.moves.map { it.sourcePath })
+        assertTrue(report.groups.single { it.key == bad.selected.key }.findings.any {
+            it.code == FileOperationIssueCode.STALE_RECOMMENDATION
+        })
+        val validation = service(f, good).revalidateForExecution(report)
+        assertEquals(setOf(bad.selected.key), validation.groupFindings.keys)
+        val beforeMove = service(f, good).executionMoveValidator(report, validation)
+        beforeMove(report.executionEligibility.moves.single())
+        val failure = assertFailsWith<FileOperationException> {
+            beforeMove(report.moves.single { it.sourcePath == staleCandidate })
+        }
+        assertFalse(failure.global)
+    }
+
+    @Test
+    fun runtimeStaleGroupDoesNotInvalidateAnIndependentGroupButBinAndSettingsChangesAreGlobal() = concurrencyTest { f ->
+        val bad = seed(f)
+        val good = seed(f, "Holiday")
+        var context = OllamaSettings("http://ollama.test", "model").context()
+        val service = FileOperationService(f.repository, good.proposals, good.retention, f.lane,
+            f.fakeFs, f.dispatcher, classificationContext = { context },
+            clock = { 100 }, nextId = { "runtime" })
+        val proposal = service.createProposal(listOf(bad.selected, good.selected))
+        val candidate = bad.selected.group.candidates.single().advice.file.path
+        val record = f.repository.fileExif(listOf(candidate)).single()
+        f.repository.saveFileExif(record.copy(readerVersion = "old"))
+        val validation = service.revalidateForExecution(proposal)
+        assertEquals(setOf(bad.selected.key), validation.groupFindings.keys)
+        val beforeMove = service.executionMoveValidator(proposal, validation)
+        val goodMove = proposal.moves.single { it.sourcePath != candidate }
+        beforeMove(goodMove)
+        assertFalse(assertFailsWith<FileOperationException> {
+            beforeMove(proposal.moves.single { it.sourcePath == candidate })
+        }.global)
+        context = OllamaSettings("http://ollama.test", "another-model").context()
+        assertTrue(assertFailsWith<FileOperationException> { beforeMove(goodMove) }.global)
+        f.repository.configureBinRoot("/another-bin".toPath(), 200)
+        assertTrue(assertFailsWith<FileOperationException> { service.revalidateForExecution(proposal) }.global)
+    }
+
+    @Test
+    fun protectedGroupLeavesAnUnrelatedGroupEligible() = concurrencyTest { f ->
+        val bad = seed(f)
+        val good = seed(f, "Holiday")
+        val context = OllamaSettings("http://ollama.test", "model").context()
+        f.repository.saveDirectoryClassification(DirectoryClassificationRecord(
+            f.root / "Family", (f.root / "Family").toString(), DirectoryClassification.PROTECTED, context, 5))
+        val service = FileOperationService(f.repository, good.proposals, good.retention, f.lane,
+            f.fakeFs, f.dispatcher, classificationContext = { context })
+        val proposal = service.createProposal(listOf(bad.selected, good.selected))
+        assertEquals(FileOperationValidationStatus.PARTIALLY_READY, proposal.validationStatus)
+        assertTrue(proposal.findings.isEmpty())
+        assertEquals(listOf(good.selected.group.candidates.single().advice.file.path),
+            proposal.executionEligibility.moves.map { it.sourcePath })
     }
 
     @Test

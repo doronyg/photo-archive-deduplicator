@@ -57,13 +57,15 @@ class FileOperationPresentationTest {
 
     @Test
     fun validationIsNotApprovalAndRealRunsDiscloseTheMissingIndependentAiReview() {
-        assertEquals("Dry-run metadata checks: Passed", strings.status(FileOperationValidationStatus.READY))
-        assertEquals("Dry-run metadata checks: Needs attention", strings.status(FileOperationValidationStatus.NEEDS_ATTENTION))
+        assertEquals("Dry-run checks: Valid groups available", strings.status(FileOperationValidationStatus.READY))
+        assertTrue(strings.status(FileOperationValidationStatus.PARTIALLY_READY).contains("other groups will be skipped"))
+        assertTrue(strings.status(FileOperationValidationStatus.NEEDS_ATTENTION).contains("Needs attention"))
         assertEquals("Independent AI review: Not performed (not implemented)", strings.aiStatus)
         assertTrue(strings.availability.contains("Approved real runs"))
         assertTrue(strings.realRunAiNote.contains("has not been performed"))
         assertTrue(strings.realRunChecks.contains("same-filesystem"))
-        assertTrue(strings.approveMoves(42).contains("exactly these 42 files"))
+        assertTrue(strings.approveMoves(42).contains("up to 42 eligible files"))
+        assertTrue(strings.dryRunSourceNote.contains("do not check candidate file"))
         assertEquals("Needs reconciliation", strings.executionStatus(FileMoveExecutionStatus.UNCERTAIN))
         assertEquals("Not moved", strings.executionStatus(FileMoveExecutionStatus.FAILED))
         assertEquals("Candidate", strings.role(FileRecommendationRole.REDUNDANT_CANDIDATE))
@@ -161,9 +163,9 @@ class FileOperationPresentationTest {
         assertEquals(text, formatFileOperationResults(proposal))
         listOf(keep, move, missing).forEach { assertTrue(text.contains(quoteResultText(it.file.path.toString()))) }
         assertTrue(text.contains("File stays"))
-        assertTrue(text.contains(quoteResultText(strings.fileMoves(destination.toString()))))
+        assertTrue(text.contains(quoteResultText(strings.skippedMove)))
         assertTrue(text.contains(quoteResultText(destination.toString())))
-        assertTrue(text.contains(strings.missingDestination))
+        assertTrue(text.contains(strings.unmapped))
         assertTrue(text.contains("SOURCE_MISSING"))
         assertTrue(text.contains(quoteResultText("saved\nreason")))
         assertTrue(text.contains(strings.status(FileOperationValidationStatus.NEEDS_ATTENTION)))
@@ -194,10 +196,35 @@ class FileOperationPresentationTest {
         assertTrue(text.contains(quoteResultText(destination.toString())))
         assertTrue(text.contains(quoteResultText(keep.file.path.toString())))
         assertTrue(text.contains("File stays"))
-        assertTrue(text.contains(strings.missingDestination))
+        assertTrue(text.contains(strings.unmapped))
         assertTrue(text.contains(quoteResultText(orphan.toString())))
         assertTrue(text.contains("Cannot map saved path"))
         assertTrue(text.contains("Group finding"))
+    }
+
+    @Test
+    fun partialReportExplainsRejectedGroupsAndKeepsIndependentMovesEligible() = runTest {
+        val keep = savedMember("/photos/keep.jpg", FileRecommendationRole.PREFERRED)
+        val bad = savedMember("/photos/bad.jpg", FileRecommendationRole.REDUNDANT_CANDIDATE)
+        val good = savedMember("/photos/good.jpg", FileRecommendationRole.REDUNDANT_CANDIDATE)
+        val error = FileOperationFinding(FileOperationIssueCode.SURVIVOR_MISSING, keep.file.path, "Bad group keeper")
+        val moves = listOf(bad, good).map {
+            ProposedFileMove(it.file.path, "photos/${it.file.name}".toPath(), "/bin/photos/${it.file.name}".toPath(),
+                keep.file.path, 123, emptyList())
+        }
+        val proposal = FileOperationProposal("partial", 1, 2, null, "/bin".toPath(),
+            listOf(
+                FileOperationGroup("bad", "category", "Category", "Bad evidence", 90, listOf(bad, keep), listOf(error)),
+                FileOperationGroup("good", "category", "Category", "Good evidence", 90, listOf(good, keep))),
+            moves, emptyList())
+        val text = formatFileOperationResults(proposal)
+        assertTrue(text.contains(strings.status(FileOperationValidationStatus.PARTIALLY_READY)))
+        assertTrue(text.contains(strings.eligibleMoves(1, 2, formatBytes(123))))
+        assertTrue(text.contains(strings.skippedMove))
+        assertTrue(text.contains(strings.fileMoves(moves.last().destinationPath.toString())))
+        assertTrue(text.contains("Bad group keeper"))
+        assertEquals(strings.skippedMove,
+            operationMemberDisposition(bad.file.path, moves, proposal.executionEligibility.rejected.keys))
     }
 
     @Test
@@ -229,5 +256,16 @@ class FileOperationPresentationTest {
         assertEquals(listOf(second), selectedDeletionGroups(report, toggleDeletionGroup(keys, first.key, false)))
         assertEquals(keys, toggleDeletionGroup(keys, first.key, true))
         assertTrue(selectedDeletionGroups(report, setOf("stale-key")).isEmpty())
+        val largeCategory = report.categories.first().copy(
+            groups = List(20_000) { group.copy(id = "group-$it") })
+        val initiallySelected = setOf(second.key)
+        val bulk = toggleDeletionCategory(initiallySelected, largeCategory, true)
+        assertEquals(20_001, bulk.size)
+        val largeReport = report.copy(categories = listOf(largeCategory, report.categories.last()))
+        assertEquals(20_001, selectedDeletionGroups(largeReport, bulk).size)
+        assertEquals(bulk, toggleDeletionCategory(bulk, largeCategory, true))
+        assertEquals(initiallySelected, toggleDeletionCategory(bulk, largeCategory, false))
+        assertEquals(initiallySelected,
+            toggleDeletionCategory(initiallySelected, largeCategory.copy(groups = emptyList()), true))
     }
 }

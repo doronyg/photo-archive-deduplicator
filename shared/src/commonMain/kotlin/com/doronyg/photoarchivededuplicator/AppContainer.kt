@@ -25,8 +25,8 @@ import com.doronyg.photoarchivededuplicator.operations.FileOperationExecutor
 import com.doronyg.photoarchivededuplicator.operations.FileMoveIo
 import com.doronyg.photoarchivededuplicator.operations.platformFileMoveIo
 import com.doronyg.photoarchivededuplicator.operations.FileOperationProposal
+import com.doronyg.photoarchivededuplicator.operations.ProposedFileMove
 import com.doronyg.photoarchivededuplicator.operations.history.ArchiveBinding
-import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificationContext
 import com.doronyg.photoarchivededuplicator.operations.OperationHistoryController
 import com.doronyg.photoarchivededuplicator.operations.history.OperationHistoryStore
 import com.doronyg.photoarchivededuplicator.scan.ScanState
@@ -106,17 +106,15 @@ class AppContainer internal constructor(
             binDirectoryPreparer.prepare(proposal, operationBinding(proposal))
         }, executeMoves = { proposal, progress ->
             val binding = operationBinding(proposal)
-            var context: DirectoryClassificationContext? = null
-            var validated = false
+            var validateMove: (suspend (ProposedFileMove) -> Unit)? = null
             try {
                 fileOperationExecutor.execute(proposal, binding,
                     validate = {
-                        context = fileOperationService.revalidateForExecution(proposal)
-                        validated = true
+                        val validation = fileOperationService.revalidateForExecution(proposal)
+                        validateMove = fileOperationService.executionMoveValidator(proposal, validation)
                     },
                     beforeMove = {
-                        check(validated) { "Execution has not been validated" }
-                        fileOperationService.validateBeforeMove(proposal, it, context)
+                        checkNotNull(validateMove) { "Execution has not been validated" }.invoke(it)
                     },
                     recordMove = repository::recordCompletedMove,
                     onProgress = progress,

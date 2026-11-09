@@ -1,6 +1,7 @@
 package com.doronyg.photoarchivededuplicator.operations
 
 import com.doronyg.photoarchivededuplicator.classification.DirectoryClassification
+import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificationContext
 import com.doronyg.photoarchivededuplicator.recommendation.DeletionRecommendationCategory
 import com.doronyg.photoarchivededuplicator.recommendation.DeletionRecommendationGroup
 import com.doronyg.photoarchivededuplicator.recommendation.FileRecommendationRole
@@ -14,7 +15,7 @@ internal data class SelectedDeletionGroup(
     val category: DeletionRecommendationCategory,
     val group: DeletionRecommendationGroup,
 ) {
-    val key: String get() = "${category.id.length}:${category.id}${group.id}"
+    val key: String = "${category.id.length}:${category.id}${group.id}"
 }
 
 internal enum class FileOperationIssueCode {
@@ -32,7 +33,18 @@ internal data class FileOperationFinding(
     val detail: String? = null,
 )
 
-internal class FileOperationException(val finding: FileOperationFinding) : IllegalStateException(finding.code.name)
+internal class FileOperationException(val finding: FileOperationFinding, val global: Boolean = false) :
+    IllegalStateException(finding.code.name)
+
+internal data class FileOperationExecutionValidation(
+    val classificationContext: DirectoryClassificationContext?,
+    val groupFindings: Map<String, List<FileOperationFinding>> = emptyMap(),
+)
+
+internal data class BinDirectoryPreparationReport(
+    val preparedProposal: FileOperationProposal,
+    val rejected: Map<String, List<FileOperationFinding>>,
+)
 
 internal data class FileOperationMember(
     val file: FileRecord,
@@ -52,6 +64,7 @@ internal data class FileOperationGroup(
     val explanation: String,
     val duplicateConfidence: Int,
     val members: List<FileOperationMember>,
+    val findings: List<FileOperationFinding> = emptyList(),
 )
 
 internal data class ProposedFileMove(
@@ -63,7 +76,12 @@ internal data class ProposedFileMove(
     val findings: List<FileOperationFinding>,
 )
 
-internal enum class FileOperationValidationStatus { READY, NEEDS_ATTENTION }
+internal enum class FileOperationValidationStatus { READY, PARTIALLY_READY, NEEDS_ATTENTION }
+
+internal data class FileOperationEligibility(
+    val moves: List<ProposedFileMove>,
+    val rejected: Map<Path, List<FileOperationFinding>>,
+)
 
 internal data class FileOperationProposal(
     val id: String,
@@ -75,14 +93,58 @@ internal data class FileOperationProposal(
     val moves: List<ProposedFileMove>,
     val findings: List<FileOperationFinding>,
 ) {
+    val executionEligibility: FileOperationEligibility by lazy { eligibleOperationMoves(this) }
+    val canExecute: Boolean get() = executionEligibility.moves.isNotEmpty()
     val validationStatus: FileOperationValidationStatus
-        get() = if (findings.isEmpty() && moves.isNotEmpty() && moves.all { it.findings.isEmpty() })
-            FileOperationValidationStatus.READY else FileOperationValidationStatus.NEEDS_ATTENTION
+        get() = when {
+            !canExecute -> FileOperationValidationStatus.NEEDS_ATTENTION
+            executionEligibility.rejected.isNotEmpty() || groups.any { it.findings.isNotEmpty() } ->
+                FileOperationValidationStatus.PARTIALLY_READY
+            else -> FileOperationValidationStatus.READY
+        }
     val candidateBytes: Long
         get() = moves.fold(0L) { total, move ->
             require(move.sizeBytes >= 0 && total <= Long.MAX_VALUE - move.sizeBytes)
             total + move.sizeBytes
         }
+}
+
+private fun eligibleOperationMoves(proposal: FileOperationProposal): FileOperationEligibility {
+    if (proposal.findings.isNotEmpty())
+        return FileOperationEligibility(emptyList(), proposal.moves.associate { it.sourcePath to proposal.findings })
+    val sources = proposal.moves.mapTo(mutableSetOf()) { it.sourcePath }
+    val groupsBySource = mutableMapOf<Path, MutableList<String>>()
+    val sourcesByGroup = proposal.groups.associate { group ->
+        group.key to group.members.map { it.file.path }.filter { it in sources }.distinct().also { paths ->
+            paths.forEach { groupsBySource.getOrPut(it) { mutableListOf() } += group.key }
+        }
+    }
+    val errors = mutableMapOf<String, List<FileOperationFinding>>()
+    val queue = ArrayDeque<String>()
+    fun reject(key: String, findings: List<FileOperationFinding>) {
+        if (key !in errors) queue.addLast(key)
+        errors[key] = (errors[key].orEmpty() + findings).distinct()
+    }
+    proposal.groups.filter { it.findings.isNotEmpty() }.forEach { reject(it.key, it.findings) }
+    proposal.moves.filter { it.findings.isNotEmpty() }.forEach { move ->
+        groupsBySource[move.sourcePath].orEmpty().forEach { reject(it, move.findings) }
+    }
+    // Shared candidates connect group decisions; shared retained copies alone do not.
+    while (queue.isNotEmpty()) {
+        val key = queue.removeFirst()
+        for (path in sourcesByGroup[key].orEmpty()) {
+            for (related in groupsBySource[path].orEmpty()) {
+                if (related !in errors) reject(related, errors.getValue(key))
+            }
+        }
+    }
+    val rejected = linkedMapOf<Path, List<FileOperationFinding>>()
+    val eligible = mutableListOf<ProposedFileMove>()
+    for (move in proposal.moves) {
+        val problems = (move.findings + groupsBySource[move.sourcePath].orEmpty().flatMap { errors[it].orEmpty() }).distinct()
+        if (problems.isEmpty()) eligible += move else rejected[move.sourcePath] = problems
+    }
+    return FileOperationEligibility(eligible, rejected)
 }
 
 internal data class FileOperationSummary(
@@ -107,4 +169,5 @@ internal data class FileOperationState(
     val directoryPreparation: BinDirectoryPreparationResult? = null,
     val executionProgress: FileExecutionProgress? = null,
     val executionResult: FileExecutionResult? = null,
+    val availableGroups: List<SelectedDeletionGroup> = emptyList(),
 )

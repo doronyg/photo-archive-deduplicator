@@ -23,7 +23,7 @@ internal object OperationHistoryStrings {
     const val loading = "Reading operation history..."
     const val noHistory = "No recorded file operations."
     const val unmapped = "Archive mapping is unverified. History browsing remains available."
-    const val verified = "Archive identity matches. Approve file moves from a passed dry run in Local dry runs."
+    const val verified = "Archive identity matches. Approve eligible file moves from a dry run in Local dry runs."
     const val actionsDisabled = "This history view supports registration and browsing. Real runs are started from Local dry runs. Restoration, independent AI review, and permanent deletion are not implemented."
     const val incomplete = "Incomplete history: totals include confirmed events only and may be partial."
     const val physicalSpace = "Physical storage reclaimed: Unknown. Moving files into the Bin does not establish reclaimed space."

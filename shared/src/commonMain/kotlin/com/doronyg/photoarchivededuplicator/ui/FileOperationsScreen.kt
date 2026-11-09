@@ -38,6 +38,7 @@ import com.doronyg.photoarchivededuplicator.exif.ExifQueueController
 import com.doronyg.photoarchivededuplicator.operations.FILE_BIN_NAME
 import com.doronyg.photoarchivededuplicator.operations.FileOperationController
 import com.doronyg.photoarchivededuplicator.operations.FileOperationMember
+import com.doronyg.photoarchivededuplicator.operations.FileOperationGroup
 import com.doronyg.photoarchivededuplicator.operations.FileOperationProposal
 import com.doronyg.photoarchivededuplicator.operations.FileOperationFinding
 import com.doronyg.photoarchivededuplicator.operations.FileOperationState
@@ -79,7 +80,12 @@ internal fun fileOperationBinSuggestion(configured: Path?, scanRoot: String, sou
 internal fun fileOperationWritesEnabled(state: FileOperationState, scanning: Boolean, exifRunning: Boolean): Boolean =
     !state.busy && !scanning && !exifRunning
 
-internal fun operationMemberDisposition(path: Path, moves: List<ProposedFileMove>): String {
+internal fun operationMemberDisposition(
+    path: Path,
+    moves: List<ProposedFileMove>,
+    rejected: Set<Path> = emptySet(),
+): String {
+    if (path in rejected) return AppStrings.operations.skippedMove
     val move = moves.firstOrNull { it.sourcePath == path } ?: return AppStrings.operations.fileStays
     return move.destinationPath?.let { AppStrings.operations.fileMoves(it.toString()) }
         ?: AppStrings.operations.missingDestination
@@ -116,6 +122,7 @@ internal suspend fun formatFileOperationResults(
     val context = currentCoroutineContext()
     val strings = AppStrings.operations
     val movesBySource = proposal.moves.groupBy { it.sourcePath }
+    val eligibility = proposal.executionEligibility
     val findingsByPath = proposal.findings.groupBy { it.path }
     buildString {
         fun field(label: String, value: String) {
@@ -140,6 +147,9 @@ internal suspend fun formatFileOperationResults(
         field(strings.validatedAt, proposal.validatedAt.toString())
         field(strings.binRoot, proposal.binRoot.toString())
         appendLine(strings.summary(proposal.groups.size.toLong(), proposal.moves.size.toLong(), formatBytes(proposal.candidateBytes)))
+        appendLine(strings.eligibleMoves(eligibility.moves.size, proposal.moves.size,
+            formatBytes(eligibility.moves.sumOf { it.sizeBytes })))
+        appendLine(strings.dryRunSourceNote)
         proposal.findings.forEach { context.ensureActive(); finding(it) }
         proposal.groups.forEach { group ->
             context.ensureActive()
@@ -147,13 +157,14 @@ internal suspend fun formatFileOperationResults(
             field(strings.selectedGroups, group.categoryName)
             field(strings.explanation, group.explanation)
             field(strings.duplicateConfidence, "${group.duplicateConfidence}/100")
+            group.findings.forEach { finding(it) }
             group.members.forEach { member ->
                 context.ensureActive()
                 appendLine()
                 field(strings.source, member.file.path.toString())
                 // Quote the entire outcome so unusual destination characters stay on one export line.
                 val memberMoves = movesBySource[member.file.path].orEmpty()
-                field(strings.suggestedOutcome, operationMemberDisposition(member.file.path, memberMoves))
+                field(strings.suggestedOutcome, operationMemberDisposition(member.file.path, memberMoves, eligibility.rejected.keys))
                 appendLine(AppStrings.fileSize(member.file.sizeBytes, formatBytes(member.file.sizeBytes)))
                 field(strings.fileCreatedAt, member.file.createdAt?.toString() ?: AppStrings.unavailable)
                 field(strings.modifiedAt, member.file.modifiedAt?.toString() ?: AppStrings.unavailable)
@@ -166,7 +177,7 @@ internal suspend fun formatFileOperationResults(
         val members = proposal.groups.flatMap { it.members }.mapTo(mutableSetOf()) { it.file.path }
         proposal.moves.filter { it.sourcePath !in members }.forEach {
             context.ensureActive()
-            field(strings.suggestedOutcome, operationMemberDisposition(it.sourcePath, listOf(it)))
+            field(strings.suggestedOutcome, operationMemberDisposition(it.sourcePath, listOf(it), eligibility.rejected.keys))
             move(it)
         }
     }
@@ -186,7 +197,11 @@ internal fun FileOperationsScreen(
     val queueState by queue.state.collectAsState()
     val suggestedBin = remember(state.binRoot, choices.scanRoot, state.selectedGroups) {
         fileOperationBinSuggestion(state.binRoot, choices.scanRoot,
-            state.selectedGroups.flatMap { it.group.recommendation.files.keys })
+            if (state.binRoot == null) state.selectedGroups.flatMap { it.group.recommendation.files.keys } else emptyList())
+    }
+    val selectedKeys = remember(state.selectedGroups) { state.selectedGroups.mapTo(mutableSetOf()) { it.key } }
+    val proposalRows: List<Pair<FileOperationGroup, FileOperationMember?>> = remember(state.proposal) {
+        state.proposal?.groups?.flatMap { group -> listOf(group to null) + group.members.map { group to it } }.orEmpty()
     }
     var binInput by remember(state.binRoot) { mutableStateOf(suggestedBin) }
     var binEdited by remember(state.binRoot) { mutableStateOf(false) }
@@ -232,28 +247,41 @@ internal fun FileOperationsScreen(
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(strings.selectedGroups, style = MaterialTheme.typography.titleMedium)
                     Text(strings.selection(state.selectedGroups.size))
-                    if (state.selectedGroups.isEmpty()) Text(strings.emptySelection)
+                    if (state.selectedGroups.isEmpty())
+                        Text(if (state.availableGroups.isEmpty()) strings.emptySelection else strings.pendingSelectionHint)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            enabled = writesEnabled && state.selectedGroups.size < state.availableGroups.size,
+                            onClick = { controller.selectAllGroups() },
+                        ) { Text(strings.selectAll) }
+                        OutlinedButton(
+                            enabled = writesEnabled && state.selectedGroups.isNotEmpty(),
+                            onClick = { controller.clearGroupSelection() },
+                        ) { Text(strings.clearSelection) }
+                    }
+                    Text(strings.operationSelectionNote, style = MaterialTheme.typography.bodySmall)
                     Button(
                         enabled = writesEnabled && state.binRoot != null && state.selectedGroups.isNotEmpty(),
                         onClick = { controller.createDryRun() },
                     ) { Text(strings.createDryRun) }
                 }
             }
-            if (state.proposal == null) state.selectedGroups.forEach { selected ->
-                item(key = "selection:${selected.key}") {
-                    Column {
-                        Text(strings.group(selected.category.name, selected.group.candidates.size,
-                            selected.group.recommendation.files.size), style = MaterialTheme.typography.titleSmall)
-                        OperationEvidence {
-                            Text(selected.group.evidenceSummary)
-                        }
+            if (state.proposal == null) items(state.availableGroups, key = { "selection:${it.key}" }) { selected ->
+                Column {
+                    Row {
+                        Checkbox(
+                            checked = selected.key in selectedKeys,
+                            enabled = writesEnabled,
+                            onCheckedChange = { controller.setGroupSelected(selected.key, it) },
+                        )
+                        Text(strings.selectGroup, Modifier.padding(top = 12.dp))
                     }
-                }
-                items(selected.group.recommendation.files.values.toList(),
-                    key = { "selected-member:${selected.key}:${it.file.path}" }) { member ->
-                    Column(Modifier.padding(start = 12.dp)) {
-                        FilePathLinks(member.file, pathActions)
-                        OperationEvidence {
+                    Text(strings.group(selected.category.name, selected.group.candidates.size,
+                        selected.group.recommendation.files.size), style = MaterialTheme.typography.titleSmall)
+                    OperationEvidence {
+                        Text(selected.group.evidenceSummary)
+                        selected.group.recommendation.files.values.forEach { member ->
+                            FilePathLinks(member.file, pathActions)
                             Text(AppStrings.field(strings.engineRole, strings.role(member.role)))
                             Text(member.explanation, style = MaterialTheme.typography.bodySmall)
                         }
@@ -270,6 +298,9 @@ internal fun FileOperationsScreen(
                         Text(AppStrings.field(strings.binRoot, proposal.binRoot.toString()))
                         Text(strings.summary(proposal.groups.size.toLong(), proposal.moves.size.toLong(),
                             formatBytes(proposal.candidateBytes)))
+                        Text(strings.eligibleMoves(proposal.executionEligibility.moves.size, proposal.moves.size,
+                            formatBytes(proposal.executionEligibility.moves.sumOf { it.sizeBytes })))
+                        Text(strings.dryRunSourceNote, style = MaterialTheme.typography.bodySmall)
                         CopyFileOperationResults(proposal)
                         Text(strings.preparationNote, style = MaterialTheme.typography.bodySmall)
                         OutlinedButton(
@@ -282,7 +313,7 @@ internal fun FileOperationsScreen(
                             Text(strings.preparedDirectories(it.createdDirectories, it.writtenMarkers, it.checkedDirectories))
                         }
                         Button(
-                            enabled = writesEnabled && proposal.validationStatus == FileOperationValidationStatus.READY &&
+                            enabled = writesEnabled && proposal.canExecute &&
                                 state.executionResult?.operationId != proposal.id,
                             onClick = { executionProposal = proposal },
                         ) { Text(strings.realRun) }
@@ -341,17 +372,20 @@ internal fun FileOperationsScreen(
                         }
                     }
                 }
-                proposal.groups.forEach { group ->
-                    item(key = "proposal-group:${proposal.id}:${group.key}") {
+                items(proposalRows, key = { (group, member) ->
+                    if (member == null) "proposal-group:${proposal.id}:${group.key}"
+                    else "member:${proposal.id}:${group.key}:${member.file.path}"
+                }) { (group, member) ->
+                    if (member == null) {
                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             Text(group.categoryName, style = MaterialTheme.typography.titleMedium)
+                            group.findings.forEach { Text(strings.finding(it), color = MaterialTheme.colorScheme.error) }
                             OperationEvidence {
                                 Text(group.explanation)
                                 Text(AppStrings.field(strings.duplicateConfidence, "${group.duplicateConfidence}/100"))
                             }
                         }
-                    }
-                    items(group.members, key = { "member:${proposal.id}:${group.key}:${it.file.path}" }) { member ->
+                    } else {
                         OperationMemberCard(member, proposal, pathActions)
                     }
                 }
@@ -388,18 +422,21 @@ internal fun FileOperationsScreen(
             text = {
                 Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(strings.summary(proposal.groups.size.toLong(), proposal.moves.size.toLong(), formatBytes(proposal.candidateBytes)))
+                    Text(strings.eligibleMoves(proposal.executionEligibility.moves.size, proposal.moves.size,
+                        formatBytes(proposal.executionEligibility.moves.sumOf { it.sizeBytes })))
                     Text(AppStrings.field(strings.binRoot, proposal.binRoot.toString()))
                     Text(strings.realRunChecks)
                     Text(strings.realRunAiNote)
                     Text(strings.realRunHistory)
+                    Text(strings.batchExecutionNote)
                     Row {
                         Checkbox(checked = executionApproved, onCheckedChange = { executionApproved = it })
-                        Text(strings.approveMoves(proposal.moves.size))
+                        Text(strings.approveMoves(proposal.executionEligibility.moves.size))
                     }
                 }
             },
             confirmButton = {
-                TextButton(enabled = writesEnabled && executionApproved, onClick = {
+                TextButton(enabled = writesEnabled && executionApproved && proposal.canExecute, onClick = {
                     executionProposal = null
                     controller.runRealOperation(proposal.id)
                 }) { Text(strings.realRun) }
@@ -416,11 +453,12 @@ private fun OperationMemberCard(member: FileOperationMember, proposal: FileOpera
     val strings = AppStrings.operations
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(AppStrings.field(strings.suggestedOutcome, operationMemberDisposition(member.file.path, proposal.moves)),
+            Text(AppStrings.field(strings.suggestedOutcome,
+                operationMemberDisposition(member.file.path, proposal.moves, proposal.executionEligibility.rejected.keys)),
                 style = MaterialTheme.typography.labelLarge)
             FilePathLinks(member.file, pathActions)
             Text(AppStrings.fileSize(member.file.sizeBytes, formatBytes(member.file.sizeBytes)))
-            val findings = proposal.moves.filter { it.sourcePath == member.file.path }.flatMap { it.findings } +
+            val findings = proposal.executionEligibility.rejected[member.file.path].orEmpty() +
                 proposal.findings.filter { it.path == member.file.path }
             findings.distinct().forEach { Text(strings.finding(it), color = MaterialTheme.colorScheme.error) }
             OperationEvidence {

@@ -44,7 +44,13 @@ internal class FileOperationRepository(private val database: FilesDatabase, priv
             payload.getValue("moves").jsonArray.map { decodeMove(it.jsonObject) },
             decodeFindings(payload.getValue("findings")),
         )
-        check(proposal.validationStatus.name == row.validationStatus &&
+        val legacyGroups = payload.getValue("groups").jsonArray.all { "findings" !in it.jsonObject }
+        val legacyStatus = if (proposal.moves.isEmpty() || proposal.findings.isNotEmpty() ||
+            proposal.moves.any { it.findings.isNotEmpty() }) FileOperationValidationStatus.NEEDS_ATTENTION
+            else FileOperationValidationStatus.READY
+        val statusMatches = proposal.validationStatus.name == row.validationStatus ||
+            (legacyGroups && legacyStatus.name == row.validationStatus)
+        check(statusMatches &&
             proposal.groups.size.toLong() == row.groupCount && proposal.moves.size.toLong() == row.candidateCount &&
             proposal.candidateBytes == row.candidateBytes) { "Inconsistent proposal summary" }
         proposal
@@ -69,6 +75,7 @@ internal fun encodeProposalSnapshot(proposal: FileOperationProposal): String = b
             put("categoryName", group.categoryName)
             put("explanation", group.explanation)
             put("duplicateConfidence", group.duplicateConfidence)
+            put("findings", encodeFindings(group.findings))
             put("members", buildJsonArray {
                 group.members.forEach { member -> add(buildJsonObject {
                     put("file", encodeFile(member.file))
@@ -138,6 +145,7 @@ private fun decodeGroup(group: JsonObject) = FileOperationGroup(
             member.optionalString("capturedAt"), member.optionalString("classification")?.let(DirectoryClassification::valueOf),
             member.getValue("evidence").jsonObject)
     },
+    group["findings"]?.let(::decodeFindings).orEmpty(),
 )
 
 private fun decodeMove(move: JsonObject) = ProposedFileMove(

@@ -33,8 +33,34 @@ internal class FileOperationController(
         if (mutableState.value.busy) {
             mutableState.update { it.copy(error = FileOperationFinding(FileOperationIssueCode.BUSY)) }
         } else {
-            mutableState.update { it.copy(selectedGroups = groups.distinctBy { group -> group.key }.toList(),
+            val available = groups.distinctBy { it.key }
+            mutableState.update { it.copy(selectedGroups = available, availableGroups = available,
                 proposal = null, error = null, directoryPreparation = null, executionProgress = null, executionResult = null) }
+        }
+    }
+
+    fun selectAllGroups() = updateGroupSelection { it.availableGroups }
+
+    fun clearGroupSelection() = updateGroupSelection { emptyList() }
+
+    fun setGroupSelected(key: String, selected: Boolean) = updateGroupSelection { current ->
+        if (current.availableGroups.none { it.key == key }) null
+        else {
+            val keys = current.selectedGroups.mapTo(mutableSetOf()) { it.key }
+            if (selected) keys.add(key) else keys.remove(key)
+            current.availableGroups.filter { it.key in keys }
+        }
+    }
+
+    private fun updateGroupSelection(select: (FileOperationState) -> List<SelectedDeletionGroup>?) {
+        mutableState.update { current ->
+            if (current.busy) current.copy(error = FileOperationFinding(FileOperationIssueCode.BUSY))
+            else {
+                val selection = select(current)
+                if (selection == null) current.copy(error = FileOperationFinding(FileOperationIssueCode.STALE_RECOMMENDATION))
+                else current.copy(selectedGroups = selection, proposal = null, error = null,
+                    directoryPreparation = null, executionProgress = null, executionResult = null)
+            }
         }
     }
 
@@ -77,9 +103,9 @@ internal class FileOperationController(
 
     fun runRealOperation(expectedProposalId: String) = action(FileOperationIssueCode.EXECUTION_ERROR) {
         checkAdmission()
-        val proposal = checkNotNull(mutableState.value.proposal) { "Open a passed dry run first." }
+        val proposal = checkNotNull(mutableState.value.proposal) { "Open a dry run with valid groups first." }
         check(proposal.id == expectedProposalId) { "The displayed proposal changed. Review it again." }
-        check(proposal.validationStatus == FileOperationValidationStatus.READY) { "The dry run needs attention." }
+        check(proposal.canExecute) { "The dry run has no executable groups or has a global error." }
         check(mutableState.value.executionResult?.operationId != proposal.id) {
             "This proposal already ran. Review the results and create a new dry run."
         }
@@ -111,6 +137,7 @@ internal class FileOperationController(
                     .sumOf { item -> item.move.sizeBytes },
             ),
             selectedGroups = if (completed > 0) emptyList() else it.selectedGroups,
+            availableGroups = if (completed > 0) emptyList() else it.availableGroups,
         ) }
         refreshInAction()
     }

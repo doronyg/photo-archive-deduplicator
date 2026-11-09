@@ -12,6 +12,40 @@ import kotlin.test.assertFailsWith
 
 class FileOperationRepositoryTest {
     @Test
+    fun historicalMixedProposalLoadsWithPartialEligibilityWithoutChangingSavedEvidence() = concurrencyTest { f ->
+        val database = createFilesDatabase(f.driver)
+        val files = listOf("bad", "good").map { name ->
+            FileRecord("/Archive/$name.jpg".toPath(), "/Archive".toPath(), "$name.jpg", "jpg", 42, null, 123, null)
+        }
+        val proposal = FileOperationProposal("old-mixed", 100, 200, null, "/Bin".toPath(),
+            files.map { file ->
+                FileOperationGroup(file.name, "category", "Category", "Saved evidence", 100,
+                    listOf(FileOperationMember(file, FileRecommendationRole.REDUNDANT_CANDIDATE,
+                        "Saved reason", 95, "/Archive/keep.jpg".toPath(), null, null, buildJsonObject {})))
+            },
+            files.mapIndexed { index, file ->
+                ProposedFileMove(file.path, "Archive/${file.name}".toPath(), "/Bin/Archive/${file.name}".toPath(),
+                    "/Archive/keep.jpg".toPath(), 42, if (index == 0)
+                        listOf(FileOperationFinding(FileOperationIssueCode.SOURCE_MISSING, file.path)) else emptyList())
+            }, emptyList())
+        val encoded = Json.parseToJsonElement(encodeProposalSnapshot(proposal)).jsonObject
+        val oldGroups = JsonArray(encoded.getValue("groups").jsonArray.map { group ->
+            JsonObject(group.jsonObject.filterKeys { it != "findings" })
+        })
+        f.lane.run("insert historical mixed proposal") {
+            database.fileOperationProposalQueries.insertProposal(
+                id = proposal.id, createdAt = proposal.createdAt, validatedAt = proposal.validatedAt, archiveRoot = null,
+                binRoot = proposal.binRoot.toString(), validationStatus = FileOperationValidationStatus.NEEDS_ATTENTION.name,
+                groupCount = 2, candidateCount = 2, candidateBytes = 84,
+                snapshotJson = JsonObject(encoded + ("groups" to oldGroups)).toString())
+        }
+        val loaded = FileOperationRepository(database, f.lane).load(proposal.id)
+        assertEquals(proposal, loaded)
+        assertEquals(FileOperationValidationStatus.PARTIALLY_READY, loaded.validationStatus)
+        assertEquals(listOf(files.last().path), loaded.executionEligibility.moves.map { it.sourcePath })
+    }
+
+    @Test
     fun snapshotsRoundTripNullMetadataUnicodePathsAndUnknownEvidenceFields() = concurrencyTest { f ->
         val repository = FileOperationRepository(createFilesDatabase(f.driver), f.lane)
         val file = FileRecord("/Archive/雪_%'.jpg".toPath(), "/Archive".toPath(), "雪_%'.jpg",
@@ -38,5 +72,19 @@ class FileOperationRepositoryTest {
         repository.save(fullPathProposal)
         assertEquals(fullPathProposal, repository.load("full-path"))
         assertEquals(null, repository.recent().single { it.id == "full-path" }.archiveRoot)
+        val legacy = fullPathProposal.copy(id = "legacy")
+        val encoded = Json.parseToJsonElement(encodeProposalSnapshot(legacy)).jsonObject
+        val oldGroups = JsonArray(encoded.getValue("groups").jsonArray.map { group ->
+            JsonObject(group.jsonObject.filterKeys { it != "findings" })
+        })
+        val payload = JsonObject(encoded + ("groups" to oldGroups)).toString()
+        f.lane.run("insert historical proposal") {
+            createFilesDatabase(f.driver).fileOperationProposalQueries.insertProposal(
+                id = legacy.id, createdAt = legacy.createdAt, validatedAt = legacy.validatedAt,
+                archiveRoot = null, binRoot = legacy.binRoot.toString(), validationStatus = legacy.validationStatus.name,
+                groupCount = legacy.groups.size.toLong(), candidateCount = legacy.moves.size.toLong(),
+                candidateBytes = legacy.candidateBytes, snapshotJson = payload)
+        }
+        assertEquals(legacy, repository.load(legacy.id), "Old snapshots without group findings remain readable")
     }
 }

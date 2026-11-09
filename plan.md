@@ -759,7 +759,14 @@ reads, hashing, rescoring, AI calls or filesystem writes. Independent AI review
 is not implemented; its absence is explicitly disclosed when approving real runs.
 Restoration and permanent deletion remain unavailable.
 Missing Bin directories do not block a dry run. The UI suggests an editable Bin
-location, presents each file's suggested stay/move destination, provides copyable
+location. Metadata validation uses one depth-first pass over retained/destination paths, caches
+both observations and ancestor verdicts, and skips descendants of missing or unsafe
+parents. Shared ancestors are not re-walked per file. Phase/progress logs explain
+long runs without logging each file, and every new validation gets a fresh cache.
+Candidate source locations are not preflighted; missing candidates do not block
+dry runs. Group-level findings reject the group and any groups sharing its
+candidates, while independent valid groups remain eligible for approval.
+The UI presents each file's suggested stay/move destination, provides copyable
 results and keeps saved evidence collapsed until opened.
 
 #### Operation history infrastructure
@@ -773,18 +780,30 @@ analysis and retention scoring use stored exclusions without filesystem sweeps;
 externally added markers take effect at the next scan. Directory preparation
 does not approve moves or count as completed file operations.
 
-Passed dry runs can now execute after an explicit file-count approval. The
-executor verifies archive/Bin identity, fresh recommendations and metadata, and
-same-filesystem capability before moving any photos. Per-file checks stay
+Dry runs with eligible groups can execute after an explicit upper-bound file-count
+approval. The executor verifies archive/Bin identity, fresh recommendations and
+retained/destination metadata. Source safety and same-filesystem capability are
+checked only by the actual move primitive at the mutation boundary. Per-file checks stay
 targeted, with no whole-inventory filesystem sweep. Moves never overwrite and
 have no cross-filesystem copy/delete fallback. An immutable portable manifest and
 flushed intent/completion journal preserve evidence independently of inventory.
 Confirmed completed moves remove only the matching source inventory, EXIF,
 profile scores/factors and directory count; the retained copies stay unchanged.
-Execution stops on the first failure or uncertain result, leaves later files
-untouched, and reports database postprocessing failures separately. Interrupted
+Invalid groups and confirmed no-effect failures skip that group's remaining
+candidates while independent groups continue. Missing or failed moves do not
+count or alter inventory/cache records. Global errors, uncertain outcomes and
+journal or database reconciliation failures stop the whole run. Interrupted
 intents and stale locks require manual reconciliation, not automatic retries.
 Progress is throttled and the history view refreshes after execution.
+Both Deletion Recommendations and File Operations support Select all and Clear
+selection, including off-screen groups. Recommendation selection is scoped to the
+current category; File Operations retains its available group pool when cleared.
+Changing selection invalidates the displayed dry run, not saved snapshots.
+Large selections use automatic bounded execution batches under one explicit
+approval, retaining global identity/configuration checks and one execution lock
+session. Group-local failures remain isolated across batch boundaries. Indexed
+per-file validation and lazy list rows avoid repeatedly traversing
+tens of thousands of groups.
 Completed-move counts and logical bytes are checkpointed per operation every 20
 moves and at the end, including failures and orderly cancellation. These
 best-effort JSON summaries are replaceable; journals remain authoritative.

@@ -23,9 +23,11 @@ internal object OperationStrings {
     const val preparationNotApproval = "Directory preparation is not approval to move files. File safety checks must run again before any future move."
     const val realRun = "Run approved moves"
     const val confirmRealRun = "Approve moving files into the Bin?"
-    const val realRunChecks = "Recommendations and file metadata will be checked again. Metadata does not prove identical contents. Only same-filesystem moves are allowed; existing destinations are never replaced. Do not modify the source or Bin from another program during the run."
+    const val realRunChecks = "Recommendations, retained copies and destination safety are checked. Candidate files are checked only as part of the actual move. Metadata does not prove identical contents. Only same-filesystem moves are allowed; existing destinations are never replaced. Do not modify the source or Bin from another program during the run."
     const val realRunAiNote = "Independent AI review has not been performed. This run uses the saved recommendations and current deterministic safety checks."
     const val realRunHistory = "Confirmed moves are recorded in Operation history and removed from the active inventory. An uncertain outcome stops the run and requires reconciliation."
+    const val dryRunSourceNote = "Dry runs do not check candidate file existence or locations. Missing or failed files are reported at execution and do not increase moved counts or logical bytes."
+    const val skippedMove = "Not moved: this group has validation errors"
     const val executionResults = "Real-run results"
     const val reconcileRun = "This run needs reconciliation. Check Operation history and the source/Bin locations before retrying. Rescan the archive if inventory updates failed."
     const val executionFinished = "Execution finished"
@@ -34,7 +36,13 @@ internal object OperationStrings {
     const val statisticsSaveError = "Statistics checkpoint could not be saved. Confirmed moves remain recorded in Operation history."
     const val logicalBytesMoved = "Logical bytes moved to Bin (not storage reclaimed)"
     const val selectedGroups = "Selected recommendations"
+    const val selectAll = "Select all"
+    const val clearSelection = "Clear selection"
+    const val categorySelectionNote = "Applies to every group in this category, including off-screen groups. Selection is not approval to move files."
+    const val operationSelectionNote = "Applies to every group sent from Deletion Recommendations. Changing selection discards the displayed dry run; saved results remain unchanged."
+    const val batchExecutionNote = "Large selections are split into bounded history batches under this single approval. Invalid groups and confirmed no-effect failures are skipped; independent groups continue. Uncertain outcomes stop the remaining batches."
     const val emptySelection = "Select whole groups in Deletion Recommendations to prepare a dry run."
+    const val pendingSelectionHint = "Select groups below or choose Select all before creating a dry run."
     const val selectGroup = "Select this category recommendation"
     const val history = "Recent proposals"
     const val noHistory = "No saved proposals."
@@ -71,7 +79,9 @@ internal object OperationStrings {
     fun fileMoves(destination: String) = "File moves to $destination"
     fun preparedDirectories(created: Int, markers: Int, checked: Int) =
         "Bin directories prepared: $created created, $markers mapping files written, $checked directories checked. No files moved."
-    fun approveMoves(count: Int) = "I approve moving exactly these $count files into the Bin."
+    fun approveMoves(count: Int) = "I approve moving up to $count eligible files into the Bin."
+    fun eligibleMoves(eligible: Int, total: Int, bytes: String) =
+        "Eligible for execution: $eligible of $total proposed files | up to $bytes"
     fun executionCounts(total: Int, completed: Int, failed: Int, uncertain: Int, remaining: Int) =
         "$completed/$total moved and verified; $failed failed; $uncertain uncertain; $remaining not started."
     fun executionStatus(status: FileMoveExecutionStatus) = when (status) {
@@ -87,8 +97,9 @@ internal object OperationStrings {
     fun summary(groups: Long, candidates: Long, size: String) = "$groups groups | $candidates candidates | $size"
     fun confidence(value: Int) = "Decision confidence: $value/100"
     fun status(status: FileOperationValidationStatus) = when (status) {
-        FileOperationValidationStatus.READY -> "Dry-run metadata checks: Passed"
-        FileOperationValidationStatus.NEEDS_ATTENTION -> "Dry-run metadata checks: Needs attention"
+        FileOperationValidationStatus.READY -> "Dry-run checks: Valid groups available"
+        FileOperationValidationStatus.PARTIALLY_READY -> "Dry-run checks: Valid groups can run; other groups will be skipped"
+        FileOperationValidationStatus.NEEDS_ATTENTION -> "Dry-run checks: Needs attention"
     }
     fun role(role: FileRecommendationRole) = when (role) {
         FileRecommendationRole.PREFERRED -> "Retained member"
