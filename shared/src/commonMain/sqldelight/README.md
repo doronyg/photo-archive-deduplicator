@@ -216,6 +216,7 @@ not source availability or approval to move.
 Snapshots use a versioned JSON payload; history summaries load independently of
 the larger evidence payload. Stored proposals remain unchanged when configuration,
 cached evidence or recommendation algorithms change.
+The local proposal list shows the latest 50 saved dry runs in newest-first order.
 Older snapshots without group findings remain readable; their saved all-or-nothing
 summary status is accepted while execution eligibility is derived from their
 unchanged saved findings.
@@ -306,6 +307,23 @@ errors block discovery rather than treating inaccessible metadata as a valid
 archive. Ordinary database browsing does not require marker access.
 
 ### Approved real runs
+
+Duplicates and Suspected Duplicates also accept deletion-job selections.
+**Select file for deletion** explicitly overrides the engine's keep/review advice
+for that file; at least one unselected member of its original group must remain.
+Protected groups cannot be selected. **Select group using recommendation** selects
+only the engine's redundant candidates, preserving every retained/review member
+and supporting multiple keepers. Groups whose recommendation keeps every member
+can also be selected; they contribute no moves, with an explicit explanation.
+Choosing an individual file replaces that
+group's recommendation-mode selection with explicit manual selection.
+
+**Add selected groups/files to File Operations** adds the selections to the job.
+It does not move files, perform permanent deletion, or bypass dry-run/final
+approval. Original group membership, selection mode and stored evidence are saved
+and revalidated; manual choices remain explicit rather than being presented as
+high-confidence engine advice. Candidate metadata and bin exclusion rules apply
+through the same execution flow as Deletion Recommendations.
 
 **Select all** and **Clear selection** in Deletion Recommendations apply to the
 current category, including off-screen groups, without changing selections in

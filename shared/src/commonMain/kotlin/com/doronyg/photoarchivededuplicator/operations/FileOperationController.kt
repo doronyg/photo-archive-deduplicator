@@ -42,10 +42,35 @@ internal class FileOperationController(
         if (mutableState.value.busy) {
             mutableState.update { it.copy(error = FileOperationFinding(FileOperationIssueCode.BUSY)) }
         } else {
-            val available = groups.distinctBy { it.key }
-            mutableState.update { it.copy(selectedGroups = available, availableGroups = available,
-                proposal = null, error = null, directoryPreparation = null, executionProgress = null, executionResult = null) }
+            val keys = groups.mapTo(mutableSetOf()) { it.key }
+            mutableState.update { current ->
+                val selected = mergeSelectedDeletionGroups(
+                    current.selectedGroups.filter { it.duplicateProvenance != null || it.key in keys }, groups)
+                val available = mergeSelectedDeletionGroups(
+                    current.availableGroups.filter { it.duplicateProvenance != null || it.key in keys }, groups)
+                if (selected == current.selectedGroups) current.copy(availableGroups = available, error = null)
+                else current.copy(selectedGroups = selected, availableGroups = available,
+                    proposal = null, error = null, directoryPreparation = null, executionProgress = null, executionResult = null)
+            }
         }
+    }
+
+    fun addDuplicateSelections(selections: List<DuplicateDeletionSelection>) = action(FileOperationIssueCode.PROPOSAL_ERROR) {
+        checkAdmission()
+        val current = mutableState.value
+        val merged = mergeDuplicateDeletionSelections(
+            current.availableGroups.mapNotNull { it.duplicateProvenance?.selection }, selections)
+        val ids = selections.mapTo(mutableSetOf()) { duplicateDeletionGroupId(it) }
+        val additions = service.resolveDuplicateSelections(merged.filter { duplicateDeletionGroupId(it) in ids })
+        val selected = mergeSelectedDeletionGroups(current.selectedGroups, additions)
+        val available = mergeSelectedDeletionGroups(current.availableGroups, additions)
+        mutableState.update {
+            if (selected == it.selectedGroups) it.copy(availableGroups = available, error = null)
+            else it.copy(selectedGroups = selected, availableGroups = available,
+                proposal = null, error = null, directoryPreparation = null,
+                executionProgress = null, executionResult = null)
+        }
+        refreshInAction()
     }
 
     fun selectAllGroups() = updateGroupSelection { it.availableGroups }
@@ -67,6 +92,7 @@ internal class FileOperationController(
             else {
                 val selection = select(current)
                 if (selection == null) current.copy(error = FileOperationFinding(FileOperationIssueCode.STALE_RECOMMENDATION))
+                else if (selection == current.selectedGroups) current.copy(error = null)
                 else current.copy(selectedGroups = selection, proposal = null, error = null,
                     directoryPreparation = null, executionProgress = null, executionResult = null)
             }

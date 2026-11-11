@@ -48,6 +48,8 @@ import com.doronyg.photoarchivededuplicator.exif.ExifQueueController
 import com.doronyg.photoarchivededuplicator.exif.ExifQueuePhase
 import com.doronyg.photoarchivededuplicator.exif.ExifRecord
 import com.doronyg.photoarchivededuplicator.recommendation.DuplicateGroupRecommendation
+import com.doronyg.photoarchivededuplicator.recommendation.DeletionRecommendationSource
+import com.doronyg.photoarchivededuplicator.operations.DuplicateDeletionSelection
 import com.doronyg.photoarchivededuplicator.retention.RetentionAssessmentResult
 import com.doronyg.photoarchivededuplicator.retention.RetentionScoreService
 import com.doronyg.photoarchivededuplicator.retention.RetentionPresentation
@@ -73,7 +75,10 @@ private data class SortedCandidates(
 )
 
 @Composable
-fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathActions: PathActions, preferences: UiPreferences, retentionScores: RetentionScoreService, exifService: ExifExtractionService, queue: ExifQueueController, scanRunning: Boolean, modifier: Modifier = Modifier, directoryClassifications: DirectoryClassificationController? = null) {
+internal fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathActions: PathActions, preferences: UiPreferences, retentionScores: RetentionScoreService, exifService: ExifExtractionService, queue: ExifQueueController, scanRunning: Boolean, modifier: Modifier = Modifier, directoryClassifications: DirectoryClassificationController? = null,
+    fileOperationsBusy: Boolean = false,
+    onAddToFileOperations: (List<DuplicateDeletionSelection>) -> Unit = {},
+) {
     val choices by preferences.state.collectAsState()
     val queueState by queue.state.collectAsState()
     val queueRefreshKey = exifQueueRefreshKey(queueState)
@@ -82,6 +87,7 @@ fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathAc
     val filenamePattern = choices.duplicateFilenamePattern
     var roots by remember { mutableStateOf(emptyList<Path>()) }
     var groups by remember { mutableStateOf<List<DuplicateCandidateGroup>?>(null) }
+    var deletionSelections by remember(groups) { mutableStateOf<Map<String, DuplicateDeletionSelection>>(emptyMap()) }
     var searchedRoot by remember { mutableStateOf("") }
     var searchedFilter by remember { mutableStateOf(DuplicateCandidateFilter()) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -115,6 +121,8 @@ fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathAc
         evidenceReady = classificationCache.ready && !scanRunning && !queueState.isRunning && !scoring && !exifLoading &&
             loadedExifToken?.isCurrent(exifToken) == true && loadedExifKey == queueRefreshKey,
         directoryClassifications = classificationCache.records)
+    val deletionEnabled = !fileOperationsBusy && !scanRunning && !busy && !scoring && !exifLoading &&
+        !queueState.isRunning && !classificationState.isRunning && classificationCache.ready && recommendations != null
     val sortRecommendations = recommendations.takeIf {
         choices.duplicateSort.any { rule -> rule.enabled && rule.criterion == DuplicateSortCriterion.RECOMMENDATION }
     }
@@ -229,130 +237,132 @@ fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathAc
 
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(AppStrings.duplicates.title, style = MaterialTheme.typography.titleLarge)
-        directoryClassifications?.let { controller ->
-            DirectoryClassificationControls(controller, choices.ollama,
-                displayedSnapshot?.groups?.map { it.files }?.takeUnless { busy || scanRunning },
-                classificationCache, onReloadCache = { classificationCacheRefresh++ })
-        }
-        OutlinedTextField(
-            value = rootText,
-            onValueChange = { value -> invalidateExif(); preferences.update { it.copy(duplicateRoot = value) }; groups = null },
-            label = { Text(AppStrings.duplicates.folderPath) },
-            enabled = !busy,
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        if (target is ScanTarget.ChosenFolder) {
-            OutlinedButton(enabled = !busy, onClick = {
-                scope.launch {
-                    try {
-                        target.pickDirectory()?.let { path ->
-                            invalidateExif()
-                            preferences.update { it.copy(duplicateRoot = path) }
-                            groups = null
-                        }
-                    } catch (e: CancellationException) {
-                        throw e
-                    } catch (e: Exception) {
-                        error = AppStrings.duplicates.chooseFolderError(e.message)
-                    }
-                }
-            }) { Text(AppStrings.duplicates.chooseFolder) }
-        }
-        Row(
-            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            DuplicateFileType.entries.forEach { type ->
-                FilterChip(
-                    selected = fileType == type,
-                    onClick = { invalidateExif(); preferences.update { it.copy(duplicateFileType = type) }; groups = null },
-                    enabled = !busy,
-                    label = {
-                        Text(when (type) {
-                            DuplicateFileType.ALL -> AppStrings.duplicates.all
-                            DuplicateFileType.IMAGES -> AppStrings.duplicates.images
-                            DuplicateFileType.VIDEOS -> AppStrings.duplicates.videos
-                            DuplicateFileType.DOCUMENTS -> AppStrings.duplicates.documents
-                        })
-                    },
-                )
+        DuplicateFilterPanel(active = rootText.isNotBlank() || filenamePattern.isNotBlank() || fileType != DuplicateFileType.ALL) {
+            directoryClassifications?.let { controller ->
+                DirectoryClassificationControls(controller, choices.ollama,
+                    displayedSnapshot?.groups?.map { it.files }?.takeUnless { busy || scanRunning },
+                    classificationCache, onReloadCache = { classificationCacheRefresh++ })
             }
-        }
-        OutlinedTextField(
-            value = filenamePattern,
-            onValueChange = { value -> invalidateExif(); preferences.update { it.copy(duplicateFilenamePattern = value) }; groups = null },
-            label = { Text(AppStrings.duplicates.filenameWildcard) },
-            supportingText = { Text(AppStrings.duplicates.wildcardHelp) },
-            enabled = !busy,
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        DuplicateSortControls(choices.duplicateSort, enabled = !busy, onChange = { transform ->
-            preferences.update { it.copy(duplicateSort = transform(it.duplicateSort)) }
-        })
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(enabled = !busy && rootText.isNotBlank(), onClick = {
-                invalidateExif()
-                val selected = rootText.trim()
-                val filter = DuplicateCandidateFilter(fileType, filenamePattern)
-                busy = true
-                scope.launch {
-                    error = null
-                    groups = null
-                    retention = null
-                    try {
-                        val root = selected.toPath().inventoryPath()
-                        val results = completeDuplicateGroupsUnderRoot(repository.duplicateCandidates(filter = filter), root)
-                        searchedRoot = selected
-                        searchedFilter = filter
-                        groups = results
-                        assessResults(results)
-                    } catch (e: CancellationException) {
-                        throw e
-                    } catch (e: Exception) {
-                        error = AppStrings.duplicates.searchError(e.message)
-                    } finally {
-                        busy = false
-                    }
-                }
-            }) { Text(if (scoring) AppStrings.duplicates.scoring else if (busy) AppStrings.duplicates.searching else AppStrings.duplicates.findCandidates) }
-            OutlinedButton(enabled = !busy && !queueState.isRunning && !groups.isNullOrEmpty(), onClick = {
-                val snapshot = groups ?: return@OutlinedButton
-                busy = true
-                error = null
-                scope.launch {
-                    try {
-                        assessResults(snapshot, force = true)
-                    } finally {
-                        busy = false
-                    }
-                }
-            }) { Text(AppStrings.duplicates.recomputeScores) }
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            OutlinedButton(
-                enabled = !scanRunning && !busy && !queueState.isRunning && !displayedSnapshot?.groups.isNullOrEmpty(),
-                onClick = {
-                    val snapshot = displayedSnapshot?.groups?.toList() ?: return@OutlinedButton
-                    if (!queue.start(snapshot)) error = AppStrings.duplicates.analysisBusy
-                },
-            ) { Text(AppStrings.duplicates.analyzeAmbiguous) }
-            if (queueState.isRunning) {
-                TextButton(enabled = !cancellingQueue, onClick = {
-                    cancellingQueue = true
+            OutlinedTextField(
+                value = rootText,
+                onValueChange = { value -> invalidateExif(); preferences.update { it.copy(duplicateRoot = value) }; groups = null },
+                label = { Text(AppStrings.duplicates.folderPath) },
+                enabled = !busy,
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            if (target is ScanTarget.ChosenFolder) {
+                OutlinedButton(enabled = !busy, onClick = {
                     scope.launch {
                         try {
-                            queue.cancel()
+                            target.pickDirectory()?.let { path ->
+                                invalidateExif()
+                                preferences.update { it.copy(duplicateRoot = path) }
+                                groups = null
+                            }
                         } catch (e: CancellationException) {
                             throw e
                         } catch (e: Exception) {
-                            error = AppStrings.duplicates.cancellationError(e.message)
-                        } finally {
-                            cancellingQueue = false
+                            error = AppStrings.duplicates.chooseFolderError(e.message)
                         }
                     }
-                }) { Text(if (cancellingQueue) AppStrings.duplicates.cancelling else AppStrings.duplicates.cancelExif) }
+                }) { Text(AppStrings.duplicates.chooseFolder) }
+            }
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                DuplicateFileType.entries.forEach { type ->
+                    FilterChip(
+                        selected = fileType == type,
+                        onClick = { invalidateExif(); preferences.update { it.copy(duplicateFileType = type) }; groups = null },
+                        enabled = !busy,
+                        label = {
+                            Text(when (type) {
+                                DuplicateFileType.ALL -> AppStrings.duplicates.all
+                                DuplicateFileType.IMAGES -> AppStrings.duplicates.images
+                                DuplicateFileType.VIDEOS -> AppStrings.duplicates.videos
+                                DuplicateFileType.DOCUMENTS -> AppStrings.duplicates.documents
+                            })
+                        },
+                    )
+                }
+            }
+            OutlinedTextField(
+                value = filenamePattern,
+                onValueChange = { value -> invalidateExif(); preferences.update { it.copy(duplicateFilenamePattern = value) }; groups = null },
+                label = { Text(AppStrings.duplicates.filenameWildcard) },
+                supportingText = { Text(AppStrings.duplicates.wildcardHelp) },
+                enabled = !busy,
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            DuplicateSortControls(choices.duplicateSort, enabled = !busy, onChange = { transform ->
+                preferences.update { it.copy(duplicateSort = transform(it.duplicateSort)) }
+            })
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(enabled = !busy && rootText.isNotBlank(), onClick = {
+                    invalidateExif()
+                    val selected = rootText.trim()
+                    val filter = DuplicateCandidateFilter(fileType, filenamePattern)
+                    busy = true
+                    scope.launch {
+                        error = null
+                        groups = null
+                        retention = null
+                        try {
+                            val root = selected.toPath().inventoryPath()
+                            val results = completeDuplicateGroupsUnderRoot(repository.duplicateCandidates(filter = filter), root)
+                            searchedRoot = selected
+                            searchedFilter = filter
+                            groups = results
+                            assessResults(results)
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            error = AppStrings.duplicates.searchError(e.message)
+                        } finally {
+                            busy = false
+                        }
+                    }
+                }) { Text(if (scoring) AppStrings.duplicates.scoring else if (busy) AppStrings.duplicates.searching else AppStrings.duplicates.findCandidates) }
+                OutlinedButton(enabled = !busy && !queueState.isRunning && !groups.isNullOrEmpty(), onClick = {
+                    val snapshot = groups ?: return@OutlinedButton
+                    busy = true
+                    error = null
+                    scope.launch {
+                        try {
+                            assessResults(snapshot, force = true)
+                        } finally {
+                            busy = false
+                        }
+                    }
+                }) { Text(AppStrings.duplicates.recomputeScores) }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                OutlinedButton(
+                    enabled = !scanRunning && !busy && !queueState.isRunning && !displayedSnapshot?.groups.isNullOrEmpty(),
+                    onClick = {
+                        val snapshot = displayedSnapshot?.groups?.toList() ?: return@OutlinedButton
+                        if (!queue.start(snapshot)) error = AppStrings.duplicates.analysisBusy
+                    },
+                ) { Text(AppStrings.duplicates.analyzeAmbiguous) }
+                if (queueState.isRunning) {
+                    TextButton(enabled = !cancellingQueue, onClick = {
+                        cancellingQueue = true
+                        scope.launch {
+                            try {
+                                queue.cancel()
+                            } catch (e: CancellationException) {
+                                throw e
+                            } catch (e: Exception) {
+                                error = AppStrings.duplicates.cancellationError(e.message)
+                            } finally {
+                                cancellingQueue = false
+                            }
+                        }
+                    }) { Text(if (cancellingQueue) AppStrings.duplicates.cancelling else AppStrings.duplicates.cancelExif) }
+                }
             }
         }
         presentExifQueue(queueState)?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
@@ -410,11 +420,21 @@ fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathAc
                                 style = MaterialTheme.typography.bodySmall)
                             Text(AppStrings.duplicates.scoreDetailsHelp,
                                 style = MaterialTheme.typography.bodySmall)
+                            DisableSelection {
+                                DuplicateDeletionSelectionBar(deletionSelections.values, deletionEnabled,
+                                    onClear = { deletionSelections = emptyMap() },
+                                    onAdd = { onAddToFileOperations(deletionSelections.values.toList()) })
+                            }
                             if (exifLoading) Text(AppStrings.duplicates.loadingExif, style = MaterialTheme.typography.bodySmall)
                             copyStatus?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                         }
                         if (results.isEmpty()) item { Text(AppStrings.duplicates.emptyCandidates) }
                         results.forEach { group ->
+                            val selection = DuplicateDeletionSelection(DeletionRecommendationSource.REGULAR, group.files)
+                            val selectionKey = duplicateDeletionSelectionKey(selection)
+                            val selected = deletionSelections[selectionKey]
+                            val recommendation = group.files.firstOrNull()?.let { recommendations?.get(it.path) }
+                            val protected = duplicateDeletionGroupProtected(selection, recommendation, classificationCache.records)
                             item {
                                 HorizontalDivider()
                                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -426,11 +446,34 @@ fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarget, pathAc
                                         }) { Text(AppStrings.duplicates.analyzeExif) }
                                     }
                                 }
-                                DuplicateRecommendationSummary(group.files.firstOrNull()?.let { recommendations?.get(it.path) })
+                                DuplicateRecommendationSummary(recommendation)
+                                if (recommendation != null && recommendation.redundantCandidates.isEmpty() && !protected)
+                                    Text(AppStrings.operations.groupKeepsAll, style = MaterialTheme.typography.bodySmall)
+                                DisableSelection {
+                                    DuplicateDeletionCheckbox(AppStrings.operations.selectDuplicateGroup,
+                                        checked = selected != null && selected.selectedPaths == null,
+                                        enabled = deletionEnabled && !protected && duplicateDeletionGroupRecommended(recommendation),
+                                        onCheckedChange = {
+                                            deletionSelections = if (it) deletionSelections + (selectionKey to selection)
+                                                else deletionSelections - selectionKey
+                                        })
+                                }
                             }
                             items(group.files, key = { it.path.toString() }) { file ->
                                 Column {
                                     FilePathLinks(file, pathActions)
+                                    DisableSelection {
+                                        DuplicateDeletionCheckbox(AppStrings.operations.selectFileForDeletion,
+                                            checked = file.path in selected?.selectedPaths.orEmpty(),
+                                            enabled = deletionEnabled && !protected &&
+                                                (file.path in selected?.selectedPaths.orEmpty() ||
+                                                    selected?.selectedPaths.orEmpty().size < group.files.size - 1),
+                                            onCheckedChange = {
+                                                val updated = toggleDuplicateDeletionFile(selected, selection, file.path, it)
+                                                deletionSelections = if (updated == null) deletionSelections - selectionKey
+                                                    else deletionSelections + (selectionKey to updated)
+                                            })
+                                    }
                                     Text(AppStrings.duplicates.timestamps(formatEpochMillis(file.createdAt), formatEpochMillis(file.modifiedAt)),
                                         style = MaterialTheme.typography.bodySmall)
                                     RetentionScoreLine(file.path, reportRetention[file.path])

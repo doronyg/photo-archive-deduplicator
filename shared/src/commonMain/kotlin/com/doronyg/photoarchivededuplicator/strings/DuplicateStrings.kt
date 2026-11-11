@@ -30,6 +30,7 @@ internal object DuplicateStrings {
     const val loadingExif = "Loading EXIF..."
     const val emptyCandidates = "No duplicate groups match these filters."
     const val hideFilters = "Hide filters"
+    const val showFilters = "Show filters"
     const val activeFilters = "Filters (active)"
     const val filters = "Filters"
     const val analyzeSuspected = "Analyze suspected duplicates"

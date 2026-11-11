@@ -6,6 +6,7 @@ import com.doronyg.photoarchivededuplicator.IoLane
 import com.doronyg.photoarchivededuplicator.classification.DirectoryClassification
 import com.doronyg.photoarchivededuplicator.db.FilesDatabase
 import com.doronyg.photoarchivededuplicator.recommendation.FileRecommendationRole
+import com.doronyg.photoarchivededuplicator.recommendation.DeletionRecommendationSource
 import com.doronyg.photoarchivededuplicator.scan.FileRecord
 import kotlinx.serialization.json.*
 import okio.Path
@@ -76,6 +77,16 @@ internal fun encodeProposalSnapshot(proposal: FileOperationProposal): String = b
             put("explanation", group.explanation)
             put("duplicateConfidence", group.duplicateConfidence)
             put("findings", encodeFindings(group.findings))
+            group.duplicateProvenance?.let { provenance ->
+                put("duplicateProvenance", buildJsonObject {
+                    put("source", provenance.selection.source.name)
+                    put("files", JsonArray(provenance.selection.files.map(::encodeFile)))
+                    put("selectedPaths", provenance.selection.selectedPaths?.let { paths ->
+                        JsonArray(paths.sortedBy { it.toString() }.map { JsonPrimitive(it.toString()) })
+                    } ?: JsonNull)
+                    put("engineEvidence", provenance.engineEvidence)
+                })
+            }
             put("members", buildJsonArray {
                 group.members.forEach { member -> add(buildJsonObject {
                     put("file", encodeFile(member.file))
@@ -146,6 +157,14 @@ private fun decodeGroup(group: JsonObject) = FileOperationGroup(
             member.getValue("evidence").jsonObject)
     },
     group["findings"]?.let(::decodeFindings).orEmpty(),
+    group["duplicateProvenance"]?.takeUnless { it == JsonNull }?.jsonObject?.let { provenance ->
+        DuplicateDeletionProvenance(DuplicateDeletionSelection(
+            DeletionRecommendationSource.valueOf(provenance.string("source")),
+            provenance.getValue("files").jsonArray.map { decodeFile(it.jsonObject) },
+            provenance.getValue("selectedPaths").takeUnless { it == JsonNull }?.jsonArray
+                ?.map { it.jsonPrimitive.content.toPath() }?.toSet()),
+            provenance.getValue("engineEvidence").jsonObject)
+    },
 )
 
 private fun decodeMove(move: JsonObject) = ProposedFileMove(

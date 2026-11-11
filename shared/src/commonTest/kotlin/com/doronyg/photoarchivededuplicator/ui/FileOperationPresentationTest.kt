@@ -7,6 +7,7 @@ import com.doronyg.photoarchivededuplicator.operations.FileOperationMember
 import com.doronyg.photoarchivededuplicator.operations.FileOperationProposal
 import com.doronyg.photoarchivededuplicator.operations.FileOperationIssueCode
 import com.doronyg.photoarchivededuplicator.operations.FileOperationState
+import com.doronyg.photoarchivededuplicator.operations.FileOperationSummary
 import com.doronyg.photoarchivededuplicator.operations.FileOperationValidationStatus
 import com.doronyg.photoarchivededuplicator.operations.FileMoveExecutionStatus
 import com.doronyg.photoarchivededuplicator.operations.FileExecutionPhase
@@ -35,6 +36,24 @@ import kotlin.test.assertTrue
 
 class FileOperationPresentationTest {
     private val strings = AppStrings.operations
+
+    @Test
+    fun savedResultsExpandOnlyTheSelectedCardAndKeepUnlistedProposalsVisible() {
+        val proposal = FileOperationProposal("selected", 10, 10, null, "/Bin".toPath(),
+            emptyList(), emptyList(), emptyList())
+        val selected = FileOperationSummary("selected", 10, null, proposal.binRoot,
+            proposal.validationStatus, 0, 0, 0)
+        val newer = selected.copy(id = "newer", createdAt = 20)
+        val older = selected.copy(id = "older", createdAt = 5)
+        val cards = savedFileOperationResults(listOf(newer, selected, older), proposal)
+        assertEquals(listOf("newer", "selected", "older"), cards.map { it.first.id })
+        assertEquals(listOf(proposal), cards.mapNotNull { it.second })
+        assertSame(proposal, cards[1].second)
+        assertTrue(savedFileOperationResults(listOf(newer, older), null).all { it.second == null })
+        val unlisted = savedFileOperationResults(listOf(newer, older), proposal)
+        assertEquals(listOf("newer", "selected", "older"), unlisted.map { it.first.id })
+        assertSame(proposal, unlisted[1].second)
+    }
 
     @Test
     fun liveProgressDistinguishesVerifiedFromRecordedAndEstimatesOnlyAfterEnoughMoves() {

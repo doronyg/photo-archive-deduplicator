@@ -4,6 +4,7 @@ import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificati
 import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificationContext
 import com.doronyg.photoarchivededuplicator.recommendation.DeletionRecommendationCategory
 import com.doronyg.photoarchivededuplicator.recommendation.DeletionRecommendationGroup
+import com.doronyg.photoarchivededuplicator.recommendation.DeletionRecommendationSource
 import com.doronyg.photoarchivededuplicator.recommendation.FileRecommendationRole
 import com.doronyg.photoarchivededuplicator.scan.FileRecord
 import kotlinx.serialization.json.JsonObject
@@ -11,9 +12,21 @@ import okio.Path
 
 internal const val FILE_BIN_NAME = "DeduplicatorGarbageBin"
 
+internal data class DuplicateDeletionSelection(
+    val source: DeletionRecommendationSource,
+    val files: List<FileRecord>,
+    val selectedPaths: Set<Path>? = null,
+)
+
+internal data class DuplicateDeletionProvenance(
+    val selection: DuplicateDeletionSelection,
+    val engineEvidence: JsonObject,
+)
+
 internal data class SelectedDeletionGroup(
     val category: DeletionRecommendationCategory,
     val group: DeletionRecommendationGroup,
+    val duplicateProvenance: DuplicateDeletionProvenance? = null,
 ) {
     val key: String = "${category.id.length}:${category.id}${group.id}"
 }
@@ -65,6 +78,7 @@ internal data class FileOperationGroup(
     val duplicateConfidence: Int,
     val members: List<FileOperationMember>,
     val findings: List<FileOperationFinding> = emptyList(),
+    val duplicateProvenance: DuplicateDeletionProvenance? = null,
 )
 
 internal data class ProposedFileMove(

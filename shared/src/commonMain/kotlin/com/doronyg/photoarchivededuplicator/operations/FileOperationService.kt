@@ -48,6 +48,25 @@ internal class FileOperationService(
     private val clock: () -> Long = { Clock.System.now().toEpochMilliseconds() },
     private val nextId: () -> String = { Uuid.random().toString() },
 ) {
+    suspend fun resolveDuplicateSelections(selections: List<DuplicateDeletionSelection>): List<SelectedDeletionGroup> =
+        withContext(dispatcher) {
+            if (admissionBlocked()) throw FileOperationException(FileOperationFinding(FileOperationIssueCode.BUSY))
+            repository.scanning {
+                if (admissionBlocked()) throw FileOperationException(FileOperationFinding(FileOperationIssueCode.BUSY))
+                val context = classificationContext()
+                val index = duplicateSnapshots(selections, context)
+                val groups = selections.map { selection ->
+                    val snapshot = index[duplicateDeletionGroupId(selection)]
+                        ?: throw FileOperationException(FileOperationFinding(FileOperationIssueCode.STALE_RECOMMENDATION,
+                            detail = "The original duplicate group is no longer current."))
+                    duplicateDeletionGroup(selection, snapshot)
+                }
+                if (classificationContext() != context)
+                    throw FileOperationException(FileOperationFinding(FileOperationIssueCode.STALE_RECOMMENDATION))
+                groups
+            }
+        }
+
     suspend fun createProposal(selected: List<SelectedDeletionGroup>): FileOperationProposal =
         withContext(dispatcher) {
             if (admissionBlocked()) throw FileOperationException(FileOperationFinding(FileOperationIssueCode.BUSY), global = true)
@@ -70,7 +89,8 @@ internal class FileOperationService(
             if (repository.binRoot() != proposal.binRoot)
                 throw FileOperationException(FileOperationFinding(FileOperationIssueCode.BIN_ROOT_CHANGED), global = true)
             val context = classificationContext()
-            val fresh = currentRecommendations(context)
+            val fresh = currentRecommendations(context, proposal.groups.mapNotNull { it.duplicateProvenance?.selection },
+                includeProviders = proposal.groups.any { it.duplicateProvenance == null })
             checkCancellation()
             val current = snapshotGroups(proposal.groups.mapNotNull { fresh[it.key] }, context)
                 .associateBy { it.key }
@@ -182,10 +202,34 @@ internal class FileOperationService(
             throw FileOperationException(FileOperationFinding(FileOperationIssueCode.UNSAFE_PATH, move.sourcePath))
     }
 
-    private suspend fun currentRecommendations(context: DirectoryClassificationContext?) =
-        DeletionRecommendationService(repository, retention, dispatcher, context).load()
+    private suspend fun duplicateSnapshots(
+        selections: List<DuplicateDeletionSelection>,
+        context: DirectoryClassificationContext?,
+    ) = DeletionRecommendationService(repository, retention, dispatcher, context).let { service ->
+        selections.map { it.source }.distinct().flatMap { service.snapshots(it) }.associateBy {
+            duplicateDeletionGroupId(DuplicateDeletionSelection(it.source, it.files))
+        }
+    }
+
+    private suspend fun currentRecommendations(
+        context: DirectoryClassificationContext?,
+        duplicates: List<DuplicateDeletionSelection>,
+        includeProviders: Boolean,
+    ): Map<String, SelectedDeletionGroup> {
+        val recommended = if (includeProviders) DeletionRecommendationService(repository, retention, dispatcher, context).load()
             .categories.flatMap { category -> category.groups.map { SelectedDeletionGroup(category.category, it) } }
-            .associateBy { it.key }
+            else emptyList()
+        val snapshots = duplicateSnapshots(duplicates, context)
+        val duplicateGroups = duplicates.mapNotNull { selection ->
+            val snapshot = snapshots[duplicateDeletionGroupId(selection)] ?: return@mapNotNull null
+            try {
+                duplicateDeletionGroup(selection, snapshot)
+            } catch (_: FileOperationException) {
+                null
+            }
+        }
+        return (recommended + duplicateGroups).associateBy { it.key }
+    }
 
     private suspend fun snapshotGroups(
         selected: List<SelectedDeletionGroup>,
@@ -216,7 +260,7 @@ internal class FileOperationService(
                         storedExif?.result?.metadata?.capturedAt, classification?.classification,
                         operationEvidence(advice, storedExif, scores[advice.file.path], classification))
                 }, if (protected) listOf(FileOperationFinding(FileOperationIssueCode.PROTECTED_GROUP,
-                    detail = selection.category.name)) else emptyList())
+                    detail = selection.category.name)) else emptyList(), selection.duplicateProvenance)
         }
     }
 
@@ -234,7 +278,9 @@ internal class FileOperationService(
         val selection = selected.distinctBy { it.key }
         val createdAt = clock()
         Diagnostics.logger.i("FileOperations", "Preparing dry run for ${selection.size} groups: loading current recommendations")
-        val fresh = freshRecommendations ?: currentRecommendations(context)
+        val fresh = freshRecommendations ?: currentRecommendations(context,
+            selection.mapNotNull { it.duplicateProvenance?.selection },
+            includeProviders = selection.any { it.duplicateProvenance == null })
         val findings = mutableListOf<FileOperationFinding>()
         val selectedByKey = selection.associateBy { it.key }
         val groups = snapshotGroups(selection, context).map { group ->
@@ -278,7 +324,7 @@ internal class FileOperationService(
     ): List<ProposedFileMove> {
         val sourcePaths = moves.mapTo(mutableSetOf()) { it.sourcePath }
         val keptMembers = groups.flatMap { it.members }.filter {
-            it.role in setOf(FileRecommendationRole.PREFERRED, FileRecommendationRole.PRESERVE)
+            it.role != FileRecommendationRole.REDUNDANT_CANDIDATE
         }
         val keptPaths = keptMembers.map { it.file.path }.toSet()
         // A selected candidate must never become a directory metadata probe, even

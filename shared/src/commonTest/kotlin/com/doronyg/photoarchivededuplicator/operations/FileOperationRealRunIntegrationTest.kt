@@ -7,6 +7,7 @@ import com.doronyg.photoarchivededuplicator.operations.history.OperationHistoryM
 import com.doronyg.photoarchivededuplicator.operations.history.historyObject
 import com.doronyg.photoarchivededuplicator.operations.history.historyLong
 import com.doronyg.photoarchivededuplicator.recommendation.DeletionRecommendationService
+import com.doronyg.photoarchivededuplicator.recommendation.DeletionRecommendationSource
 import com.doronyg.photoarchivededuplicator.scan.*
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
@@ -149,7 +150,28 @@ class FileOperationRealRunIntegrationTest {
         assertApprovedExecution(cancelAfterFirst = true)
     }
 
-    private suspend fun TestScope.assertApprovedExecution(cancelAfterFirst: Boolean) {
+    @Test
+    fun manualReviewOverrideUsesTheReviewedBinPipelineWithoutScoring() = runTest(timeout = 15.seconds) {
+        assertApprovedExecution(cancelAfterFirst = false, duplicateSelection = true,
+            manualSelection = true, omitScores = true)
+    }
+
+    @Test
+    fun manualEngineKeeperOverrideCancelsSafelyAndRetainsAnUnselectedOriginalMember() = runTest(timeout = 15.seconds) {
+        assertApprovedExecution(cancelAfterFirst = true, duplicateSelection = true, manualSelection = true)
+    }
+
+    @Test
+    fun duplicateGroupSelectionUsesTheReviewedBinPipeline() = runTest(timeout = 15.seconds) {
+        assertApprovedExecution(cancelAfterFirst = false, duplicateSelection = true)
+    }
+
+    private suspend fun TestScope.assertApprovedExecution(
+        cancelAfterFirst: Boolean,
+        duplicateSelection: Boolean = false,
+        manualSelection: Boolean = false,
+        omitScores: Boolean = false,
+    ) {
         val fs = FakeFileSystem()
         val dispatcher = StandardTestDispatcher(testScheduler)
         val root = "/archive".toPath()
@@ -192,15 +214,25 @@ class FileOperationRealRunIntegrationTest {
                     ExifStatus.EXTRACTED, ExifMetadata(capturedAt = "2023:02:18 12:44:25",
                         make = "Canon", model = "Camera", width = 4000, height = 3000)), 3))
             }
-            container.retentionScores.assessSuspected(container.repository.suspectedDuplicates())
+            if (!omitScores) container.retentionScores.assessSuspected(container.repository.suspectedDuplicates())
             container.fileOperations.configureBin(bin.toString())
             advanceUntilIdle()
             container.operationHistory.register(root.toString())
             advanceUntilIdle()
             assertNull(container.operationHistory.state.value.error)
-            val category = DeletionRecommendationService(container.repository, container.retentionScores, dispatcher).load()
-                .categories.single { it.category.id == "same-directory-metadata" }
-            container.fileOperations.selectGroups(listOf(SelectedDeletionGroup(category.category, category.groups.single())))
+            if (duplicateSelection) {
+                val files = container.repository.suspectedDuplicates().single().files
+                container.fileOperations.addDuplicateSelections(listOf(DuplicateDeletionSelection(
+                    DeletionRecommendationSource.SUSPECTED, files,
+                    if (manualSelection) names.take(if (cancelAfterFirst) 2 else 1)
+                        .mapTo(mutableSetOf()) { directory / it } else null)))
+                container.fileOperations.state.first { !it.busy }
+                assertNull(container.fileOperations.state.value.error)
+            } else {
+                val category = DeletionRecommendationService(container.repository, container.retentionScores, dispatcher).load()
+                    .categories.single { it.category.id == "same-directory-metadata" }
+                container.fileOperations.selectGroups(listOf(SelectedDeletionGroup(category.category, category.groups.single())))
+            }
             container.fileOperations.clearGroupSelection()
             assertTrue(container.fileOperations.state.value.selectedGroups.isEmpty())
             container.fileOperations.selectAllGroups()

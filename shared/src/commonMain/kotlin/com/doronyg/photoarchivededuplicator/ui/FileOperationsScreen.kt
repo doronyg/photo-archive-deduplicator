@@ -45,6 +45,7 @@ import com.doronyg.photoarchivededuplicator.operations.FileOperationGroup
 import com.doronyg.photoarchivededuplicator.operations.FileOperationProposal
 import com.doronyg.photoarchivededuplicator.operations.FileOperationFinding
 import com.doronyg.photoarchivededuplicator.operations.FileOperationState
+import com.doronyg.photoarchivededuplicator.operations.FileOperationSummary
 import com.doronyg.photoarchivededuplicator.operations.FileOperationValidationStatus
 import com.doronyg.photoarchivededuplicator.operations.FileMoveExecutionStatus
 import com.doronyg.photoarchivededuplicator.operations.ProposedFileMove
@@ -61,6 +62,7 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlin.time.TimeSource
 
@@ -93,6 +95,17 @@ internal fun fileOperationBinSuggestion(configured: Path?, scanRoot: String, sou
 
 internal fun fileOperationWritesEnabled(state: FileOperationState, scanning: Boolean, exifRunning: Boolean): Boolean =
     !state.busy && !scanning && !exifRunning
+
+internal fun savedFileOperationResults(
+    history: List<FileOperationSummary>,
+    proposal: FileOperationProposal?,
+): List<Pair<FileOperationSummary, FileOperationProposal?>> {
+    val summaries = if (proposal == null || history.any { it.id == proposal.id }) history
+        else (history + FileOperationSummary(proposal.id, proposal.createdAt, proposal.archiveRoot, proposal.binRoot,
+            proposal.validationStatus, proposal.groups.size.toLong(), proposal.moves.size.toLong(), proposal.candidateBytes))
+            .sortedWith(compareByDescending<FileOperationSummary> { it.createdAt }.thenBy { it.id })
+    return summaries.map { it to proposal?.takeIf { proposal -> proposal.id == it.id } }
+}
 
 internal fun operationMemberDisposition(
     path: Path,
@@ -215,6 +228,7 @@ internal fun FileOperationsScreen(
             if (state.binRoot == null) state.selectedGroups.flatMap { it.group.recommendation.files.keys } else emptyList())
     }
     val selectedKeys = remember(state.selectedGroups) { state.selectedGroups.mapTo(mutableSetOf()) { it.key } }
+    val savedResults = remember(state.history, state.proposal) { savedFileOperationResults(state.history, state.proposal) }
     val proposalRows: List<Pair<FileOperationGroup, FileOperationMember?>> = remember(state.proposal) {
         state.proposal?.groups?.flatMap { group -> listOf(group to null) + group.members.map { group to it } }.orEmpty()
     }
@@ -229,7 +243,10 @@ internal fun FileOperationsScreen(
     val writesEnabled = fileOperationWritesEnabled(state, scanning, queueState.isRunning)
     val listState = rememberLazyListState()
     val strings = AppStrings.operations
-    LaunchedEffect(controller) { controller.refresh() }
+    LaunchedEffect(controller) {
+        controller.state.first { !it.busy }
+        controller.refresh()
+    }
 
     Row(modifier) {
         LazyColumn(Modifier.weight(1f), state = listState, verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -308,97 +325,100 @@ internal fun FileOperationsScreen(
                     }
                 }
             }
-            state.proposal?.let { proposal ->
-                item(key = "proposal-heading:${proposal.id}") {
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(strings.proposal, style = MaterialTheme.typography.titleLarge)
-                        Text(strings.status(proposal.validationStatus))
-                        Text(AppStrings.field(strings.createdAt, proposal.createdAt.toString()))
-                        Text(AppStrings.field(strings.validatedAt, proposal.validatedAt.toString()))
-                        Text(AppStrings.field(strings.binRoot, proposal.binRoot.toString()))
-                        Text(strings.summary(proposal.groups.size.toLong(), proposal.moves.size.toLong(),
-                            formatBytes(proposal.candidateBytes)))
-                        Text(strings.eligibleMoves(proposal.executionEligibility.moves.size, proposal.moves.size,
-                            formatBytes(proposal.executionEligibility.moves.sumOf { it.sizeBytes })))
-                        Text(strings.dryRunSourceNote, style = MaterialTheme.typography.bodySmall)
-                        CopyFileOperationResults(proposal)
-                        Text(strings.preparationNote, style = MaterialTheme.typography.bodySmall)
-                        OutlinedButton(
-                            enabled = writesEnabled && proposal.validationStatus == FileOperationValidationStatus.READY &&
-                                state.executionResult?.operationId != proposal.id,
-                            onClick = { preparationProposal = proposal },
-                        ) { Text(strings.prepareDirectories) }
-                        Text(strings.preparationNotApproval, style = MaterialTheme.typography.bodySmall)
-                        state.directoryPreparation?.let {
-                            Text(strings.preparedDirectories(it.createdDirectories, it.writtenMarkers, it.checkedDirectories))
-                        }
-                        Button(
-                            enabled = writesEnabled && proposal.canExecute &&
-                                state.executionResult?.operationId != proposal.id,
-                            onClick = { executionProposal = proposal },
-                        ) { Text(strings.realRun) }
-                    }
+            item(key = "history-heading") {
+                Column {
+                    Text(strings.history, style = MaterialTheme.typography.titleMedium)
+                    OutlinedButton(enabled = !state.busy, onClick = { controller.refresh() }) { Text(AppStrings.refresh) }
+                    if (savedResults.isEmpty()) Text(strings.noHistory)
                 }
-                item(key = "history-heading") {
-                    Column {
-                        Text(strings.history, style = MaterialTheme.typography.titleMedium)
-                        OutlinedButton(enabled = !state.busy, onClick = { controller.refresh() }) { Text(AppStrings.refresh) }
-                        if (state.history.isEmpty()) Text(strings.noHistory)
-                    }
-                }
-                items(state.history, key = { "history:${it.id}" }) { saved ->
+            }
+            savedResults.forEach { (saved, expandedProposal) ->
+                item(key = "history:${saved.id}") {
                     Card(Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             Text(strings.summary(saved.groupCount, saved.candidateCount, formatBytes(saved.candidateBytes)))
                             Text(strings.status(saved.validationStatus))
                             Text(AppStrings.field(strings.createdAt, saved.createdAt.toString()))
-                            OutlinedButton(enabled = !state.busy, onClick = { controller.openProposal(saved.id) }) {
-                                Text(strings.open)
+                            OutlinedButton(enabled = !state.busy && expandedProposal == null,
+                                onClick = { controller.openProposal(saved.id) }) {
+                                Text(if (expandedProposal == null) strings.open else strings.openedResult)
                             }
                         }
                     }
                 }
-                items(proposal.findings) { Text(strings.finding(it), color = MaterialTheme.colorScheme.error) }
-                state.executionResult?.takeIf { it.operationId == proposal.id }?.let { result ->
-                    item(key = "execution-heading:${result.operationId}") {
+                expandedProposal?.let { proposal ->
+                    item(key = "proposal-heading:${proposal.id}") {
                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(strings.executionResults, style = MaterialTheme.typography.titleMedium)
-                            result.statisticsError?.let {
-                                Text("${strings.statisticsSaveError}\n$it", color = MaterialTheme.colorScheme.error)
+                            Text(strings.proposal, style = MaterialTheme.typography.titleLarge)
+                            Text(strings.status(proposal.validationStatus))
+                            Text(AppStrings.field(strings.createdAt, proposal.createdAt.toString()))
+                            Text(AppStrings.field(strings.validatedAt, proposal.validatedAt.toString()))
+                            Text(AppStrings.field(strings.binRoot, proposal.binRoot.toString()))
+                            Text(strings.summary(proposal.groups.size.toLong(), proposal.moves.size.toLong(),
+                                formatBytes(proposal.candidateBytes)))
+                            Text(strings.eligibleMoves(proposal.executionEligibility.moves.size, proposal.moves.size,
+                                formatBytes(proposal.executionEligibility.moves.sumOf { it.sizeBytes })))
+                            Text(strings.dryRunSourceNote, style = MaterialTheme.typography.bodySmall)
+                            CopyFileOperationResults(proposal)
+                            Text(strings.preparationNote, style = MaterialTheme.typography.bodySmall)
+                            OutlinedButton(
+                                enabled = writesEnabled && proposal.validationStatus == FileOperationValidationStatus.READY &&
+                                    state.executionResult?.operationId != proposal.id,
+                                onClick = { preparationProposal = proposal },
+                            ) { Text(strings.prepareDirectories) }
+                            Text(strings.preparationNotApproval, style = MaterialTheme.typography.bodySmall)
+                            state.directoryPreparation?.let {
+                                Text(strings.preparedDirectories(it.createdDirectories, it.writtenMarkers, it.checkedDirectories))
                             }
-                            if (result.items.any { it.status == FileMoveExecutionStatus.UNCERTAIN || it.postProcessingError != null })
-                                Text(strings.reconcileRun, color = MaterialTheme.colorScheme.error)
+                            Button(
+                                enabled = writesEnabled && proposal.canExecute &&
+                                    state.executionResult?.operationId != proposal.id,
+                                onClick = { executionProposal = proposal },
+                            ) { Text(strings.realRun) }
                         }
                     }
-                    items(result.items, key = { "execution:${result.operationId}:${it.move.sourcePath}" }) { item ->
-                        Card(Modifier.fillMaxWidth()) {
-                            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text(strings.executionStatus(item.status), style = MaterialTheme.typography.titleSmall)
-                                Text(AppStrings.field(strings.source, item.move.sourcePath.toString()))
-                                Text(AppStrings.field(strings.destination, item.move.destinationPath?.toString() ?: strings.unmapped))
-                                item.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                                item.postProcessingError?.let {
-                                    Text(AppStrings.field(strings.inventoryUpdateError, it), color = MaterialTheme.colorScheme.error)
+                    items(proposal.findings) { Text(strings.finding(it), color = MaterialTheme.colorScheme.error) }
+                    state.executionResult?.takeIf { it.operationId == proposal.id }?.let { result ->
+                        item(key = "execution-heading:${result.operationId}") {
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(strings.executionResults, style = MaterialTheme.typography.titleMedium)
+                                result.statisticsError?.let {
+                                    Text("${strings.statisticsSaveError}\n$it", color = MaterialTheme.colorScheme.error)
+                                }
+                                if (result.items.any { it.status == FileMoveExecutionStatus.UNCERTAIN || it.postProcessingError != null })
+                                    Text(strings.reconcileRun, color = MaterialTheme.colorScheme.error)
+                            }
+                        }
+                        items(result.items, key = { "execution:${result.operationId}:${it.move.sourcePath}" }) { item ->
+                            Card(Modifier.fillMaxWidth()) {
+                                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Text(strings.executionStatus(item.status), style = MaterialTheme.typography.titleSmall)
+                                    Text(AppStrings.field(strings.source, item.move.sourcePath.toString()))
+                                    Text(AppStrings.field(strings.destination, item.move.destinationPath?.toString() ?: strings.unmapped))
+                                    item.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                                    item.postProcessingError?.let {
+                                        Text(AppStrings.field(strings.inventoryUpdateError, it), color = MaterialTheme.colorScheme.error)
+                                    }
                                 }
                             }
                         }
                     }
-                }
-                items(proposalRows, key = { (group, member) ->
-                    if (member == null) "proposal-group:${proposal.id}:${group.key}"
-                    else "member:${proposal.id}:${group.key}:${member.file.path}"
-                }) { (group, member) ->
-                    if (member == null) {
-                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(group.categoryName, style = MaterialTheme.typography.titleMedium)
-                            group.findings.forEach { Text(strings.finding(it), color = MaterialTheme.colorScheme.error) }
-                            OperationEvidence {
-                                Text(group.explanation)
-                                Text(AppStrings.field(strings.duplicateConfidence, "${group.duplicateConfidence}/100"))
+                    items(proposalRows, key = { (group, member) ->
+                        if (member == null) "proposal-group:${proposal.id}:${group.key}"
+                        else "member:${proposal.id}:${group.key}:${member.file.path}"
+                    }) { (group, member) ->
+                        if (member == null) {
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(group.categoryName, style = MaterialTheme.typography.titleMedium)
+                                group.findings.forEach { Text(strings.finding(it), color = MaterialTheme.colorScheme.error) }
+                                OperationEvidence {
+                                    Text(group.explanation)
+                                    Text(AppStrings.field(strings.duplicateConfidence, "${group.duplicateConfidence}/100"))
+                                }
                             }
+                        } else {
+                            OperationMemberCard(member, proposal, pathActions)
                         }
-                    } else {
-                        OperationMemberCard(member, proposal, pathActions)
                     }
                 }
             }

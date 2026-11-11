@@ -101,9 +101,21 @@ fun InventoryApp(container: AppContainer, scanTarget: ScanTarget, pathActions: P
                 when (selectedTab) {
                     UiTab.SCAN -> ScanScreen(container.scanController, scanTarget, container.uiPreferences, content)
                     UiTab.BROWSE -> BrowseScreen(container.repository, pathActions, container.uiPreferences, content, scanState is ScanState.Running)
-                    UiTab.DUPLICATES -> DuplicatesScreen(container.repository, scanTarget, pathActions, container.uiPreferences, container.retentionScores, container.exif, container.exifQueue, scanState is ScanState.Running, content, container.directoryClassifications)
+                    UiTab.DUPLICATES -> DuplicatesScreen(container.repository, scanTarget, pathActions, container.uiPreferences, container.retentionScores, container.exif, container.exifQueue, scanState is ScanState.Running, content, container.directoryClassifications,
+                        fileOperationsBusy = fileOperationState.busy,
+                        onAddToFileOperations = { selected ->
+                            container.fileOperations.addDuplicateSelections(selected)
+                            showingOperationHistory = false
+                            container.uiPreferences.update { it.copy(selectedTab = UiTab.FILE_OPERATIONS) }
+                        })
                     UiTab.SUSPECTED_DUPLICATES -> SuspectedDuplicatesScreen(container.repository, container.retentionScores,
-                        container.exifQueue, pathActions, container.uiPreferences, scanState is ScanState.Running, content, container.directoryClassifications)
+                        container.exifQueue, pathActions, container.uiPreferences, scanState is ScanState.Running, content, container.directoryClassifications,
+                        fileOperationsBusy = fileOperationState.busy,
+                        onAddToFileOperations = { selected ->
+                            container.fileOperations.addDuplicateSelections(selected)
+                            showingOperationHistory = false
+                            container.uiPreferences.update { it.copy(selectedTab = UiTab.FILE_OPERATIONS) }
+                        })
                     UiTab.STATISTICS -> RecommendationStatisticsScreen(container.repository, container.retentionScores,
                         container.exifQueue, scanState is ScanState.Running, content, container.directoryClassifications,
                         container.uiPreferences, container.operationHistory)

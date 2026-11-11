@@ -807,6 +807,13 @@ publish immediately; redundant progress is throttled. History refreshes after ex
 Both Deletion Recommendations and File Operations support Select all and Clear
 selection, including off-screen groups. Recommendation selection is scoped to the
 current category; File Operations retains its available group pool when cleared.
+Duplicates and Suspected Duplicates can add explicit file selections or complete
+engine group decisions to the same File Operations job. Manual selection overrides
+keep/review advice but never protected groups or the last unselected copy.
+Group selection retains all engine keepers, including multiple copies. Saved
+selection provenance enables fresh validation without requiring the narrower
+Deletion Recommendations categories; both modes still require a dry run and
+explicit approval to move files into the Bin.
 Changing selection invalidates the displayed dry run, not saved snapshots.
 Large selections use automatic bounded execution batches under one explicit
 approval, retaining global identity/configuration checks and one execution lock

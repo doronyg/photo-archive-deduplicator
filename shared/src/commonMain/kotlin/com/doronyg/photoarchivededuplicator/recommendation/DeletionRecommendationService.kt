@@ -21,7 +21,7 @@ internal class DeletionRecommendationService(
         buildDeletionRecommendationReport(snapshots, providers, dispatcher)
     }
 
-    private suspend fun snapshots(source: DeletionRecommendationSource): List<DeletionAnalysisSnapshot> {
+    internal suspend fun snapshots(source: DeletionRecommendationSource): List<DeletionAnalysisSnapshot> {
         val (groups, scores) = when (source) {
             DeletionRecommendationSource.REGULAR -> {
                 val records = repository.duplicateCandidates()
