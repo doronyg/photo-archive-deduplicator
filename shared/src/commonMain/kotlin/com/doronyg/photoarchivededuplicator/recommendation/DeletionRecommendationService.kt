@@ -14,10 +14,11 @@ internal class DeletionRecommendationService(
     private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
     private val classificationContext: DirectoryClassificationContext? = null,
     private val providers: List<DeletionRecommendationProvider> =
-        listOf(SameDirectoryMetadataProvider(), ExifFolderDateMismatchProvider(), FullConfidenceRegularDuplicatesProvider()),
+        listOf(SameDirectoryMetadataProvider(), ExifFolderDateMismatchProvider(), FullConfidenceRegularDuplicatesProvider(),
+            FolderPreservingDuplicatesProvider(), SingleProtectedDirectoryProvider(), PreferredBackupPerfectScoreProvider()),
 ) {
     suspend fun load(): DeletionRecommendationReport = withContext(dispatcher) {
-        val snapshots = providers.map { it.source }.distinct().flatMap { snapshots(it) }
+        val snapshots = providers.flatMap { it.sources }.distinct().flatMap { snapshots(it) }
         buildDeletionRecommendationReport(snapshots, providers, dispatcher)
     }
 

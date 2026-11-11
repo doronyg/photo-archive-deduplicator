@@ -18,6 +18,25 @@ class DeletionRecommendationPresentationTest {
     private val report = DeletionRecommendationReport(listOf(first, empty), first.summary)
 
     @Test
+    fun categoryGridAdaptsToAvailableWidthIncludingSpacingAndNarrowScreens() {
+        for ((width, columns) in listOf(0 to 1, 200 to 1, 320 to 1, 651 to 1,
+            652 to 2, 983 to 2, 984 to 3, 1400 to 4, 2400 to 6)) {
+            val actual = deletionCategoryGridColumns(width, 320, 12, 6)
+            assertEquals(columns, actual, "Available width: $width")
+            val cardWidth = (width - 12 * (actual - 1)) / actual
+            assertTrue(cardWidth >= 0)
+            assertTrue(actual * cardWidth + 12 * (actual - 1) <= width)
+        }
+    }
+
+    @Test
+    fun categoryGridDoesNotCreateEmptyColumnsOrRequireCards() {
+        assertEquals(1, deletionCategoryGridColumns(2400, 320, 12, 1))
+        assertEquals(2, deletionCategoryGridColumns(2400, 320, 12, 2))
+        assertEquals(0, deletionCategoryGridColumns(2400, 320, 12, 0))
+    }
+
+    @Test
     fun categorySelectionUsesStableIdentifiersAndSupportsEmptyFutureCategories() {
         assertEquals(first, selectedDeletionCategory(report, null))
         assertEquals(empty, selectedDeletionCategory(report, "empty"))

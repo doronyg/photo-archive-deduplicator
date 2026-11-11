@@ -188,6 +188,14 @@ The File Operations tab configures the full Bin path and creates saved proposals
 from selected deletion recommendations. Each proposal captures the Bin root,
 complete group evidence and exact proposed destinations. Dry-run setup requires
 no source archive root; real runs separately require verified history registration.
+Recommendation categories also include existing plans that retain a group copy
+in every original folder, PREFERRED/BACKUP-only groups with an engine-retained
+score-100 copy, and a narrowly scoped single-PROTECTED-folder exception.
+The last category requires a high-confidence complete group in exactly one
+protected directory and retains one copy there. Its explicit operation policy is
+saved with group evidence and checked again against current recommendations;
+missing policy in older proposals defaults to the ordinary protected-group ban.
+Manual selections and all other categories still reject protected groups.
 Destinations preserve the full original path beneath the
 Bin, for example `/Photos/Trip/a.jpg` becomes `<Bin>/Photos/Trip/a.jpg`; Windows
 drive letters and network share paths are preserved without the drive colon.

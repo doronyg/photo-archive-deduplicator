@@ -2,6 +2,7 @@ package com.doronyg.photoarchivededuplicator.operations
 
 import com.doronyg.photoarchivededuplicator.IoLane
 import com.doronyg.photoarchivededuplicator.classification.DirectoryClassification
+import com.doronyg.photoarchivededuplicator.recommendation.DeletionRecommendationPolicy
 import com.doronyg.photoarchivededuplicator.operations.history.ARCHIVE_MARKER_NAME
 import com.doronyg.photoarchivededuplicator.operations.history.ArchiveBinding
 import com.doronyg.photoarchivededuplicator.operations.history.HISTORY_DIRECTORY_NAME
@@ -337,9 +338,12 @@ internal class BinDirectoryPreparer(
         require(binding.archiveRoot.isAbsolute && binding.archiveRoot == binding.archiveRoot.normalized() &&
             binding.binRoot.isAbsolute && binding.binRoot == binding.binRoot.normalized() &&
             binding.binRoot.parent != null && !binding.archiveRoot.isInTree(binding.binRoot)) { "Unsafe archive/Bin roots" }
-        require(proposal.groups.none { group -> group.members.any { it.classification == DirectoryClassification.PROTECTED } }) {
+        require(proposal.groups.none { group -> group.members.any { it.classification == DirectoryClassification.PROTECTED } &&
+            !group.allowsSingleProtectedDirectory() }) {
             "The proposal contains protected members"
         }
+        require(proposal.groups.all { it.policy == DeletionRecommendationPolicy.ORDINARY ||
+            it.allowsSingleProtectedDirectory() }) { "Invalid protected-directory exception" }
         val sources = proposal.moves.map { it.sourcePath }.toSet()
         require(sources.size == proposal.moves.size) { "Duplicate proposed source" }
         val destinations = mutableSetOf<String>()

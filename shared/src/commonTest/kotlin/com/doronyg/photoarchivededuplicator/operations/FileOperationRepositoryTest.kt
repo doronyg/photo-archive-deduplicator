@@ -2,6 +2,7 @@ package com.doronyg.photoarchivededuplicator.operations
 
 import com.doronyg.photoarchivededuplicator.recommendation.FileRecommendationRole
 import com.doronyg.photoarchivededuplicator.recommendation.DeletionRecommendationSource
+import com.doronyg.photoarchivededuplicator.recommendation.DeletionRecommendationPolicy
 import com.doronyg.photoarchivededuplicator.scan.FileRecord
 import com.doronyg.photoarchivededuplicator.scan.concurrencyTest
 import com.doronyg.photoarchivededuplicator.scan.createFilesDatabase
@@ -101,14 +102,16 @@ class FileOperationRepositoryTest {
             FileOperationValidationStatus.NEEDS_ATTENTION, 1, 1, 42), repository.recent().single())
         assertFailsWith<Exception> { repository.save(proposal) }
         assertEquals(proposal, repository.load("saved"), "Saving the same ID cannot overwrite a snapshot")
-        val fullPathProposal = proposal.copy(id = "full-path", archiveRoot = null)
+        val fullPathProposal = proposal.copy(id = "full-path", archiveRoot = null,
+            groups = proposal.groups.map { it.copy(policy = DeletionRecommendationPolicy.SINGLE_PROTECTED_DIRECTORY) })
         repository.save(fullPathProposal)
         assertEquals(fullPathProposal, repository.load("full-path"))
         assertEquals(null, repository.recent().single { it.id == "full-path" }.archiveRoot)
-        val legacy = fullPathProposal.copy(id = "legacy")
+        val legacy = fullPathProposal.copy(id = "legacy",
+            groups = fullPathProposal.groups.map { it.copy(policy = DeletionRecommendationPolicy.ORDINARY) })
         val encoded = Json.parseToJsonElement(encodeProposalSnapshot(legacy)).jsonObject
         val oldGroups = JsonArray(encoded.getValue("groups").jsonArray.map { group ->
-            JsonObject(group.jsonObject.filterKeys { it != "findings" })
+            JsonObject(group.jsonObject.filterKeys { it != "findings" && it != "policy" })
         })
         val payload = JsonObject(encoded + ("groups" to oldGroups)).toString()
         f.lane.run("insert historical proposal") {

@@ -7,6 +7,7 @@ import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificati
 import com.doronyg.photoarchivededuplicator.db.FilesDatabase
 import com.doronyg.photoarchivededuplicator.recommendation.FileRecommendationRole
 import com.doronyg.photoarchivededuplicator.recommendation.DeletionRecommendationSource
+import com.doronyg.photoarchivededuplicator.recommendation.DeletionRecommendationPolicy
 import com.doronyg.photoarchivededuplicator.scan.FileRecord
 import kotlinx.serialization.json.*
 import okio.Path
@@ -76,6 +77,7 @@ internal fun encodeProposalSnapshot(proposal: FileOperationProposal): String = b
             put("categoryName", group.categoryName)
             put("explanation", group.explanation)
             put("duplicateConfidence", group.duplicateConfidence)
+            put("policy", group.policy.name)
             put("findings", encodeFindings(group.findings))
             group.duplicateProvenance?.let { provenance ->
                 put("duplicateProvenance", buildJsonObject {
@@ -165,6 +167,8 @@ private fun decodeGroup(group: JsonObject) = FileOperationGroup(
                 ?.map { it.jsonPrimitive.content.toPath() }?.toSet()),
             provenance.getValue("engineEvidence").jsonObject)
     },
+    group["policy"]?.jsonPrimitive?.content?.let(DeletionRecommendationPolicy::valueOf)
+        ?: DeletionRecommendationPolicy.ORDINARY,
 )
 
 private fun decodeMove(move: JsonObject) = ProposedFileMove(

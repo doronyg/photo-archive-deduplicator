@@ -5,6 +5,7 @@ import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificati
 import com.doronyg.photoarchivededuplicator.recommendation.DeletionRecommendationCategory
 import com.doronyg.photoarchivededuplicator.recommendation.DeletionRecommendationGroup
 import com.doronyg.photoarchivededuplicator.recommendation.DeletionRecommendationSource
+import com.doronyg.photoarchivededuplicator.recommendation.DeletionRecommendationPolicy
 import com.doronyg.photoarchivededuplicator.recommendation.FileRecommendationRole
 import com.doronyg.photoarchivededuplicator.scan.FileRecord
 import kotlinx.serialization.json.JsonObject
@@ -79,7 +80,20 @@ internal data class FileOperationGroup(
     val members: List<FileOperationMember>,
     val findings: List<FileOperationFinding> = emptyList(),
     val duplicateProvenance: DuplicateDeletionProvenance? = null,
+    val policy: DeletionRecommendationPolicy = DeletionRecommendationPolicy.ORDINARY,
 )
+
+internal fun FileOperationGroup.allowsSingleProtectedDirectory(): Boolean {
+    if (policy != DeletionRecommendationPolicy.SINGLE_PROTECTED_DIRECTORY || duplicateProvenance != null ||
+        duplicateConfidence < 75 || members.size < 2 ||
+        members.map { it.file.path }.distinct().size != members.size ||
+        members.map { it.file.directoryPath }.distinct().size != 1 ||
+        members.any { it.classification != DirectoryClassification.PROTECTED ||
+            it.file.path.parent != it.file.directoryPath || it.decisionConfidence < 75 }) return false
+    val survivor = members.singleOrNull { it.role == FileRecommendationRole.PREFERRED } ?: return false
+    return members.all { it == survivor || it.role == FileRecommendationRole.REDUNDANT_CANDIDATE &&
+        it.retainedReplacementPath == survivor.file.path }
+}
 
 internal data class ProposedFileMove(
     val sourcePath: Path,

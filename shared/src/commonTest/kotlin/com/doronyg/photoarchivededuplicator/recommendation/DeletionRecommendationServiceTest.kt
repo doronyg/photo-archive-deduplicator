@@ -66,7 +66,13 @@ class DeletionRecommendationServiceTest {
         assertEquals(1L, service.load().summary.groupCount)
         seed(other, listOf("IMG-002.jpg"))
         retention.assessSuspected(f.repository.suspectedDuplicates())
-        assertEquals(0L, service.load().summary.groupCount, "Never select a same-directory subset of a larger group")
+        val crossDirectoryReport = service.load()
+        assertTrue(crossDirectoryReport.categories.single {
+            it.category.id == "same-directory-metadata"
+        }.groups.isEmpty(), "Never select a same-directory subset of a larger group")
+        assertTrue(crossDirectoryReport.categories.flatMap { it.groups }.all {
+            it.survivors.size + it.candidates.size == 3
+        }, "Other categories must also use the whole original group")
         f.repository.addExclusion(other)
         assertEquals(1L, service.load().summary.groupCount)
         val candidate = f.repository.filesIn(family).first { it.name == "IMG-001.jpg" }
@@ -106,8 +112,15 @@ class DeletionRecommendationServiceTest {
         val service = DeletionRecommendationService(f.repository, retention, f.dispatcher, profile)
         val protectedStatements = f.driver.statements.size
         val protectedReport = service.load()
-        assertTrue(protectedReport.categories.all { it.groups.isEmpty() })
-        assertEquals(DeletionRecommendationSummary(), protectedReport.summary)
+        assertTrue(protectedReport.categories.filter {
+            it.category.id != "single-protected-directory"
+        }.all { it.groups.isEmpty() })
+        val protectedGroup = protectedReport.categories.single {
+            it.category.id == "single-protected-directory"
+        }.groups.single()
+        assertEquals(DeletionRecommendationPolicy.SINGLE_PROTECTED_DIRECTORY, protectedGroup.policy)
+        assertEquals(1, protectedGroup.survivors.size)
+        assertEquals(1L, protectedReport.summary.groupCount)
         assertTrue(f.driver.statements.drop(protectedStatements).all { it.startsWith("SELECT") || it.startsWith("WITH") })
         assertEquals(before, retention.storedSuspected(source))
         f.repository.saveDirectoryClassification(DirectoryClassificationRecord(family, family.toString(),

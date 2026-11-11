@@ -1,6 +1,5 @@
 package com.doronyg.photoarchivededuplicator.ui
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -9,9 +8,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Card
@@ -27,6 +24,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -203,22 +201,21 @@ internal fun DeletionRecommendationsScreen(
                 }
                 current?.report?.let { report ->
                     item(key = "categories") {
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            items(report.categories, key = { it.category.id }) { result ->
-                                val isSelected = result.category.id == category?.category?.id
-                                Card(
-                                    onClick = { selectedId = result.category.id },
-                                    modifier = Modifier.width(320.dp).semantics { selected = isSelected },
-                                    colors = CardDefaults.cardColors(containerColor =
-                                        if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant),
-                                    border = if (isSelected) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
-                                ) {
-                                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        Text(result.category.name, style = MaterialTheme.typography.titleMedium)
-                                        Text(result.category.description, style = MaterialTheme.typography.bodySmall)
-                                        Text(deletionSummaryText(result.summary), style = MaterialTheme.typography.bodyMedium)
-                                        Text(if (isSelected) AppStrings.review.selectedCategory else AppStrings.review.selectCategory,
-                                            style = MaterialTheme.typography.labelMedium)
+                        DeletionCategoryGrid {
+                            report.categories.forEach { result ->
+                                key(result.category.id) {
+                                    val isSelected = result.category.id == category?.category?.id
+                                    Card(
+                                        onClick = { selectedId = result.category.id },
+                                        modifier = Modifier.semantics { selected = isSelected },
+                                        colors = CardDefaults.cardColors(containerColor =
+                                            if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant),
+                                    ) {
+                                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            Text(result.category.name, style = MaterialTheme.typography.titleMedium)
+                                            Text(result.category.description, style = MaterialTheme.typography.bodySmall)
+                                            Text(deletionSummaryText(result.summary), style = MaterialTheme.typography.bodyMedium)
+                                        }
                                     }
                                 }
                             }

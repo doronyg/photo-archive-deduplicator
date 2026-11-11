@@ -19,11 +19,11 @@ class FileOperationServiceTest {
         val bin: Path,
     )
 
-    private suspend fun seed(f: ConcurrencyFixture, folderName: String = "Family"): Fixture {
+    private suspend fun seed(f: ConcurrencyFixture, folderName: String = "Family", copies: Int = 2): Fixture {
         val folder = f.root / folderName
         val bin = "/DeduplicatorGarbageBin".toPath()
         val prefix = if (folderName == "Family") "IMG" else folderName.uppercase()
-        val names = listOf("$prefix.JPG", "$prefix-001.JPG")
+        val names = listOf("$prefix.JPG") + (1 until copies).map { "$prefix-${it.toString().padStart(3, '0')}.JPG" }
         for (name in names) f.write(folder / name, "a".repeat(120_001))
         f.repository.seedRoot(f.root)
         f.repository.recordListing(f.root, DirectoryListing(
@@ -54,6 +54,123 @@ class FileOperationServiceTest {
     private fun service(f: ConcurrencyFixture, fixture: Fixture, fileSystem: FileSystem = f.fakeFs) =
         FileOperationService(f.repository, fixture.proposals, fixture.retention, f.lane,
             fileSystem, f.dispatcher, clock = { 100 }, nextId = { "proposal-1" })
+
+    @Test
+    fun protectedCategoryUsesFreshProviderPolicyWhileOrdinaryManualAndForgedPlansRemainBlocked() = concurrencyTest { f ->
+        val fixture = seed(f)
+        val context = OllamaSettings("http://ollama.test", "model").context()
+        val directory = f.root / "Family"
+        val classification = DirectoryClassificationRecord(directory, directory.toString(),
+            DirectoryClassification.PROTECTED, context, 5)
+        f.repository.saveDirectoryClassification(classification)
+        val category = DeletionRecommendationService(f.repository, fixture.retention, f.dispatcher, context).load()
+            .categories.single { it.category.id == "single-protected-directory" }
+        val selected = SelectedDeletionGroup(category.category, category.groups.single())
+        var id = 0
+        val service = FileOperationService(f.repository, fixture.proposals, fixture.retention, f.lane,
+            f.fakeFs, f.dispatcher, classificationContext = { context },
+            clock = { 100 }, nextId = { "protected-${++id}" })
+        val proposal = service.createProposal(listOf(selected))
+        assertTrue(proposal.canExecute)
+        assertTrue(proposal.groups.single().allowsSingleProtectedDirectory())
+        assertTrue(proposal.groups.single().members.all { it.classification == DirectoryClassification.PROTECTED })
+        assertEquals(proposal, fixture.proposals.load(proposal.id))
+        val validation = service.revalidateForExecution(proposal)
+        assertTrue(validation.groupFindings.isEmpty())
+        service.executionMoveValidator(proposal, validation)(proposal.moves.single())
+        assertFalse(service.createProposal(listOf(fixture.selected)).canExecute)
+        assertFalse(service.createProposal(listOf(selected.copy(group = selected.group.copy(
+            policy = DeletionRecommendationPolicy.ORDINARY)))).canExecute)
+        assertFalse(service.createProposal(listOf(selected.copy(category = selected.category.copy(id = "forged")))).canExecute)
+        for (paths in listOf(null, setOf(selected.group.candidates.single().advice.file.path))) {
+            val failure = assertFailsWith<FileOperationException> {
+                service.resolveDuplicateSelections(listOf(DuplicateDeletionSelection(
+                    DeletionRecommendationSource.SUSPECTED, selected.group.recommendation.files.values.map { it.file }, paths)))
+            }
+            assertEquals(FileOperationIssueCode.PROTECTED_GROUP, failure.finding.code)
+        }
+        f.repository.saveDirectoryClassification(classification.copy(classification = DirectoryClassification.PREFERRED,
+            classifiedAt = 6))
+        assertFalse(service.createProposal(listOf(selected)).canExecute)
+        assertTrue(service.revalidateForExecution(proposal).groupFindings.isNotEmpty())
+        assertFailsWith<FileOperationException> {
+            service.executionMoveValidator(proposal, validation)(proposal.moves.single())
+        }
+        assertFalse(f.fakeFs.exists(fixture.bin))
+    }
+
+    @Test
+    fun protectedBeforeMoveRejectsChangedStoredEvidence() = concurrencyTest { f ->
+        val fixture = seed(f)
+        val context = OllamaSettings("http://ollama.test", "model").context()
+        val directory = f.root / "Family"
+        f.repository.saveDirectoryClassification(DirectoryClassificationRecord(directory, directory.toString(),
+            DirectoryClassification.PROTECTED, context, 5))
+        val category = DeletionRecommendationService(f.repository, fixture.retention, f.dispatcher, context).load()
+            .categories.single { it.category.id == "single-protected-directory" }
+        val service = FileOperationService(f.repository, fixture.proposals, fixture.retention, f.lane,
+            f.fakeFs, f.dispatcher, classificationContext = { context }, nextId = { "protected-evidence" })
+        val proposal = service.createProposal(listOf(SelectedDeletionGroup(category.category, category.groups.single())))
+        val validation = service.revalidateForExecution(proposal)
+        val file = category.groups.single().survivors.single().advice.file
+        val record = f.repository.fileExif(listOf(file.path)).single()
+        f.repository.saveFileExif(record.copy(result = record.result.copy(
+            metadata = record.result.metadata.copy(model = "Other camera")), extractedAt = 6))
+        assertEquals(FileOperationIssueCode.STALE_RECOMMENDATION, assertFailsWith<FileOperationException> {
+            service.executionMoveValidator(proposal, validation)(proposal.moves.single())
+        }.finding.code)
+        assertTrue(service.revalidateForExecution(proposal).groupFindings.isNotEmpty())
+    }
+
+    @Test
+    fun protectedCategoryExecutesThroughPreparationAndJournalWindowsLeavingOneCopy() = concurrencyTest { f ->
+        val fixture = seed(f, copies = 52)
+        val context = OllamaSettings("http://ollama.test", "model").context()
+        val directory = f.root / "Family"
+        f.repository.saveDirectoryClassification(DirectoryClassificationRecord(directory, directory.toString(),
+            DirectoryClassification.PROTECTED, context, 5))
+        val category = DeletionRecommendationService(f.repository, fixture.retention, f.dispatcher, context).load()
+            .categories.single { it.category.id == "single-protected-directory" }
+        val selected = SelectedDeletionGroup(category.category, category.groups.single())
+        val binding = com.doronyg.photoarchivededuplicator.operations.history.OperationHistoryStore(
+            f.lane, f.fakeFs, f.dispatcher).register(f.root, fixture.bin)
+        val service = FileOperationService(f.repository, fixture.proposals, fixture.retention, f.lane,
+            f.fakeFs, f.dispatcher, classificationContext = { context }, nextId = { "protected-run" })
+        val proposal = service.createProposal(listOf(selected))
+        val validation = service.revalidateForExecution(proposal)
+        val preparer = BinDirectoryPreparer(f.lane, f.fakeFs, f.dispatcher)
+        for (invalidGroup in listOf(
+            proposal.groups.single().copy(policy = DeletionRecommendationPolicy.ORDINARY),
+            proposal.groups.single().copy(members = proposal.groups.single().members.map {
+                it.copy(classification = DirectoryClassification.PREFERRED)
+            }),
+        )) {
+            val rejected = preparer.prepareEligibleGroups(proposal.copy(groups = listOf(invalidGroup)), binding)
+            assertEquals(setOf(invalidGroup.key), rejected.rejected.keys)
+            assertTrue(rejected.preparedProposal.moves.isEmpty())
+        }
+        var moved = 0
+        val io = object : FileMoveIo {
+            override fun sameFileSystem(source: Path, destinationDirectory: Path) = true
+            override fun moveNoReplace(source: Path, destination: Path) {
+                assertFalse(f.fakeFs.exists(destination))
+                f.fakeFs.atomicMove(source, destination)
+                moved++
+            }
+            override fun flushFile(path: Path) = Unit
+        }
+        val result = FileOperationExecutor(f.lane, io, f.fakeFs, f.dispatcher).execute(
+            proposal, binding,
+            validate = { assertTrue(service.revalidateForExecution(proposal).groupFindings.isEmpty()) },
+            beforeMove = service.executionMoveValidator(proposal, validation),
+            recordMove = { f.repository.recordCompletedMove(it) })
+        assertEquals(51, moved)
+        assertTrue(result.items.all { it.status == FileMoveExecutionStatus.COMPLETED })
+        assertEquals(listOf(selected.group.survivors.single().advice.file.path), f.repository.filesIn(directory).map { it.path })
+        assertTrue(f.fakeFs.exists(selected.group.survivors.single().advice.file.path))
+        assertTrue(proposal.moves.all { f.fakeFs.exists(it.destinationPath!!) && !f.fakeFs.exists(it.sourcePath) })
+        assertTrue(proposal.groups.single().members.all { it.classification == DirectoryClassification.PROTECTED })
+    }
 
     @Test
     fun executionRevalidationChecksTheSavedPlanWithoutCreatingAnotherProposal() = concurrencyTest { f ->

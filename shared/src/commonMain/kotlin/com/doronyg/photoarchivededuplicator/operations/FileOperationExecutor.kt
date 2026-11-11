@@ -3,6 +3,7 @@ package com.doronyg.photoarchivededuplicator.operations
 import com.doronyg.photoarchivededuplicator.IoLane
 import com.doronyg.photoarchivededuplicator.Diagnostics
 import com.doronyg.photoarchivededuplicator.classification.DirectoryClassification
+import com.doronyg.photoarchivededuplicator.recommendation.DeletionRecommendationPolicy
 import com.doronyg.photoarchivededuplicator.operations.history.*
 import com.doronyg.photoarchivededuplicator.scan.FileRecord
 import com.doronyg.photoarchivededuplicator.scan.isBinMarkerMetadata
@@ -491,7 +492,10 @@ internal class FileOperationExecutor(
         for (group in proposal.groups) {
             val detail = when {
                 groupsByKey.getValue(group.key).size > 1 -> "Duplicate reviewed group keys"
-                group.members.any { it.classification == DirectoryClassification.PROTECTED } -> "Protected reviewed group"
+                group.policy != DeletionRecommendationPolicy.ORDINARY &&
+                    !group.allowsSingleProtectedDirectory() -> "Invalid protected-directory exception"
+                group.members.any { it.classification == DirectoryClassification.PROTECTED } &&
+                    !group.allowsSingleProtectedDirectory() -> "Protected reviewed group"
                 else -> null
             }
             if (detail != null) group.members.filter { it.file.path in sources }.forEach { reject(it.file.path, detail) }
@@ -698,6 +702,7 @@ internal class FileOperationExecutor(
         put("categoryName", group.categoryName)
         put("explanation", group.explanation)
         put("duplicateConfidence", group.duplicateConfidence)
+        put("policy", group.policy.name)
     }.toString()
 
     private fun itemManifestText(item: Item, binding: ArchiveBinding) = buildJsonObject {

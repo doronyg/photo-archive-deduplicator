@@ -3,6 +3,8 @@ package com.doronyg.photoarchivededuplicator.operations
 import com.doronyg.photoarchivededuplicator.IoLane
 import com.doronyg.photoarchivededuplicator.operations.history.*
 import com.doronyg.photoarchivededuplicator.recommendation.FileRecommendationRole
+import com.doronyg.photoarchivededuplicator.recommendation.DeletionRecommendationPolicy
+import com.doronyg.photoarchivededuplicator.classification.DirectoryClassification
 import com.doronyg.photoarchivededuplicator.scan.FileRecord
 import com.doronyg.photoarchivededuplicator.scan.TrackingIoDispatcher
 import kotlinx.coroutines.CancellationException
@@ -27,6 +29,33 @@ import okio.fakefilesystem.FakeFileSystem
 import kotlin.test.*
 
 class FileOperationExecutorTest {
+    @Test fun protectedPolicyRequiresOneRetainedSameDirectoryHighConfidenceSnapshot() = runTest {
+        for (invalid in 0..5) {
+            val f = Fixture(this)
+            f.initialize()
+            val original = f.proposal.groups.single()
+            val safe = original.copy(policy = DeletionRecommendationPolicy.SINGLE_PROTECTED_DIRECTORY,
+                members = original.members.mapIndexed { index, member -> member.copy(
+                    role = if (index == 0) FileRecommendationRole.REDUNDANT_CANDIDATE else FileRecommendationRole.PREFERRED,
+                    classification = DirectoryClassification.PROTECTED) })
+            assertTrue(safe.allowsSingleProtectedDirectory())
+            val unsafe = when (invalid) {
+                0 -> safe.copy(policy = DeletionRecommendationPolicy.ORDINARY)
+                1 -> safe.copy(duplicateConfidence = 74)
+                2 -> safe.copy(members = safe.members.map { it.copy(classification = DirectoryClassification.PREFERRED) })
+                3 -> safe.copy(members = safe.members.map { it.copy(role = FileRecommendationRole.REDUNDANT_CANDIDATE) })
+                4 -> safe.copy(members = safe.members.map { it.copy(decisionConfidence = 74) })
+                else -> safe.copy(members = listOf(safe.members.first().copy(
+                    retainedReplacementPath = safe.members.first().file.path), safe.members.last()))
+            }
+            assertFalse(unsafe.allowsSingleProtectedDirectory())
+            f.proposal = f.proposal.copy(groups = listOf(unsafe))
+            val result = f.execute()
+            assertEquals(0, f.moveCount)
+            assertEquals(FileMoveExecutionStatus.FAILED, result.items.single().status)
+        }
+    }
+
     @Test fun journalWindowsForceAllIntentsBeforeMovingAndAllResultsBeforeInventory() = runTest {
         val f = Fixture(this)
         f.initialize(51)

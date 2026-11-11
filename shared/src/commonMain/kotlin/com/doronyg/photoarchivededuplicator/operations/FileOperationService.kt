@@ -6,6 +6,8 @@ import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificati
 import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificationContext
 import com.doronyg.photoarchivededuplicator.recommendation.DeletionRecommendationService
 import com.doronyg.photoarchivededuplicator.recommendation.FileRecommendationRole
+import com.doronyg.photoarchivededuplicator.recommendation.FileRecommendation
+import com.doronyg.photoarchivededuplicator.recommendation.ConfidenceAssessment
 import com.doronyg.photoarchivededuplicator.retention.RetentionScoreService
 import com.doronyg.photoarchivededuplicator.retention.RetentionScorer
 import com.doronyg.photoarchivededuplicator.scan.DirectoryRepository
@@ -108,7 +110,10 @@ internal class FileOperationService(
                 val protected = if (group.members.any {
                     it.classification == DirectoryClassification.PROTECTED ||
                         classifications[it.file.directoryPath]?.classification == DirectoryClassification.PROTECTED
-                }) listOf(FileOperationFinding(FileOperationIssueCode.PROTECTED_GROUP, detail = group.categoryName))
+                } && !(group.allowsSingleProtectedDirectory() && snapshot?.allowsSingleProtectedDirectory() == true &&
+                    group.members.all {
+                        classifications[it.file.directoryPath]?.classification == DirectoryClassification.PROTECTED
+                    })) listOf(FileOperationFinding(FileOperationIssueCode.PROTECTED_GROUP, detail = group.categoryName))
                     else emptyList()
                 failures[group.key] = (problems + protected + when {
                     snapshot == null -> listOf(FileOperationFinding(FileOperationIssueCode.STALE_RECOMMENDATION,
@@ -191,12 +196,35 @@ internal class FileOperationService(
             repository.directoryClassifications(members.map { member -> member.file.directoryPath }.distinct(), it)
                 .associateBy { record -> record.directoryPath }
         }.orEmpty()
-        if (members.any { it.classification == DirectoryClassification.PROTECTED } ||
-            classifications.values.any { it.classification == DirectoryClassification.PROTECTED })
+        if ((members.any { it.classification == DirectoryClassification.PROTECTED } ||
+            classifications.values.any { it.classification == DirectoryClassification.PROTECTED }) &&
+            !groups.all { group -> group.allowsSingleProtectedDirectory() && group.members.all {
+                classifications[it.file.directoryPath]?.classification == DirectoryClassification.PROTECTED
+            } })
             throw FileOperationException(FileOperationFinding(FileOperationIssueCode.PROTECTED_GROUP, move.sourcePath))
         if (members.any {
             operationClassificationEvidence(classifications[it.file.directoryPath]) != it.evidence["classification"]
         }) throw FileOperationException(FileOperationFinding(FileOperationIssueCode.STALE_RECOMMENDATION, move.sourcePath))
+        if (groups.any { it.allowsSingleProtectedDirectory() }) {
+            val paths = members.map { it.file.path }
+            val exif = repository.fileExif(paths, currentOnly = true).associateBy { it.input.path }
+            val scores = repository.fileScores(paths, RetentionScorer().identity, currentOnly = true).associateBy { it.input.path }
+            for (member in members) {
+                // Earlier journal batches remove completed candidates from the inventory.
+                val current = repository.file(member.file.path)
+                if (current == null && member.role == FileRecommendationRole.REDUNDANT_CANDIDATE &&
+                    member.file.path != move.sourcePath) continue
+                val evidence = operationEvidence(
+                    FileRecommendation(
+                        member.file, member.role, "", emptySet(), member.explanation,
+                        ConfidenceAssessment(
+                            member.decisionConfidence, emptySet(), ""), member.retainedReplacementPath),
+                    exif[member.file.path], scores[member.file.path], classifications[member.file.directoryPath])
+                if (current != member.file || evidence["exif"] != member.evidence["exif"] ||
+                    evidence["retention"] != member.evidence["retention"])
+                    throw FileOperationException(FileOperationFinding(FileOperationIssueCode.STALE_RECOMMENDATION, move.sourcePath))
+            }
+        }
         val exclusions = repository.exclusions()
         if (exclusions.any { move.sourcePath.isInTree(it.path) || move.survivorPath?.isInTree(it.path) == true })
             throw FileOperationException(FileOperationFinding(FileOperationIssueCode.UNSAFE_PATH, move.sourcePath))
@@ -250,7 +278,7 @@ internal class FileOperationService(
             } || (group.survivors + group.candidates).any {
                 it.directoryClassification?.classification == DirectoryClassification.PROTECTED
             }
-            FileOperationGroup(selection.key, selection.category.id, selection.category.name,
+            val operationGroup = FileOperationGroup(selection.key, selection.category.id, selection.category.name,
                 "${group.evidenceSummary}\n${group.recommendation.explanation}", group.recommendation.duplicateConfidence.score,
                 group.recommendation.files.values.map { advice ->
                     val storedExif = exif[advice.file.path]
@@ -259,8 +287,11 @@ internal class FileOperationService(
                         advice.retentionDecisionConfidence.score, advice.retainedReplacementPath,
                         storedExif?.result?.metadata?.capturedAt, classification?.classification,
                         operationEvidence(advice, storedExif, scores[advice.file.path], classification))
-                }, if (protected) listOf(FileOperationFinding(FileOperationIssueCode.PROTECTED_GROUP,
-                    detail = selection.category.name)) else emptyList(), selection.duplicateProvenance)
+                }, duplicateProvenance = selection.duplicateProvenance, policy = group.policy)
+            if (protected && !operationGroup.allowsSingleProtectedDirectory())
+                operationGroup.copy(findings = listOf(FileOperationFinding(FileOperationIssueCode.PROTECTED_GROUP,
+                    detail = selection.category.name)))
+            else operationGroup
         }
     }
 

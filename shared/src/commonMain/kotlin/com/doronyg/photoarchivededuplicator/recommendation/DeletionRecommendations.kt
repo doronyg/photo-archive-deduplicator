@@ -49,11 +49,16 @@ internal data class DeletionRecommendationGroup(
     val survivors: List<DeletionReviewFile>,
     val candidates: List<DeletionReviewFile>,
     val recommendation: DuplicateGroupRecommendation,
+    val policy: DeletionRecommendationPolicy = DeletionRecommendationPolicy.ORDINARY,
 )
+
+internal enum class DeletionRecommendationPolicy { ORDINARY, SINGLE_PROTECTED_DIRECTORY }
 
 internal interface DeletionRecommendationProvider {
     val category: DeletionRecommendationCategory
     val source: DeletionRecommendationSource get() = DeletionRecommendationSource.SUSPECTED
+    val sources: Set<DeletionRecommendationSource> get() = setOf(source)
+    val allowsProtectedGroups: Boolean get() = false
     suspend fun recommendations(snapshots: List<DeletionAnalysisSnapshot>): List<DeletionRecommendationGroup>
 }
 
@@ -164,7 +169,7 @@ internal suspend fun buildDeletionRecommendationReport(
     val categories = providers.map { provider ->
         task.ensureActive()
         val groups = provider.recommendations(snapshots.filter {
-            it.source == provider.source && !it.hasProtectedMember()
+            it.source in provider.sources && (provider.allowsProtectedGroups || !it.hasProtectedMember())
         })
         require(groups.map { it.id }.distinct().size == groups.size && groups.all { it.id.isNotBlank() }) {
             "Deletion recommendation group IDs must be nonempty and unique within their category."

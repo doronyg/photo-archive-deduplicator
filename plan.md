@@ -731,6 +731,28 @@ explanations and replacement dependencies. Protected files cannot be candidates;
 protected retained copies remain preserved. A 100/100 metadata score is not byte
 verification. This category has no suspected-image size threshold.
 
+Three additional categories consume complete regular and suspected groups:
+
+- **Every folder retains a copy** accepts existing KEEP_MULTIPLE plans only when
+  every original directory retains at least one group member. It does not invent
+  extra keepers or modify the engine's decisions.
+- **Redundant copies in one protected folder** is a narrow exception to the
+  protected-group restriction: the entire group must occupy one current-profile
+  PROTECTED directory, duplicate confidence must be high (at least 75/100) without
+  contradictions, and a safe engine plan must retain one copy in that directory.
+  The exception is explicit in saved operation evidence and revalidated before
+  execution; it does not permit manual protected selections or cross-directory
+  protected moves.
+- **Preferred/backup groups with a score-100 keeper** requires every directory to
+  be explicitly classified PREFERRED or BACKUP and at least one engine-retained
+  file to have a current retention score of exactly 100. All existing engine
+  keepers remain, including multiple keepers.
+
+All three require current saved EXIF/retention evidence, high duplicate confidence
+without contradictions, valid retained-replacement dependencies and actual
+redundant candidates. The protected exception is unavailable to other categories.
+Categories may overlap; overall totals continue to deduplicate groups and paths.
+
 The database-only service derives advice from saved evidence with the existing
 engine, not a second decision policy. It never extracts EXIF, recomputes/saves
 retention scores or contacts Ollama. Only labels matching current saved settings
