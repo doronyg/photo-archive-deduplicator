@@ -2,12 +2,15 @@ package com.doronyg.photoarchivededuplicator.ui
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
@@ -26,11 +29,13 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import com.doronyg.photoarchivededuplicator.strings.AppStrings
 
 @Composable
 internal fun DuplicateFilterPanel(
     active: Boolean = false,
+    compact: Boolean = true,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     var expanded by remember { mutableStateOf(true) }
@@ -55,11 +60,16 @@ internal fun DuplicateFilterPanel(
                 }
             }
         }
-        if (expanded) Column(
-            Modifier.fillMaxWidth().heightIn(max = 320.dp).verticalScroll(scroll),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            content = content,
-        )
+        if (expanded) Box(Modifier.fillMaxWidth().heightIn(max = if (compact) 320.dp else Dp.Infinity)) {
+            Column(
+                Modifier.fillMaxWidth().padding(end = 14.dp).verticalScroll(scroll),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                content = content,
+            )
+            Box(Modifier.matchParentSize()) {
+                ResultsScrollbar(scroll, Modifier.align(Alignment.CenterEnd).fillMaxHeight())
+            }
+        }
         HorizontalDivider()
     }
 }

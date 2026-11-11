@@ -1,6 +1,8 @@
 package com.doronyg.photoarchivededuplicator.ui
 
 import androidx.compose.foundation.LocalScrollbarStyle
+import androidx.compose.foundation.ScrollState
+import androidx.compose.foundation.ScrollbarStyle
 import androidx.compose.foundation.VerticalScrollbar
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -16,6 +18,20 @@ import androidx.compose.ui.unit.dp
 
 @Composable
 internal actual fun ResultsScrollbar(state: LazyListState, modifier: Modifier) {
+    ResultsScrollbarTrack(modifier) { style ->
+        VerticalScrollbar(rememberScrollbarAdapter(state), Modifier.fillMaxHeight(), style = style)
+    }
+}
+
+@Composable
+internal actual fun ResultsScrollbar(state: ScrollState, modifier: Modifier) {
+    ResultsScrollbarTrack(modifier) { style ->
+        VerticalScrollbar(rememberScrollbarAdapter(state), Modifier.fillMaxHeight(), style = style)
+    }
+}
+
+@Composable
+private fun ResultsScrollbarTrack(modifier: Modifier, content: @Composable (ScrollbarStyle) -> Unit) {
     val style = LocalScrollbarStyle.current.copy(
         thickness = 10.dp,
         unhoverColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
@@ -25,11 +41,7 @@ internal actual fun ResultsScrollbar(state: LazyListState, modifier: Modifier) {
     BoxWithConstraints(modifier.width(style.thickness)) {
         // Compose 1.11 can calculate a negative drag range when the thumb exceeds its track.
         if (resultsScrollbarHasDragSpace(constraints, minimumThumbHeight)) {
-            VerticalScrollbar(
-                adapter = rememberScrollbarAdapter(state),
-                modifier = Modifier.fillMaxHeight(),
-                style = style,
-            )
+            content(style)
         }
     }
 }

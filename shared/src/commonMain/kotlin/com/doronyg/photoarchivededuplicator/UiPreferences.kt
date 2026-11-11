@@ -23,11 +23,16 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 enum class UiTab(val title: String) {
-    SCAN(AppStrings.scanTab), BROWSE(AppStrings.browseTab), DUPLICATES(AppStrings.duplicatesTab),
-    SUSPECTED_DUPLICATES(AppStrings.suspectedTab), STATISTICS(AppStrings.statisticsTab),
-    DELETION_RECOMMENDATIONS(AppStrings.recommendationsTab), FILE_OPERATIONS(AppStrings.fileOperationsTab),
+    SCAN(AppStrings.scanTab),
+    BROWSE(AppStrings.browseTab),
+    DUPLICATES(AppStrings.duplicatesTab),
+    SUSPECTED_DUPLICATES(AppStrings.suspectedTab),
+    DELETION_RECOMMENDATIONS(AppStrings.recommendationsTab),
+    FILE_OPERATIONS(AppStrings.fileOperationsTab),
+    STATISTICS(AppStrings.statisticsTab),
     OLLAMA(AppStrings.ollamaTab),
-    EXCLUSIONS(AppStrings.exclusionsTab), LOGS(AppStrings.logsTab),
+    EXCLUSIONS(AppStrings.exclusionsTab),
+    LOGS(AppStrings.logsTab),
 }
 
 data class UiChoices(

@@ -237,7 +237,12 @@ internal fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarge
 
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(AppStrings.duplicates.title, style = MaterialTheme.typography.titleLarge)
-        DuplicateFilterPanel(active = rootText.isNotBlank() || filenamePattern.isNotBlank() || fileType != DuplicateFileType.ALL) {
+        presentExifQueue(queueState)?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        DuplicateFilterPanel(
+            active = rootText.isNotBlank() || filenamePattern.isNotBlank() || fileType != DuplicateFileType.ALL,
+            compact = !groups.isNullOrEmpty(),
+        ) {
             directoryClassifications?.let { controller ->
                 DirectoryClassificationControls(controller, choices.ollama,
                     displayedSnapshot?.groups?.map { it.files }?.takeUnless { busy || scanRunning },
@@ -365,8 +370,6 @@ internal fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarge
                 }
             }
         }
-        presentExifQueue(queueState)?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         SelectionContainer(Modifier.weight(1f)) {
             Row(Modifier.fillMaxSize()) {
                 LazyColumn(
