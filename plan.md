@@ -625,7 +625,40 @@ test databases, never the production archive database.
 
 #### Recommendation statistics
 
-The Statistics tab follows Suspected duplicates. Show plain selectable text for
+The **Cleanup Results** tab follows Suspected duplicates and is the primary
+statistics entry point. Keep the existing `STATISTICS` preference key. A
+**Detailed statistics** card opens the original selectable report within the
+same tab, with a back button; re-entering the tab starts at Cleanup Results.
+
+The overview uses the existing inventory summary for current non-Bin file count
+and logical archive bytes, including inventoried folders excluded from analysis.
+Show adaptive decimal size units. Potential savings are the journal-confirmed
+logical bytes currently recorded in the selected Bin, not lifetime bytes moved,
+permanent deletion or physical space reclaimed. Show recorded Bin file counts
+and confirmed move-event counts separately; events are not unique files.
+Missing/unreadable history is unavailable, not zero. Preserve partial-history
+information in the presentation model, but keep history diagnostics in the
+detailed report rather than adding explanatory notes to the overview.
+Permanent deletions are not tracked, so omit that metric rather than infer a count.
+Use direct labels without promotional subtitles or explanatory disclaimers.
+
+Give AI retention impact a prominent before/after presentation, with changed
+groups, changed file decisions, withdrawn candidates (kept or left for review) and
+new candidates. Keep regular/suspected views separate and never add them.
+Use the existing comparison against deterministic-only recommendations, not new
+scoring or a second analysis algorithm. Do not expose diagnostic classification
+coverage or transition tables here. Show an unconfigured state when AI settings
+are absent.
+
+The compact duplicate visualization uses the existing path-deduplicated union
+and registered file types. Its archive percentage uses the overview's full
+inventory denominator; matching files can include retained copies, and analysis
+still respects exclusions. All cards, charts and text use theme colors and
+responsive layouts, supporting the system light/dark theme without new
+charting dependencies. A dedicated presentation model maps existing snapshots;
+no schema, scanning or detection changes are required.
+
+The detailed report retains plain selectable text for
 regular duplicate candidates and suspected matches separately, across all stored
 roots and excluding excluded folders, independent of the duplicate-tab filters.
 Regular grouping must span roots rather than combining per-root query results,

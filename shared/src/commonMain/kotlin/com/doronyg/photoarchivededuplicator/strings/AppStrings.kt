@@ -8,6 +8,7 @@ object AppStrings {
     internal val duplicates = DuplicateStrings
     internal val review = ReviewStrings
     internal val operations = OperationStrings
+    internal val cleanup = CleanupResultsStrings
     val platform = PlatformStrings
 
     const val unknown = "Unknown"
@@ -25,7 +26,7 @@ object AppStrings {
     const val browseTab = "Browse"
     const val duplicatesTab = "Duplicates"
     const val suspectedTab = "Suspected Duplicates"
-    const val statisticsTab = "Statistics"
+    const val statisticsTab = "Cleanup Results"
     const val recommendationsTab = "Deletion Recommendations"
     const val fileOperationsTab = "File Operations"
     const val ollamaTab = "Ollama Settings"

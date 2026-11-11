@@ -720,6 +720,18 @@ group action include every group member; per-file role totals are separate views
 of those same files. The cohorts may overlap and are not combined. This changes
 only a query's optional scope, not the schema or existing inventory.
 
+Cleanup Results is now the primary statistics presentation; its Detailed
+statistics card preserves the existing diagnostic report. It reuses the
+inventory summary, path-deduplicated duplicate counts, per-cohort AI impact and
+the selected Bin's portable history without a schema change. Overview archive
+totals include all non-Bin inventory, while duplicate analysis respects user
+exclusions. Potential savings use logical bytes recorded in Bin, not lifetime
+move bytes or physical storage reclaimed. Move counts are confirmed events,
+not inferred unique files. Unreadable history is unavailable; history diagnostics
+remain in the detailed report, and untracked permanent deletion is omitted.
+The overview uses concise labels without promotional or explanatory copy. No filesystem audit,
+network request, EXIF extraction or score write is triggered by this presentation.
+
 ## Cached AI directory classifications
 
 `DirectoryAiClassification.sq` stores successful directory classifications

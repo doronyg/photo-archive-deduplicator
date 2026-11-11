@@ -18,8 +18,9 @@ import kotlin.test.assertFalse
 
 class RecommendationStatisticsPresentationTest {
     @Test
-    fun statisticsTabFollowsSuspectedDuplicatesAndPersistsByName() {
+    fun cleanupResultsTabFollowsSuspectedDuplicatesAndPreservesTheStatisticsPreference() {
         assertEquals(UiTab.STATISTICS, UiTab.entries[UiTab.SUSPECTED_DUPLICATES.ordinal + 1])
+        assertEquals("Cleanup Results", UiTab.STATISTICS.title)
         val choices = UiChoices(selectedTab = UiTab.STATISTICS)
         assertEquals("STATISTICS", encodeUiChoices(choices)["selectedTab"])
         assertEquals(choices, decodeUiChoices(encodeUiChoices(choices)))

@@ -64,6 +64,9 @@ kotlin {
             implementation(libs.ktor.client.okhttp)
             implementation(libs.sqldelight.sqlite.driver)
         }
+        jvmTest.dependencies {
+            runtimeOnly(compose.desktop.currentOs)
+        }
         androidMain.dependencies {
             implementation(libs.ktor.client.okhttp)
             implementation(libs.sqldelight.android.driver)

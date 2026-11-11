@@ -12,6 +12,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.PrimaryScrollableTabRow
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.FilterChip
 import androidx.compose.runtime.Composable
@@ -55,7 +56,7 @@ fun InventoryApp(loadContainer: suspend () -> AppContainer, scanTarget: ScanTarg
     if (loaded != null) {
         InventoryApp(loaded, scanTarget, pathActions)
     } else {
-        MaterialTheme {
+        InventoryTheme {
             Surface(Modifier.fillMaxSize()) {
                 Column(Modifier.safeDrawingPadding().padding(16.dp)) {
                     Text(error ?: AppStrings.inventory.loadingInventory)
@@ -80,7 +81,8 @@ fun InventoryApp(container: AppContainer, scanTarget: ScanTarget, pathActions: P
     val exifState by container.exifQueue.state.collectAsState()
     val classificationState by container.directoryClassifications.state.collectAsState()
     var showingOperationHistory by remember { mutableStateOf(false) }
-    MaterialTheme {
+    var showingDetailedStatistics by remember(selectedTab) { mutableStateOf(false) }
+    InventoryTheme {
         Surface(modifier = Modifier.fillMaxSize()) {
             // safeDrawingPadding keeps content clear of Android system bars; no-op on desktop
             Column(Modifier.safeDrawingPadding()) {
@@ -92,7 +94,10 @@ fun InventoryApp(container: AppContainer, scanTarget: ScanTarget, pathActions: P
                         Tab(
                             selected = selectedTab == tab,
                             enabled = !fileOperationState.busy,
-                            onClick = { container.uiPreferences.update { it.copy(selectedTab = tab) } },
+                            onClick = {
+                                showingDetailedStatistics = false
+                                container.uiPreferences.update { it.copy(selectedTab = tab) }
+                            },
                             text = { Text(tab.title) },
                         )
                     }
@@ -116,9 +121,21 @@ fun InventoryApp(container: AppContainer, scanTarget: ScanTarget, pathActions: P
                             showingOperationHistory = false
                             container.uiPreferences.update { it.copy(selectedTab = UiTab.FILE_OPERATIONS) }
                         })
-                    UiTab.STATISTICS -> RecommendationStatisticsScreen(container.repository, container.retentionScores,
-                        container.exifQueue, scanState is ScanState.Running, content, container.directoryClassifications,
-                        container.uiPreferences, container.operationHistory)
+                    UiTab.STATISTICS -> if (showingDetailedStatistics) {
+                        Column(content, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            OutlinedButton(onClick = { showingDetailedStatistics = false }) {
+                                Text(AppStrings.cleanup.back)
+                            }
+                            RecommendationStatisticsScreen(container.repository, container.retentionScores,
+                                container.exifQueue, scanState is ScanState.Running, Modifier.weight(1f).fillMaxSize(),
+                                container.directoryClassifications, container.uiPreferences, container.operationHistory)
+                        }
+                    } else {
+                        CleanupResultsScreen(container.repository, container.retentionScores, container.exifQueue,
+                            container.uiPreferences, container.operationHistory, container.directoryClassifications,
+                            scanning = scanState is ScanState.Running, fileOperationsBusy = fileOperationState.busy,
+                            onDetailedStatistics = { showingDetailedStatistics = true }, modifier = content)
+                    }
                     UiTab.DELETION_RECOMMENDATIONS -> DeletionRecommendationsScreen(container.repository, container.retentionScores,
                         container.exifQueue, pathActions, container.uiPreferences, scanState is ScanState.Running,
                         content, container.directoryClassifications, fileOperationsBusy = fileOperationState.busy,
