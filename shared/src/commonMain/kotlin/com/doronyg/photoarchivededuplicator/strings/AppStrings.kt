@@ -32,6 +32,8 @@ object AppStrings {
     const val ollamaTab = "Ollama Settings"
     const val exclusionsTab = "Exclusions"
     const val logsTab = "Logs"
+    const val scrollNavigationForward = "Scroll navigation forward"
+    const val scrollNavigationBackward = "Scroll navigation backward"
 
     fun field(label: String, value: String) = "$label: $value"
     fun fileSize(bytes: Long, formatted: String) = "$bytes bytes ($formatted)"

@@ -3,6 +3,8 @@ package com.doronyg.photoarchivededuplicator.ui
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.Checkbox
@@ -65,7 +67,8 @@ internal fun DuplicateDeletionSelectionBar(
     val strings = AppStrings.operations
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(strings.duplicateDeletionNote, style = MaterialTheme.typography.bodySmall)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(enabled = enabled && selections.isNotEmpty(), onClick = onAdd) {
                 Text(strings.addDeletionSelections(selections.size))
             }

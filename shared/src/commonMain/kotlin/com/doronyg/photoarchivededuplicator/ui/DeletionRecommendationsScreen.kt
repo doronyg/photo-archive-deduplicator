@@ -3,6 +3,7 @@ package com.doronyg.photoarchivededuplicator.ui
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -227,7 +228,8 @@ internal fun DeletionRecommendationsScreen(
                             Column {
                                 Text(category.category.name, style = MaterialTheme.typography.titleMedium)
                                 Text(AppStrings.operations.selection(categorySelectedCount))
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                     OutlinedButton(
                                         enabled = !blocked && !fileOperationsBusy && categorySelectedCount < categoryKeys.size,
                                         onClick = { selectedKeys = toggleDeletionCategory(selectedKeys, category, true) },

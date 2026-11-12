@@ -2,7 +2,7 @@ package com.doronyg.photoarchivededuplicator.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -98,12 +98,14 @@ fun LogsScreen(pathActions: PathActions, modifier: Modifier = Modifier, preferen
         }
         OutlinedTextField(filter, { value -> updateChoices { it.copy(logFilter = value) } }, label = { Text(AppStrings.inventory.logFilter) },
             singleLine = true, modifier = Modifier.fillMaxWidth())
-        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)) {
             LogLevel.entries.forEach { level ->
                 FilterChip(selected = minimum == level, onClick = { updateChoices { it.copy(logMinimum = level) } }, label = { Text(AppStrings.inventory.minimumLogLevel(level.name)) })
             }
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)) {
             TextButton(onClick = { Diagnostics.logger.clear() }) { Text(AppStrings.inventory.clearLogs) }
             TextButton(onClick = {
                 val captured = visible

@@ -1025,6 +1025,14 @@ the persisted data later. A changed capture timestamp, offset, status, reader, o
 input fingerprint invalidates the old group's recommendation even when its
 calendar-date retention contribution would remain unchanged.
 
+Horizontal action groups and filter chips wrap within the available width on
+phone layouts. Duplicate sort cards wrap in numbered priority order, including
+their direction/priority actions; the Filters panel scrolls vertically to keep
+all controls reachable. Result headings and actions must not squeeze filenames
+or paths into unusable columns. Apply the same wrapping/stacking approach to
+settings, operations, logs, scan actions and browsing metadata; ordered
+navigation such as breadcrumbs may scroll horizontally instead.
+
 A collapsible Filters panel applies folder, filename wildcard, and recommendation
 action filters to loaded results immediately. Remember these independently from
 the regular duplicate filters. Folder matching is case-sensitive, literal, and

@@ -2,6 +2,7 @@ package com.doronyg.photoarchivededuplicator.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -97,7 +98,8 @@ internal fun DirectoryClassificationResults(
         Text(AppStrings.analysis.profileEligibility,
             style = MaterialTheme.typography.bodySmall)
         Text(AppStrings.analysis.labelInfluence, style = MaterialTheme.typography.bodySmall)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)) {
             FilterChip(selected = currentOnly, onClick = { currentOnly = true }, label = { Text(AppStrings.analysis.currentSettings) })
             FilterChip(selected = !currentOnly, onClick = { currentOnly = false }, label = { Text(AppStrings.analysis.allResults) })
         }
@@ -108,7 +110,8 @@ internal fun DirectoryClassificationResults(
             style = MaterialTheme.typography.bodySmall)
         OutlinedTextField(query, { query = it }, label = { Text(AppStrings.analysis.filterResults) },
             singleLine = true, modifier = Modifier.fillMaxWidth())
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(enabled = !state.loading, onClick = { refresh++ }) { Text(AppStrings.refresh) }
             OutlinedButton(enabled = !copying && !state.loading && loadError == null && visible.isNotEmpty(),
                 onClick = {

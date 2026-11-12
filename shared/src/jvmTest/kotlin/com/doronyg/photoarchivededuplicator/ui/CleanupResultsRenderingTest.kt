@@ -13,6 +13,7 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.use
+import androidx.compose.ui.unit.Density
 import com.doronyg.photoarchivededuplicator.classification.OllamaSettings
 import com.doronyg.photoarchivededuplicator.operations.history.ArchiveIdentity
 import com.doronyg.photoarchivededuplicator.operations.history.OperationHistorySnapshot
@@ -38,6 +39,13 @@ import kotlin.test.assertTrue
 
 @OptIn(ExperimentalComposeUiApi::class)
 class CleanupResultsRenderingTest {
+    @Test
+    fun rendersPhoneWidthWithEnlargedText() = runTest {
+        for (dark in listOf(false, true)) {
+            renderAndCheck(fixture(populated = true), null, dark, 320, 5500, fontScale = 1.4f)
+        }
+    }
+
     @Test
     fun rendersBothThemesAndLayoutsAndClicksDetailedStatistics() = runTest {
         val data = fixture(populated = true)
@@ -78,10 +86,11 @@ class CleanupResultsRenderingTest {
         width: Int,
         height: Int,
         screenshot: String? = null,
+        fontScale: Float = 1f,
     ): Int {
         var detailsClicks = 0
         var refreshClicks = 0
-        return ImageComposeScene(width, height) {
+        return ImageComposeScene(width, height, density = Density(1f, fontScale)) {
             InventoryTheme(darkTheme = dark) {
                 Surface(Modifier.fillMaxSize()) {
                     CleanupResultsContent(

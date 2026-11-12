@@ -53,7 +53,7 @@ internal object DuplicateStrings {
     const val preserveCopy = "Preserve"
     const val preserveForReview = "Preserve for review"
     const val loadingRecommendation = "Loading recommendation..."
-    const val sortPriority = "Sort priority (left to right)"
+    const val sortPriority = "Sort priority"
     const val filename = "Filename"
     const val fileSize = "File size"
     const val copyCount = "Copy count"

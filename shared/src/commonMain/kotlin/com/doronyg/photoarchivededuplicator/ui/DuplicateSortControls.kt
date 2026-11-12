@@ -1,11 +1,11 @@
 package com.doronyg.photoarchivededuplicator.ui
 
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedCard
@@ -29,9 +29,10 @@ internal fun DuplicateSortControls(
     onChange: ((List<DuplicateSortRule>) -> List<DuplicateSortRule>) -> Unit,
 ) {
     Text(AppStrings.duplicates.sortPriority, style = MaterialTheme.typography.titleSmall)
-    Row(
-        Modifier.horizontalScroll(rememberScrollState()),
+    FlowRow(
+        Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         rules.forEachIndexed { index, rule ->
             val label = when (rule.criterion) {
@@ -41,7 +42,7 @@ internal fun DuplicateSortControls(
                 DuplicateSortCriterion.EARLIEST_CREATED -> AppStrings.duplicates.creationDate
                 DuplicateSortCriterion.RECOMMENDATION -> AppStrings.duplicates.recommendation
             }
-            OutlinedCard {
+            OutlinedCard(Modifier.widthIn(max = 360.dp)) {
                 Column(Modifier.padding(8.dp)) {
                     FilterChip(
                         selected = rule.enabled,
@@ -51,9 +52,10 @@ internal fun DuplicateSortControls(
                                 current.map { if (it.criterion == rule.criterion) it.copy(enabled = !it.enabled) else it }
                             }
                         },
-                        label = { Text(label) },
+                        label = { Text("${index + 1}. $label") },
                     )
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         TextButton(
                             enabled = enabled && index > 0,
                             modifier = Modifier.semantics { contentDescription = AppStrings.duplicates.raisePriority(label) },

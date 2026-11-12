@@ -1,9 +1,9 @@
 package com.doronyg.photoarchivededuplicator.ui
 
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -142,7 +142,7 @@ internal fun DirectoryClassificationControls(
         state.failures.count { it.directory.inventoryPath() in paths }
     }
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Row(Modifier.horizontalScroll(rememberScrollState())) {
+        FlowRow(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             TextButton(onClick = { controlsExpanded = !controlsExpanded }) {
                 Text(if (controlsExpanded) AppStrings.analysis.hideClassification else AppStrings.analysis.directoryClassification)
             }
@@ -158,7 +158,8 @@ internal fun DirectoryClassificationControls(
         Text(AppStrings.analysis.classificationScope,
             style = MaterialTheme.typography.bodySmall)
         if (context == null) Text(AppStrings.analysis.configureClassification)
-        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(enabled = enabled && counts.missing > 0, onClick = {
                 error = null
                 if (!controller.start(groups.orEmpty().map { it.toList() }, context!!)) error = AppStrings.analysis.cannotStart

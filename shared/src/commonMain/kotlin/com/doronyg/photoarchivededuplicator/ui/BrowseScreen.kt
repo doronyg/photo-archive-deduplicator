@@ -1,13 +1,17 @@
 package com.doronyg.photoarchivededuplicator.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -86,7 +90,7 @@ fun BrowseScreen(repository: DirectoryRepository, pathActions: PathActions, pref
             content?.summary?.let { SummaryLine(it, Modifier.weight(1f)) }
             OutlinedButton(onClick = { refreshCount++ }) { Text(AppStrings.refresh) }
         }
-        Breadcrumbs(stack, onNavigate = { depth -> preferences.update { it.copy(browseStack = it.browseStack.take(depth)) } })
+        BrowseBreadcrumbs(stack, onNavigate = { depth -> preferences.update { it.copy(browseStack = it.browseStack.take(depth)) } })
         OutlinedButton(enabled = !copying && content != null, onClick = {
             val selected = current
             copying = true
@@ -167,8 +171,8 @@ private fun SummaryLine(summary: InventorySummary, modifier: Modifier) {
 }
 
 @Composable
-private fun Breadcrumbs(stack: List<Path>, onNavigate: (depth: Int) -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
+internal fun BrowseBreadcrumbs(stack: List<Path>, onNavigate: (depth: Int) -> Unit) {
+    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
         TextButton(onClick = { onNavigate(0) }) { Text(AppStrings.inventory.allRoots) }
         stack.forEachIndexed { index, path ->
             Text(AppStrings.inventory.breadcrumbSeparator)
@@ -181,7 +185,7 @@ private fun Breadcrumbs(stack: List<Path>, onNavigate: (depth: Int) -> Unit) {
 @Composable
 private fun DirectoryRow(overview: DirectoryOverview, onOpen: () -> Unit) {
     val dir = overview.directory
-    ListRow(
+    BrowseDirectoryListRow(
         icon = AppStrings.inventory.directoryIcon,
         name = if (dir.parentPath == null) dir.path.toString() else dir.path.name,
         details = AppStrings.inventory.directoryDetails(
@@ -202,14 +206,25 @@ private fun FileRow(file: FileRecord, actions: PathActions) {
 }
 
 @Composable
-private fun ListRow(icon: String, name: String, details: String, modifier: Modifier = Modifier) {
-    Row(
-        modifier = modifier.fillMaxWidth().padding(vertical = 6.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(icon, style = MaterialTheme.typography.titleMedium)
-        Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-        Text(details, style = MaterialTheme.typography.bodySmall)
+internal fun BrowseDirectoryListRow(icon: String, name: String, details: String, modifier: Modifier = Modifier) {
+    BoxWithConstraints(modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+        val compact = maxWidth < 600.dp
+        val maxDetailsWidth = maxWidth / 2
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(icon, style = MaterialTheme.typography.titleMedium)
+            if (compact) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(details, style = MaterialTheme.typography.bodySmall)
+                }
+            } else {
+                Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                Text(details, modifier = Modifier.widthIn(max = maxDetailsWidth),
+                    style = MaterialTheme.typography.bodySmall)
+            }
+        }
     }
 }

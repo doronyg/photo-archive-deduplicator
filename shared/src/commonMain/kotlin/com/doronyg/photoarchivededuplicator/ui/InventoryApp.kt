@@ -2,16 +2,15 @@ package com.doronyg.photoarchivededuplicator.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.PrimaryScrollableTabRow
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -88,18 +87,9 @@ fun InventoryApp(container: AppContainer, scanTarget: ScanTarget, pathActions: P
                 preferencesError?.let {
                     Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(8.dp))
                 }
-                PrimaryScrollableTabRow(selectedTabIndex = selectedTab.ordinal) {
-                    UiTab.entries.forEach { tab ->
-                        Tab(
-                            selected = selectedTab == tab,
-                            enabled = !fileOperationState.busy,
-                            onClick = {
-                                showingDetailedStatistics = false
-                                container.uiPreferences.update { it.copy(selectedTab = tab) }
-                            },
-                            text = { Text(tab.title) },
-                        )
-                    }
+                AppNavigationBar(selectedTab, enabled = !fileOperationState.busy) { tab ->
+                    showingDetailedStatistics = false
+                    container.uiPreferences.update { it.copy(selectedTab = tab) }
                 }
                 val content = Modifier.fillMaxSize().padding(16.dp)
                 when (selectedTab) {
@@ -144,7 +134,8 @@ fun InventoryApp(container: AppContainer, scanTarget: ScanTarget, pathActions: P
                             container.uiPreferences.update { it.copy(selectedTab = UiTab.FILE_OPERATIONS) }
                         })
                     UiTab.FILE_OPERATIONS -> Column(content) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             FilterChip(selected = !showingOperationHistory, enabled = !fileOperationState.busy,
                                 onClick = { showingOperationHistory = false },
                                 label = { Text(OperationHistoryStrings.localProposals) })

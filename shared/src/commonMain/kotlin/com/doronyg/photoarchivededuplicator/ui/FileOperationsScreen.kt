@@ -3,6 +3,7 @@ package com.doronyg.photoarchivededuplicator.ui
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -286,7 +287,8 @@ internal fun FileOperationsScreen(
                     Text(strings.selection(state.selectedGroups.size))
                     if (state.selectedGroups.isEmpty())
                         Text(if (state.availableGroups.isEmpty()) strings.emptySelection else strings.pendingSelectionHint)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedButton(
                             enabled = writesEnabled && state.selectedGroups.size < state.availableGroups.size,
                             onClick = { controller.selectAllGroups() },
@@ -499,11 +501,12 @@ private fun OperationExecutionProgress(state: FileOperationState, controller: Fi
     val estimate = if (state.cancellationRequested) null else fileExecutionEtaMillis(progress, elapsed)
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(if (state.cancellationRequested && !progress.finished) strings.stoppingOperation
                     else if (progress.finished && progress.phase != FileExecutionPhase.CANCELLED) strings.executionFinished
                     else strings.executionPhase(progress.phase),
-                    modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                    style = MaterialTheme.typography.titleMedium)
                 if (state.busy && !progress.finished) OutlinedButton(
                     enabled = !state.cancellationRequested, onClick = controller::cancelOperation,
                 ) { Text(strings.cancelOperation) }

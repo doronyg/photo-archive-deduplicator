@@ -1,16 +1,15 @@
 package com.doronyg.photoarchivededuplicator.ui
 
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.DisableSelection
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Button
@@ -32,7 +31,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
@@ -273,9 +271,10 @@ internal fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarge
                     }
                 }) { Text(AppStrings.duplicates.chooseFolder) }
             }
-            Row(
-                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            FlowRow(
+                Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 DuplicateFileType.entries.forEach { type ->
                     FilterChip(
@@ -305,7 +304,8 @@ internal fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarge
             DuplicateSortControls(choices.duplicateSort, enabled = !busy, onChange = { transform ->
                 preferences.update { it.copy(duplicateSort = transform(it.duplicateSort)) }
             })
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(enabled = !busy && rootText.isNotBlank(), onClick = {
                     invalidateExif()
                     val selected = rootText.trim()
@@ -344,7 +344,8 @@ internal fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarge
                     }
                 }) { Text(AppStrings.duplicates.recomputeScores) }
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(
                     enabled = !scanRunning && !busy && !queueState.isRunning && !displayedSnapshot?.groups.isNullOrEmpty(),
                     onClick = {
@@ -393,8 +394,8 @@ internal fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarge
                     displayedSnapshot?.let { displayed ->
                         val results = displayed.groups
                         item {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(AppStrings.duplicates.candidateCount(results.size, reportRoot), Modifier.weight(1f))
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(AppStrings.duplicates.candidateCount(results.size, reportRoot))
                                 DisableSelection {
                                     TextButton(enabled = !copying, onClick = {
                                         val reportExif = exif
@@ -440,9 +441,9 @@ internal fun DuplicatesScreen(repository: DirectoryRepository, target: ScanTarge
                             val protected = duplicateDeletionGroupProtected(selection, recommendation, classificationCache.records)
                             item {
                                 HorizontalDivider()
-                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                     Text(AppStrings.duplicates.group(group.name, formatBytes(group.sizeBytes), group.files.size),
-                                        modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                                        style = MaterialTheme.typography.titleMedium)
                                     DisableSelection {
                                         TextButton(enabled = !scanRunning && !busy && !queueState.isRunning, onClick = {
                                             if (!queue.start(listOf(group))) error = AppStrings.duplicates.analysisBusy

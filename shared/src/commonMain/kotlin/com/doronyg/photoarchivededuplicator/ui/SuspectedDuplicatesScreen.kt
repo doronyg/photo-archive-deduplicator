@@ -1,16 +1,15 @@
 package com.doronyg.photoarchivededuplicator.ui
 
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.DisableSelection
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.FilterChip
@@ -30,7 +29,6 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
@@ -217,9 +215,10 @@ internal fun SuspectedDuplicatesScreen(
                 AppStrings.duplicates.suspectedScope(SUSPECTED_IMAGE_MIN_SIZE_BYTES),
                 style = MaterialTheme.typography.bodySmall,
             )
-            Row(
-                Modifier.horizontalScroll(rememberScrollState()),
+            FlowRow(
+                Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 OutlinedButton(enabled = !scanning && !queueState.isRunning, onClick = {
                     error = null
@@ -268,7 +267,8 @@ internal fun SuspectedDuplicatesScreen(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(selected = choices.suspectedDuplicateRecommendation == null,
                         onClick = { preferences.update { it.copy(suspectedDuplicateRecommendation = null) } },
                         label = { Text(AppStrings.duplicates.allRecommendations) })
@@ -305,13 +305,13 @@ internal fun SuspectedDuplicatesScreen(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     item {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Text(when {
                                 loading -> AppStrings.duplicates.loadingMatches
                                 filter == null -> AppStrings.duplicates.correctFilter
                                 displayedSnapshot == null -> AppStrings.duplicates.filtering
                                 else -> AppStrings.duplicates.matchCount(displayedSnapshot.groups.size, groups.size)
-                            }, modifier = Modifier.weight(1f))
+                            })
                             DisableSelection {
                                 TextButton(enabled = !copying && !loading && displayedSnapshot != null, onClick = {
                                     val displayed = displayedSnapshot ?: return@TextButton

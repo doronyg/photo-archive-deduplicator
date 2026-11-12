@@ -1,7 +1,9 @@
 package com.doronyg.photoarchivededuplicator.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.Button
@@ -55,7 +57,8 @@ fun ScanScreen(controller: ScanController, target: ScanTarget, preferences: UiPr
     Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
         when (target) {
             is ScanTarget.ChosenFolder -> ChosenFolderControls(controller, target, running, preferences)
-            is ScanTarget.Fixed -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            is ScanTarget.Fixed -> FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = {
                     scope.launch(Dispatchers.Main) {
                         target.requestAccess { scope.launch(Dispatchers.Main) { controller.start(target.root) } }
@@ -82,16 +85,11 @@ private fun ChosenFolderControls(controller: ScanController, target: ScanTarget.
     var pickerError by rememberSaveable { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(
-                value = rootText,
-                onValueChange = { value -> preferences.update { it.copy(scanRoot = value) } },
-                label = { Text(AppStrings.inventory.folderToScan) },
-                singleLine = true,
-                enabled = !running,
-                modifier = Modifier.weight(1f),
-            )
-            OutlinedButton(onClick = {
+        ScanFolderInput(
+            rootText = rootText,
+            onRootChange = { value -> preferences.update { it.copy(scanRoot = value) } },
+            enabled = !running,
+            onChoose = {
                 scope.launch(Dispatchers.Main) {
                     pickerError = null
                     try {
@@ -102,11 +100,10 @@ private fun ChosenFolderControls(controller: ScanController, target: ScanTarget.
                         pickerError = AppStrings.inventory.chooseFolderFailed(e.message)
                     }
                 }
-            }, enabled = !running) {
-                Text(AppStrings.inventory.chooseFolder)
-            }
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            },
+        )
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(onClick = { scope.launch { controller.start(rootText.trim().toPath()) } }, enabled = !running && rootText.isNotBlank()) {
                 Text(AppStrings.inventory.startScan)
             }
@@ -119,6 +116,36 @@ private fun ChosenFolderControls(controller: ScanController, target: ScanTarget.
         pickerError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         Text(AppStrings.inventory.scanControlsHelp,
             style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+@Composable
+internal fun ScanFolderInput(rootText: String, onRootChange: (String) -> Unit, enabled: Boolean, onChoose: () -> Unit) {
+    val field: @Composable (Modifier) -> Unit = { modifier ->
+        OutlinedTextField(
+            value = rootText,
+            onValueChange = onRootChange,
+            label = { Text(AppStrings.inventory.folderToScan) },
+            singleLine = true,
+            enabled = enabled,
+            modifier = modifier,
+        )
+    }
+    val chooser: @Composable () -> Unit = {
+        OutlinedButton(onClick = onChoose, enabled = enabled) { Text(AppStrings.inventory.chooseFolder) }
+    }
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        if (maxWidth < 600.dp) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                field(Modifier.fillMaxWidth())
+                chooser()
+            }
+        } else {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                field(Modifier.weight(1f))
+                chooser()
+            }
+        }
     }
 }
 

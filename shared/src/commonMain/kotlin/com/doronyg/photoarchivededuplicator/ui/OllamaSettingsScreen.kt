@@ -3,7 +3,7 @@ package com.doronyg.photoarchivededuplicator.ui
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -71,7 +71,8 @@ internal fun OllamaSettingsScreen(
             modifier = Modifier.fillMaxWidth())
         OutlinedTextField(draft.model, { draft = draft.copy(model = it); status = null },
             label = { Text(AppStrings.analysis.model) }, enabled = !saving, singleLine = true, modifier = Modifier.fillMaxWidth())
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(enabled = !saving && !loadingModels && draft.baseUrl.isNotBlank(), onClick = {
                 error = null
                 models = null
@@ -112,7 +113,8 @@ internal fun OllamaSettingsScreen(
                 style = MaterialTheme.typography.bodySmall)
         }
         Text(AppStrings.analysis.disableHelp)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(enabled = !saving && !loadingModels, onClick = {
                 error = ollamaSettingsValidationError(draft)
                 if (error == null) {
