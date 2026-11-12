@@ -1,27 +1,51 @@
 # Photo Archive Deduplicator
 
+This is the detailed product and engineering reference for contributors and
+coding assistants. Preserve the rationale, behavioral contracts, edge cases,
+and safety constraints here when changing the application. This is not a
+portfolio summary or a checklist of features still to build.
+
+[roadmap.md](roadmap.md) summarizes delivered work, current limitations, and
+future priorities. The sections below describe implemented behavior unless
+explicitly marked as future work or investigation. Algorithm and schema version notes
+explain how the current design evolved; they are not instructions to revert to
+an earlier version.
+
+When this document and the implementation disagree, investigate the relevant
+code and tests before changing either. An inconsistency may be a documentation
+error or an implementation regression, not an intentional product decision.
+
 ## 1. Goal
 
-Build a Kotlin Multiplatform (KMP) tool to identify redundant files in a large personal photo archive stored on a Synology NAS.
+Build a Kotlin Multiplatform (KMP) tool to identify potentially redundant files
+in a large personal photo archive stored on a NAS.
 
-The archive contains hundreds of thousands of files accumulated over approximately 20 years, with an estimated total size of 0.5 TB. Many files are believed to be duplicates resulting from repeated imports, computer backups, and copying between folders.
+The motivating archive contains more than 200,000 images accumulated over
+approximately 20 years. Repeated imports, backup services, and copying between
+folders have produced many possible duplicates.
 
-The tool should eventually automate duplicate cleanup while preserving the intended folder organization and minimizing the risk of losing valuable photos.
+The tool should make analysis and explicitly approved bulk cleanup practical
+while preserving the intended folder organization and minimizing the risk of
+losing valuable photos. Routine analysis should use a persistent inventory
+rather than repeatedly traversing the archive, especially over network storage.
 
-This is also a genuine portfolio project demonstrating Kotlin Multiplatform, software architecture, filesystem processing, performance optimization, data persistence, test-driven development, and practical local AI integration using Ollama.
+Current recommendations and Bin moves use metadata evidence, not hashes or
+byte comparison. Content verification remains a possible future investigation,
+not a committed feature or prerequisite for the existing reviewed workflow.
+Metadata matches must not be described as confirmed identical files.
 
 ## 2. Core principles
 
-1. **Safety first.** Initial phases must be entirely read-only. Destructive operations are explicitly out of scope until detection and selection logic are well tested.
-2. **Automation over manual review.** The system must handle hundreds of thousands of files without requiring manual inspection of every duplicate group.
+1. **Safety first.** Scanning and analysis must not modify archive files. Moves require saved proposals, fresh validation, and explicit approval. Permanent deletion and automatic file-operation recovery are not implemented.
+2. **Practical bulk review.** The system must handle hundreds of thousands of files without requiring individual interaction with every duplicate group. Bulk selection does not bypass validation or explicit execution approval.
 3. **Conservative duplicate detection.** Filename and file size identify candidates, not definitive duplicates. Content verification is required before classifying files as exact duplicates.
 4. **Preserve existing organization.** The tool should identify the likely canonical copy without reorganizing surviving files.
-5. **Deterministic core, AI assistance.** Ordinary code handles file identity, persistence, validation, and safety invariants. Ollama assists with folder-convention discovery, ambiguous cases, and auditing.
+5. **Deterministic core, AI assistance.** Ordinary code handles candidate grouping, persistence, validation, and safety invariants. Ollama supplies optional directory classifications; it does not verify content or authorize operations.
 6. **Test-driven development.** Prefer writing a failing test, implementing the smallest useful change, and refactoring while keeping tests green. Use TDD particularly for duplicate classification, selection policies, persistence, and safety-critical behavior.
 7. **Measure before optimizing.** Benchmark NAS and network I/O before committing to a complex hashing strategy or execution environment.
-8. **Resumable processing.** Long scans must survive interruptions without unnecessarily reprocessing the entire archive.
+8. **Continue interrupted work.** Long scans must survive interruptions without unnecessarily reprocessing the entire archive.
 9. **Multiplatform from the beginning, platform-specific only where necessary.** Put portable domain logic in shared Kotlin code. Isolate filesystem, database, UI, and platform integrations behind appropriate interfaces.
-10. **Useful early deliverables.** Every phase should produce something useful, even if later phases are never implemented.
+10. **Useful increments.** Each change should produce something useful without depending on speculative future features.
 11. **Never block the UI with application I/O.** Public database/filesystem operations (including container initialization and shutdown) must be suspend APIs that dispatch blocking work internally to IO. UI event handlers launch coroutines; UI callbacks and native UI operations run explicitly on Main. Do not use `runBlocking` on UI or `CoroutineStart.UNDISPATCHED` to start scans. Cancel and join scan work before closing its driver on IO, without holding UI/progress locks across I/O. Keep raw drivers, generated database access, and blocking filesystem implementations private/internal; do not edit generated sources. The compiler enforces suspend call boundaries, not arbitrary effect safety. Modal folder chooser construction/browsing is a native UI operation and stays on Main; application-owned filesystem preparation runs on IO.
 
 ## 3. Technology and project structure
@@ -32,41 +56,30 @@ This is also a genuine portfolio project demonstrating Kotlin Multiplatform, sof
 - Kotlin Multiplatform.
 - Gradle with Kotlin DSL.
 - Git and automated tests from the beginning.
-- GitHub Copilot as a development assistant, with human review of generated code and tests.
+- GitHub Copilot as a primary implementation tool, with human-defined requirements, architectural direction, and review of generated code and tests.
 
-### Initial targets
+### Targets
 
-- **Android:** include an Android application target from the initial project skeleton. Use it to establish the KMP structure, exercise shared business logic, and provide a simple interface for inspecting inventory reports or test data.
+- **Android:** shared UI and business logic, with MediaStore-based scanning and Android-specific permissions and integrations.
 - **Desktop JVM:** the intended target for scanning the large archive from a PC, accessing NAS folders, running bulk processing, and integrating with local Ollama.
-- **NAS-side scanner:** an optional future deployment approach, potentially using Docker. Do not commit to it before benchmarking.
 
-The Android target is not required to scan the entire NAS directly. Its initial purpose is to make Android Studio the starting point for the project and establish a working multiplatform codebase.
+The Android target is not required to scan the entire NAS directly. A NAS-side
+scanner remains an optional deployment idea, not an implemented target; do not
+commit to it before benchmarking.
 
-### Suggested source-set organization
+### Source-set organization
 
 ```text
-composeApp/
+app/          Android host
+desktopApp/   Desktop JVM host
+shared/
   src/
-    commonMain/
-      kotlin/
-        model/
-        dedup/
-        policy/
-        inventory/
-        reporting/
-    commonTest/
-      kotlin/
-        dedup/
-        policy/
-        inventory/
-    androidMain/
-    androidUnitTest/
-    androidInstrumentedTest/
-    jvmMain/
-    jvmTest/
+    commonMain/   Shared UI, application/domain logic, SQLDelight schema
+    commonTest/   Shared behavior and persistence tests
+    androidMain/  Android platform implementations
+    jvmMain/      Desktop platform implementations
+    jvmTest/      Desktop-specific tests
 ```
-
-The exact layout may vary with the KMP template selected in Android Studio.
 
 Use shared source sets for portable domain models, candidate grouping, duplicate classification, policy decisions, and validation rules.
 
@@ -74,17 +87,21 @@ Keep platform-specific implementations separate where required:
 
 - Filesystem traversal and file access.
 - SQLite integration.
-- Desktop CLI and user interface.
+- Desktop host, native folder chooser, and platform UI integrations.
 - Android UI and platform integration.
-- Ollama HTTP client and desktop configuration.
+- HTTP engines and platform configuration where required; the Ollama protocol client is shared.
 
 Do not force all code into `commonMain`. Use platform abstractions only where they provide a clear benefit, and prefer the simplest implementation that supports the required targets.
 
 ### Persistence
 
-Use SQLite for the inventory when its multiplatform integration has been evaluated. SQLDelight is a candidate because it supports Kotlin Multiplatform.
+The inventory uses SQLite through SQLDelight, with platform-specific drivers.
+Store file metadata and reusable analysis results so searches, filtering, and
+reports do not repeat expensive archive filesystem operations. The inventory
+is a stored snapshot, not a live view of external changes.
 
-Keep the initial persistence API narrow so the domain and duplicate-detection tests do not depend on a particular database implementation.
+Keep persistence APIs narrow so domain and duplicate-detection tests do not
+depend on a particular database implementation.
 
 ### Local diagnostics
 
@@ -98,9 +115,9 @@ Logs are local only and can contain filenames and paths; review before sharing. 
 
 ### UI
 
-Start with the Android application target and a minimal interface. A polished desktop UI is a later milestone, not a prerequisite for building the scanning engine.
-
-A CLI remains a good option for the desktop bulk-scanning workflow.
+Android and desktop share the Compose UI. Keep platform-specific interaction
+differences, such as native folder selection and visible desktop scrollbars,
+at the platform boundary.
 
 UI choices are stored locally with the inventory on desktop and Android: the
 selected tab, scan folder, browse navigation stack, duplicate-search folder and
@@ -126,8 +143,8 @@ Deletion Recommendations has one concise review notice, not warnings on every
 group/file. Model/server/profile details belong in Ollama settings and its saved
 results viewer, not file recommendations or statistics. Collapsed file rows show
 the decision; expanding them reveals the actual explanation and confidence.
-This copy cleanup does not change detection, scoring, safety or persisted
-score-factor explanations.
+Changes to presentation copy must not change detection, scoring, safety, or
+the meaning of persisted score-factor explanations.
 
 ## 4. Test-driven development approach
 
@@ -143,7 +160,7 @@ Prioritize tests for shared logic in `commonTest`, with platform-specific tests 
 
 Avoid writing tests that merely duplicate implementation details. Tests should express observable behavior and important invariants.
 
-### Initial test fixtures
+### Test fixtures
 
 Create synthetic archives in temporary directories, containing:
 
@@ -156,25 +173,17 @@ Create synthetic archives in temporary directories, containing:
 - Files that change between inventory and verification.
 - Filename collisions and ambiguous canonical paths.
 
-Never use the real photo archive as the initial test environment.
+For changes to file operations, test failure and interruption handling before
+expanding mutation behavior. Do not use the real archive for automated tests.
 
-For destructive operations in future phases, test the failure and recovery paths before implementing actual cleanup.
+## 5. Functional design and behavioral contracts
 
-## 5. Phased implementation plan
+### KMP foundation and development workflow
 
-### Phase 0: KMP skeleton and development workflow
+Maintain buildable Android and desktop JVM targets, shared code, and focused
+regression tests. Keep build and test commands documented in the README.
 
-- Create the project in Android Studio using a Kotlin Multiplatform template.
-- Include Android and desktop JVM targets from the outset if the selected template supports them cleanly.
-- Configure Gradle, source sets, and test tasks.
-- Establish the package structure and basic domain model.
-- Add a small passing test in `commonTest`.
-- Demonstrate that shared code is exercised by the Android target.
-- Configure Git, a useful README, and a basic build/test workflow.
-
-**Deliverable:** a buildable KMP project with Android and JVM targets, shared code, and a working test-first workflow.
-
-### Phase 1: Read-only inventory
+### Read-only inventory
 
 Recursively scan selected archive roots and record:
 
@@ -194,11 +203,11 @@ Requirements:
 - Provide progress reporting and scan summaries.
 - Never modify source files.
 
-Start with a desktop JVM scanner. Keep its interface independent of the later duplicate-selection and AI logic.
+Keep scanner interfaces independent of duplicate-selection and AI logic.
 
 **Deliverable:** a reliable inventory database and a report generated from a read-only scan.
 
-### Phase 2: Duplicate candidate discovery
+### Duplicate candidate discovery
 
 Group files by filename and size.
 
@@ -335,7 +344,7 @@ separately for every filename. Plain copies in undated collection folders may ti
 do not infer which collection name is more correct.
 
 Failed or limit-exceeded EXIF is treated exactly like absent EXIF, not as negative
-evidence. The reported `20191210_104020-ANIMATION.gif` therefore scores +20 in
+evidence. For example, `20191210_104020-ANIMATION.gif` scores +20 in
 `MobileBackup/.../Google Photos/2019/12` and -60 in `.Picasa3Temp_1`, regardless of
 whether extraction was attempted unsuccessfully.
 
@@ -394,17 +403,18 @@ Do not classify these candidates as exact duplicates yet.
 
 Analyze complete regular and suspected groups using stored files, current EXIF,
 and existing retention assessments. This is a separate, pure rule-based layer:
-retention algorithm v5, its weights, scoring ambiguity labels, and persistence
-remain unchanged. No AI calls, filesystem reads, content verification, or file
-deletion/modification/movement is involved.
+group policy must not silently change individual retention weights, scoring
+ambiguity labels, or persistence. No AI calls, filesystem reads, content
+verification, or file deletion/modification/movement is involved.
 
 Return a group action (`KEEP_ONE`, `KEEP_MULTIPLE`, or `REVIEW`), qualitative
 metadata evidence strength, per-file roles, human-readable explanations, and
 stable reason codes. Derive preferred, redundant-candidate, and must-preserve
 members from those roles. Explicitly supplied protected paths force `PROTECTED`
 and preserve every member before ordinary ranking; the optional input defaults
-empty. There is still no protection classifier or protected-directory configuration.
-Do not hardcode names such as Zoo or infer protection from directory names.
+empty. This explicit protection input is separate from cached AI directory
+classifications described below. Do not hardcode collection names or infer
+explicit protection from directory names.
 
 Use the retention scorer's shared filename parser and directory evidence rather
 than interpreting explanation text or duplicating detection/scoring rules.
@@ -527,8 +537,10 @@ recommendation snapshot, group duplicate confidence, per-file decision confidenc
 and replacement dependencies, reference/comparison evidence, explanations and
 reason codes without changing file order. Calculations run off the UI
 dispatcher; source/evidence changes invalidate previous presentation snapshots.
-Active scans/EXIF queues or loading evidence produce review-only results. No
-recommendations are persisted and no database migration is needed.
+Active scans/EXIF queues or loading evidence produce review-only results.
+Live group recommendations are derived rather than persisted as a separate
+assessment. Saved file-operation proposals capture the reviewed evidence
+independently; they must not be confused with current live recommendations.
 
 #### User-triggered Ollama directory classification
 
@@ -551,8 +563,9 @@ Both default to empty; configuration alone never
 contacts a server. An explicit Fetch models action calls `GET {baseUrl}/api/tags`
 using the entered URL, without requiring a selected model or sending directory
 data. Users can choose an installed model from the returned list or enter an
-identifier manually, then save settings. Android permits HTTP for an explicitly configured endpoint
-and declares network access. The app lazily creates its shared Ktor client only
+identifier manually, then save settings. Android declares network access and
+permits cleartext traffic app-wide to support user-configured HTTP endpoints.
+This is not a host-scoped network permission. The app lazily creates its shared Ktor client only
 when the user fetches models or starts a classification job and closes it after cancelling requests
 at shutdown.
 
@@ -711,10 +724,6 @@ loaded results. Wait while scanning or EXIF processing is active, then reload
 after completion/cancellation; allow explicit refresh when inactive. No charting
 library, file operations, new persistence tables, or schema migration is needed.
 
-Measure how many files and groups survive the initial filter.
-
-**Deliverable:** a candidate report showing the potential scope of deduplication.
-
 #### Deletion Recommendations review screen
 
 The Deletion Recommendations tab is separate from duplicate investigation.
@@ -760,9 +769,10 @@ existing group duplicate confidence of exactly 100/100 without contradictions.
 Confidence alone does not choose a survivor or make a file redundant: only safe
 KEEP_ONE/KEEP_MULTIPLE decisions with actual redundant candidates qualify.
 Display every engine-designated survivor and candidate with the original
-explanations and replacement dependencies. Protected files cannot be candidates;
-protected retained copies remain preserved. A 100/100 metadata score is not byte
-verification. This category has no suspected-image size threshold.
+explanations and replacement dependencies. A current-profile PROTECTED member
+excludes the entire group from this category, even if it would be retained.
+A 100/100 metadata score is not byte verification. This category has no
+suspected-image size threshold.
 
 Three additional categories consume complete regular and suspected groups:
 
@@ -801,17 +811,27 @@ loads only requested sources and keeps their complete group decisions separate.
 #### File Operations: saved dry-run proposals
 
 The configurable DeduplicatorGarbageBin preserves each file's full original path
-beneath the Bin, with no source archive root needed for dry runs. Operation/file IDs
-are not inserted into photo destination paths. Registered Bin roots are mandatory archive exclusions, including
-already inventoried content and roots inside the archive. Previous roots remain
-excluded after configuration changes. Whole groups containing a PROTECTED member
-are excluded from every deletion category.
+beneath the Bin, with no source archive root needed for dry runs. Operation/file
+IDs are not inserted into photo destination paths. This photo destination
+mapping is separate from the portable archive-relative paths used in history.
+Registered Bin roots are mandatory archive exclusions, including already
+inventoried content and roots inside the archive. Previous roots remain excluded
+after configuration changes.
+
+Whole groups containing a current-profile PROTECTED member are excluded from
+ordinary deletion categories. The single-protected-directory category is the
+only explicit exception for moving redundant copies within a protected
+directory; preserve its saved policy and revalidate it before execution.
+Manual duplicate selections do not receive that exception. Explicit protected
+paths remain separate from the AI directory-label policy.
 
 Users select existing recommendations and prepare a saved proposal in the File
 Operations tab. It records exact candidates/destinations, original survivors,
-complete group evidence and metadata-validation findings. It performs no content
-reads, hashing, rescoring, AI calls or filesystem writes. Independent AI review
-is not implemented; its absence is explicitly disclosed when approving real runs.
+complete group evidence and metadata-validation findings. Proposal preparation
+performs no photo-content reads, hashing, rescoring, AI calls, or writes to the
+source archive or Bin. Saving the proposal writes to the local database.
+Independent AI review is not implemented; its absence is explicitly disclosed
+when approving real runs.
 Restoration and permanent deletion remain unavailable.
 Missing Bin directories do not block a dry run. The UI suggests an editable Bin
 location. Metadata validation uses one depth-first pass over retained/destination paths, caches
@@ -839,9 +859,16 @@ Dry runs with eligible groups can execute after an explicit upper-bound file-cou
 approval. The executor verifies archive/Bin identity, fresh recommendations and
 retained/destination metadata. Source safety and same-filesystem capability are
 checked only by the actual move primitive at the mutation boundary. Per-file checks stay
-targeted, with no whole-inventory filesystem sweep. Moves never overwrite and
-have no cross-filesystem copy/delete fallback. An immutable portable manifest and
+targeted, with no whole-inventory filesystem sweep. The move primitive rejects
+existing destinations and requires same-filesystem atomic rename, with no
+cross-filesystem copy/delete fallback. This is not a race-proof no-clobber
+guarantee: an unrelated external writer can create a destination after its
+absence check, and atomic rename may replace it. App-owned execution locks
+coordinate cooperating writers only; source/Bin paths and mounts must not be
+changed concurrently by external tools. An immutable portable manifest and
 flushed intent/completion journal preserve evidence independently of inventory.
+Flushing metadata files does not fsync parent directories or guarantee remote
+storage durability through power loss.
 Confirmed completed moves remove only the matching source inventory, EXIF,
 profile scores/factors and directory count; the retained copies stay unchanged.
 Invalid groups and confirmed no-effect failures skip that group's remaining
@@ -897,7 +924,9 @@ Lazy group summaries show survivors and proposed counts/bytes. Expanding reveals
 distinct retained/candidate cards with file/folder links, sizes, saved capture and
 identifying EXIF, score factors, cached AI labels and the actual engine explanations,
 confidence evidence and replacement dependencies. Details are lazy list entries,
-with the shared desktop scrollbar. No deletion, move or rename controls exist.
+with the shared desktop scrollbar. Review rows do not perform ad hoc file
+mutations; approved moves go through the File Operations workflow. Permanent
+deletion and restoration remain unavailable.
 
 #### Cached and queued EXIF inspection
 
@@ -1016,105 +1045,79 @@ filters show an error instead of exposing or copying stale results.
 Schema v6 adds a size-leading index through additive migration `5.sqm`, preserving
 the existing inventory, EXIF cache, scores, and settings.
 
-### Phase 3: Exact duplicate verification
+### Future investigation: content verification
 
-Verify candidate contents before declaring them exact duplicates.
+Verify candidate contents before describing them as exact duplicates, but do
+not assume verification must be added to the existing metadata-based workflow.
+Content hashing, including SHA-256, remains a possible aspiration, not a
+committed or near-term feature.
 
-Start with full SHA-256 hashing of candidate files. Benchmark this approach on the actual NAS.
+Reading candidate contents over a NAS may cost more I/O and time than the
+additional certainty is worth for this use case. If a compelling need arises,
+benchmark candidate bytes, actual read throughput, and cache reuse before
+deciding whether to implement hashing. It is acceptable to defer it or conclude
+that the extra reads are not worthwhile.
 
-If network I/O is expensive, evaluate:
+If investigation is justified, possible approaches include:
 - Comparing initial and final content samples to reject candidates early.
-- Caching hashes for unchanged files.
+- Full SHA-256 hashing of a limited candidate set.
+- Caching verification results with an explicit input-invalidation policy.
 - Parallel processing where benchmarks justify it.
 - Running a lightweight scanner locally on the NAS.
 
 Sampling is a filter only, never proof of equality.
 
-For the initial cleanup policy, a file is eligible for consideration only when filename, size, and verified content all match.
+Any future verified-content state must remain distinct from metadata
+confidence. Do not silently relabel old recommendations as verified, and do
+not change the existing approved-move eligibility policy as part of a
+documentation update.
 
-**Deliverable:** a trustworthy report of exact duplicate groups, with no file modifications.
+### Future investigation: broader AI assistance
 
-### Phase 4: Canonical-copy selection
-
-Develop a deterministic policy engine to recommend which copy should be retained.
-
-Potential evidence:
-- Configured archive roots.
-- Folder hierarchy and naming conventions.
-- Backup, download, and temporary-folder indicators.
-- File metadata and available EXIF information.
-- Explicit user-defined preferences.
-
-The engine must support an undecided result. It must not automatically assume that the oldest, newest, or largest file is the correct one.
-
-Store the recommendation and its reasoning in the inventory.
-
-**Deliverable:** a report of recommended keepers, redundant copies, confidence, and unresolved groups.
-
-### Phase 5: Ollama integration
-
-Use Ollama as an advisory component, not as the authority over file identity or destructive actions.
-
-Potential uses:
+The implemented AI scope is directory classification, described above.
+Additional ideas, not current capabilities or committed requirements, include:
 - Discover recurring folder conventions from aggregated inventory statistics.
 - Propose candidate canonical-copy rules.
-- Rank ambiguous locations using supplied metadata and paths.
 - Audit proposed rules and batches for suspicious outcomes.
 
-Requirements:
-- Keep AI integration behind a replaceable interface.
-- Use structured, schema-validated outputs.
-- Record model decisions, explanations, and model version.
-- Evaluate AI suggestions against deterministic baselines.
-- Begin in shadow mode: record suggestions without allowing them to influence actions.
-- Never allow a model response alone to authorize deletion.
+If broader assistance is added, keep it behind a replaceable interface, use
+schema-validated outputs, and record appropriate provenance. Evaluate against
+deterministic baselines in shadow mode before allowing a new kind of model
+output to affect recommendations. The existing directory-label integration
+already influences location policy; this is not an instruction to disable it.
+A model response alone must never authorize a file operation.
 
-**Deliverable:** an evaluation showing whether AI improves selection quality or reduces unresolved cases.
+### Future investigation: operational extensions
 
-### Phase 6: Operational interface and performance
+Add operational features based on actual use rather than the original
+speculative phase list. CSV/JSON exports and a NAS-side scanner remain
+possible extensions; existing copyable reports are not those export formats.
+Share business logic between Android and desktop rather than duplicating it
+for an additional interface or deployment.
 
-Based on real usage, add only the necessary UI and operational features.
+### Future work: recovery and permanent deletion
 
-Potential additions:
-- Android UI for inspecting status and reports.
-- Desktop UI for managing large scans and reviewing results.
-- Search, filtering, and duplicate-group navigation.
-- Scan and processing statistics.
-- Export to CSV or JSON.
-- Improved cancellation and resumption.
-- Optional NAS-side scanning.
-
-Avoid duplicating complex business logic between Android and desktop. Both should use shared domain logic wherever practical.
-
-**Deliverable:** a usable tool for operating on the entire archive.
-
-### Phase 7: Cleanup, explicitly deferred
-
-This phase is outside the scope of the initial implementation.
-
-Only after detection, selection, and recovery have been thoroughly validated should cleanup be considered.
-
-Future safeguards:
-- Independent validation of the keeper and redundant file immediately before an operation.
-- Persistent action manifest and audit log.
-- Collision-safe quarantine.
-- Revalidation of file contents.
-- Tested recovery and interruption handling.
-- Small, bounded batches.
-- Delayed permanent deletion as a separate operation.
-
-No permanent deletion should be implemented in the early phases.
+Approved Bin moves are implemented; restoration, automatic reconciliation, and
+permanent deletion are not. Preserve the existing validation, manifests,
+journals, bounded batches, and uncertain-outcome handling described above.
+Design and test a user-reviewed restore/reconciliation workflow before adding
+permanent deletion or broader automation. Permanent deletion would be a
+separate, explicitly approved operation, not an implicit continuation of a Bin
+move. These aspirations do not establish transactional filesystem guarantees.
 
 ## 6. Performance strategy
 
-Do not assume that hashing 0.5 TB is necessarily the dominant cost. File enumeration, SMB latency, candidate frequency, and disk throughput may matter more.
+Measure the actual workload before optimizing. File enumeration, SMB latency,
+candidate frequency, database queries, and disk throughput may matter more
+than any one algorithm. Ordinary analysis should use stored metadata; do not
+add archive reads merely to refresh a presentation.
 
 Collect measurements for:
 - Total files and total bytes.
 - Files enumerated per second.
 - Candidate group count and candidate bytes.
-- Bytes read during verification.
-- Hash throughput.
+- Bytes read during EXIF extraction or any future verification.
+- Hash throughput if content verification is investigated.
 - Total elapsed time.
 - Cache hit rate on subsequent scans.
 
@@ -1122,24 +1125,25 @@ Use these results to decide whether partial reads, hash caching, parallelism, or
 
 Keep performance tests separate from deterministic correctness tests where appropriate.
 
-## 7. Portfolio objectives
+## 7. Documentation goals
 
-The repository should demonstrate sound engineering judgment rather than simply the use of multiple technologies.
+Keep this plan useful as engineering context. The README is the concise
+portfolio presentation; the roadmap describes status and priorities.
 
 Document:
 - Architecture and key design decisions.
 - The TDD workflow and meaningful regression tests.
-- Benchmark methodology and measured results.
+- Benchmark methodology and measured results when available; do not invent metrics.
 - Correctness guarantees and known limitations.
 - Tests for failure handling and recovery.
 - AI evaluation against a deterministic baseline.
 - Actual results from the archive, without publishing private paths or personal photos.
 
-Prioritize a reliable, measurable solution over an elaborate initial architecture.
+Prioritize a reliable, measurable solution over speculative architecture.
 
-## 8. Initial milestone and acceptance criteria
+## 8. Validation expectations
 
-The first milestone is complete when:
+When changing the relevant areas, preserve these expectations:
 
 - Android Studio builds the KMP project.
 - Android and desktop JVM targets compile.
@@ -1148,7 +1152,10 @@ The first milestone is complete when:
 - The desktop scanner can inventory a representative portion of the NAS.
 - The inventory can be persisted and resumed.
 - Candidate groups can be identified by filename and size.
-- Candidate contents can be verified to produce exact-duplicate reports.
-- Reports can be exported without modifying any source files.
+- Metadata-only candidates remain clearly distinguished from any future content-verified matches.
+- Reports can be copied without modifying source files or unexpectedly starting analysis.
+- File-operation changes retain proposal validation, explicit approval, journaling, and tested failure handling.
 
-Everything else follows from the evidence collected in this phase.
+Content verification is not a requirement for declaring the existing app
+complete. Future scope and priorities are tracked separately in
+[roadmap.md](roadmap.md).
