@@ -1,5 +1,11 @@
 package com.doronyg.photoarchivededuplicator
 
+import com.doronyg.photoarchivededuplicator.scan.DirectoryListing
+import com.doronyg.photoarchivededuplicator.scan.DirectoryRepository
+import com.doronyg.photoarchivededuplicator.scan.ScanSessionRecord
+import com.doronyg.photoarchivededuplicator.scan.SuspendingQueryDriver
+import com.doronyg.photoarchivededuplicator.scan.createFilesDatabase
+import com.doronyg.photoarchivededuplicator.scan.createInMemoryDriver
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -8,19 +14,13 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
-import com.doronyg.photoarchivededuplicator.scan.DirectoryListing
-import com.doronyg.photoarchivededuplicator.scan.DirectoryRepository
-import com.doronyg.photoarchivededuplicator.scan.ScanSessionRecord
-import com.doronyg.photoarchivededuplicator.scan.SuspendingQueryDriver
-import com.doronyg.photoarchivededuplicator.scan.createFilesDatabase
-import com.doronyg.photoarchivededuplicator.scan.createInMemoryDriver
 import okio.Path.Companion.toPath
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertTrue
 import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 class IoLaneThreadTest {
     private fun threadedTest(block: suspend CoroutineScope.() -> Unit) =

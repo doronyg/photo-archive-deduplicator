@@ -2,16 +2,16 @@ package com.doronyg.photoarchivededuplicator.retention
 
 import com.doronyg.photoarchivededuplicator.Diagnostics
 import com.doronyg.photoarchivededuplicator.LogTags
-import com.doronyg.photoarchivededuplicator.scan.DirectoryRepository
-import com.doronyg.photoarchivededuplicator.scan.DuplicateCandidateGroup
-import com.doronyg.photoarchivededuplicator.scan.FileRecord
-import com.doronyg.photoarchivededuplicator.scan.SuspectedDuplicateGroup
 import com.doronyg.photoarchivededuplicator.exif.ExifInput
 import com.doronyg.photoarchivededuplicator.exif.ExifRecord
 import com.doronyg.photoarchivededuplicator.exif.ExifStatus
 import com.doronyg.photoarchivededuplicator.exif.KIM_VERSION
 import com.doronyg.photoarchivededuplicator.exif.isValidExifOffset
 import com.doronyg.photoarchivededuplicator.exif.validatedExifTimestamp
+import com.doronyg.photoarchivededuplicator.scan.DirectoryRepository
+import com.doronyg.photoarchivededuplicator.scan.DuplicateCandidateGroup
+import com.doronyg.photoarchivededuplicator.scan.FileRecord
+import com.doronyg.photoarchivededuplicator.scan.SuspectedDuplicateGroup
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext

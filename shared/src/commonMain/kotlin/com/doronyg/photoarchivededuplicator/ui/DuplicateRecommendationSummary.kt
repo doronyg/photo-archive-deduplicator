@@ -12,8 +12,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
-import com.doronyg.photoarchivededuplicator.exif.ExifRecord
 import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificationRecord
+import com.doronyg.photoarchivededuplicator.exif.ExifRecord
 import com.doronyg.photoarchivededuplicator.recommendation.ConfidenceAssessment
 import com.doronyg.photoarchivededuplicator.recommendation.DuplicateGroupRecommendation
 import com.doronyg.photoarchivededuplicator.recommendation.FileRecommendation

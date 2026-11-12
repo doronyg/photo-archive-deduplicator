@@ -1,17 +1,17 @@
 package com.doronyg.photoarchivededuplicator.ui
 
 import com.doronyg.photoarchivededuplicator.operations.FILE_BIN_NAME
+import com.doronyg.photoarchivededuplicator.operations.FileExecutionPhase
+import com.doronyg.photoarchivededuplicator.operations.FileExecutionProgress
+import com.doronyg.photoarchivededuplicator.operations.FileMoveExecutionStatus
 import com.doronyg.photoarchivededuplicator.operations.FileOperationFinding
 import com.doronyg.photoarchivededuplicator.operations.FileOperationGroup
+import com.doronyg.photoarchivededuplicator.operations.FileOperationIssueCode
 import com.doronyg.photoarchivededuplicator.operations.FileOperationMember
 import com.doronyg.photoarchivededuplicator.operations.FileOperationProposal
-import com.doronyg.photoarchivededuplicator.operations.FileOperationIssueCode
 import com.doronyg.photoarchivededuplicator.operations.FileOperationState
 import com.doronyg.photoarchivededuplicator.operations.FileOperationSummary
 import com.doronyg.photoarchivededuplicator.operations.FileOperationValidationStatus
-import com.doronyg.photoarchivededuplicator.operations.FileMoveExecutionStatus
-import com.doronyg.photoarchivededuplicator.operations.FileExecutionPhase
-import com.doronyg.photoarchivededuplicator.operations.FileExecutionProgress
 import com.doronyg.photoarchivededuplicator.operations.ProposedFileMove
 import com.doronyg.photoarchivededuplicator.operations.SelectedDeletionGroup
 import com.doronyg.photoarchivededuplicator.recommendation.DeletionCategoryResults
@@ -24,10 +24,10 @@ import com.doronyg.photoarchivededuplicator.recommendation.DuplicateRecommendati
 import com.doronyg.photoarchivededuplicator.recommendation.FileRecommendationRole
 import com.doronyg.photoarchivededuplicator.scan.FileRecord
 import com.doronyg.photoarchivededuplicator.strings.AppStrings
-import okio.Path.Companion.toPath
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import okio.Path.Companion.toPath
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse

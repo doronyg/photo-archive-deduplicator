@@ -4,12 +4,12 @@ import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import com.doronyg.photoarchivededuplicator.ui.InventoryApp
 import com.doronyg.photoarchivededuplicator.ui.ScanTarget
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.runBlocking
 
 fun main() {
     val logShutdown = Thread({

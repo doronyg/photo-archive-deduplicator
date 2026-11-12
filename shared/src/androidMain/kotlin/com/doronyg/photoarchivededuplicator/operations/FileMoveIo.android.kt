@@ -2,16 +2,16 @@ package com.doronyg.photoarchivededuplicator.operations
 
 import okio.Path
 import java.nio.channels.FileChannel
-import java.nio.file.FileAlreadyExistsException
 import java.nio.file.CopyOption
+import java.nio.file.FileAlreadyExistsException
 import java.nio.file.FileStore
 import java.nio.file.FileSystemException
 import java.nio.file.Files
 import java.nio.file.LinkOption.NOFOLLOW_LINKS
 import java.nio.file.NoSuchFileException
 import java.nio.file.Paths
-import java.nio.file.StandardOpenOption.WRITE
 import java.nio.file.StandardCopyOption.ATOMIC_MOVE
+import java.nio.file.StandardOpenOption.WRITE
 import java.nio.file.attribute.BasicFileAttributes
 import java.nio.file.Path as NioPath
 

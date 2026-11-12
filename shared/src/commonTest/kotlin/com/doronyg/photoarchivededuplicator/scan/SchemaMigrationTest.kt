@@ -1,20 +1,28 @@
 package com.doronyg.photoarchivededuplicator.scan
 
 import app.cash.sqldelight.db.SqlDriver
-import com.doronyg.photoarchivededuplicator.db.FilesDatabase
 import com.doronyg.photoarchivededuplicator.UiChoices
 import com.doronyg.photoarchivededuplicator.allUiChoices
-import com.doronyg.photoarchivededuplicator.classification.*
-import com.doronyg.photoarchivededuplicator.exif.*
-import com.doronyg.photoarchivededuplicator.retention.*
+import com.doronyg.photoarchivededuplicator.classification.DirectoryClassification
+import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificationContext
+import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificationRecord
+import com.doronyg.photoarchivededuplicator.db.FilesDatabase
+import com.doronyg.photoarchivededuplicator.exif.ExifInput
+import com.doronyg.photoarchivededuplicator.exif.ExifReadResult
+import com.doronyg.photoarchivededuplicator.exif.ExifRecord
+import com.doronyg.photoarchivededuplicator.exif.ExifStatus
+import com.doronyg.photoarchivededuplicator.retention.FileScore
+import com.doronyg.photoarchivededuplicator.retention.FileScoreInput
+import com.doronyg.photoarchivededuplicator.retention.ScoreFactor
+import com.doronyg.photoarchivededuplicator.retention.ScoreIdentity
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
 import okio.Path.Companion.toPath
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertNull
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class SchemaMigrationTest {

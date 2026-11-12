@@ -1,14 +1,14 @@
 package com.doronyg.photoarchivededuplicator
 
+import com.doronyg.photoarchivededuplicator.scan.TrackingIoDispatcher
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withContext
 import okio.Path.Companion.toPath
 import java.net.URI
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
-import com.doronyg.photoarchivededuplicator.scan.TrackingIoDispatcher
-import kotlinx.coroutines.withContext
 import kotlin.test.assertFalse
 
 class DesktopPathActionsTest {

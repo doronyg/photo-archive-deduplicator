@@ -3,21 +3,26 @@ package com.doronyg.photoarchivededuplicator.operations
 import com.doronyg.photoarchivededuplicator.IoLane
 import com.doronyg.photoarchivededuplicator.operations.history.ArchiveBinding
 import com.doronyg.photoarchivededuplicator.operations.history.OperationHistoryStore
-import com.doronyg.photoarchivededuplicator.scan.TrackingIoDispatcher
-import com.doronyg.photoarchivededuplicator.scan.FileRecord
 import com.doronyg.photoarchivededuplicator.recommendation.FileRecommendationRole
-import kotlinx.serialization.json.JsonObject
+import com.doronyg.photoarchivededuplicator.scan.FileRecord
+import com.doronyg.photoarchivededuplicator.scan.TrackingIoDispatcher
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runTest
-import okio.ForwardingFileSystem
-import okio.Path
-import okio.Path.Companion.toPath
+import kotlinx.serialization.json.JsonObject
 import okio.Buffer
+import okio.ForwardingFileSystem
 import okio.ForwardingSink
 import okio.IOException
+import okio.Path
+import okio.Path.Companion.toPath
 import okio.Sink
 import okio.fakefilesystem.FakeFileSystem
-import kotlin.test.*
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class BinDirectoryPreparerTest {
     private val archive = "/archive".toPath()

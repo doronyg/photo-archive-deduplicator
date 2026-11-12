@@ -1,15 +1,35 @@
 package com.doronyg.photoarchivededuplicator.operations
 
-import com.doronyg.photoarchivededuplicator.classification.*
-import com.doronyg.photoarchivededuplicator.exif.*
-import com.doronyg.photoarchivededuplicator.recommendation.*
+import com.doronyg.photoarchivededuplicator.classification.DirectoryClassification
+import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificationRecord
+import com.doronyg.photoarchivededuplicator.classification.OllamaSettings
+import com.doronyg.photoarchivededuplicator.exif.ExifInput
+import com.doronyg.photoarchivededuplicator.exif.ExifMetadata
+import com.doronyg.photoarchivededuplicator.exif.ExifReadResult
+import com.doronyg.photoarchivededuplicator.exif.ExifRecord
+import com.doronyg.photoarchivededuplicator.exif.ExifStatus
+import com.doronyg.photoarchivededuplicator.recommendation.DeletionRecommendationPolicy
+import com.doronyg.photoarchivededuplicator.recommendation.DeletionRecommendationService
+import com.doronyg.photoarchivededuplicator.recommendation.DeletionRecommendationSource
+import com.doronyg.photoarchivededuplicator.recommendation.FileRecommendationRole
 import com.doronyg.photoarchivededuplicator.retention.RetentionScoreService
-import com.doronyg.photoarchivededuplicator.scan.*
+import com.doronyg.photoarchivededuplicator.scan.ConcurrencyFixture
+import com.doronyg.photoarchivededuplicator.scan.DirectoryListing
+import com.doronyg.photoarchivededuplicator.scan.concurrencyTest
+import com.doronyg.photoarchivededuplicator.scan.createFilesDatabase
+import com.doronyg.photoarchivededuplicator.scan.isInTree
 import okio.FileSystem
 import okio.ForwardingFileSystem
 import okio.Path
 import okio.Path.Companion.toPath
-import kotlin.test.*
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
+import kotlin.test.assertNotEquals
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class FileOperationServiceTest {
     private data class Fixture(

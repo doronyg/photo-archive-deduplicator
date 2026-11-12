@@ -8,8 +8,8 @@ import com.doronyg.photoarchivededuplicator.exif.ExifStatus
 import com.doronyg.photoarchivededuplicator.retention.RetentionScoreService
 import com.doronyg.photoarchivededuplicator.scan.DirectoryListing
 import com.doronyg.photoarchivededuplicator.scan.concurrencyTest
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runCurrent

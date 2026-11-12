@@ -3,7 +3,6 @@ package com.doronyg.photoarchivededuplicator.ui
 import com.doronyg.photoarchivededuplicator.strings.AppStrings
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertTrue
 
 class InventoryPresentationTest {
     @Test

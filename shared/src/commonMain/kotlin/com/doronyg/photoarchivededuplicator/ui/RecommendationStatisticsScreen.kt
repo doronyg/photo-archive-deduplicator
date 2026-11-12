@@ -21,15 +21,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
-import com.doronyg.photoarchivededuplicator.exif.ExifQueueController
 import com.doronyg.photoarchivededuplicator.UiPreferences
-import com.doronyg.photoarchivededuplicator.operations.OperationHistoryController
-import com.doronyg.photoarchivededuplicator.strings.OperationHistoryStrings
-import okio.Path
-import com.doronyg.photoarchivededuplicator.strings.AppStrings
+import com.doronyg.photoarchivededuplicator.classification.DirectoryClassification
 import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificationController
 import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificationJobState
-import com.doronyg.photoarchivededuplicator.classification.DirectoryClassification
+import com.doronyg.photoarchivededuplicator.exif.ExifQueueController
+import com.doronyg.photoarchivededuplicator.operations.OperationHistoryController
 import com.doronyg.photoarchivededuplicator.recommendation.FileRecommendationRole
 import com.doronyg.photoarchivededuplicator.recommendation.FileStatistics
 import com.doronyg.photoarchivededuplicator.recommendation.InventoryFileCounts
@@ -41,9 +38,12 @@ import com.doronyg.photoarchivededuplicator.recommendation.RecommendationStatist
 import com.doronyg.photoarchivededuplicator.recommendation.StatisticsFileType
 import com.doronyg.photoarchivededuplicator.retention.RetentionScoreService
 import com.doronyg.photoarchivededuplicator.scan.DirectoryRepository
+import com.doronyg.photoarchivededuplicator.strings.AppStrings
+import com.doronyg.photoarchivededuplicator.strings.OperationHistoryStrings
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okio.Path
 import kotlin.math.roundToInt
 
 internal fun formatStatisticsMegabytes(sizeBytes: Long): String {

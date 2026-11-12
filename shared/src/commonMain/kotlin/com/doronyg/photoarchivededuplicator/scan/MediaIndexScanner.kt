@@ -1,12 +1,9 @@
 package com.doronyg.photoarchivededuplicator.scan
 
-import com.doronyg.photoarchivededuplicator.LogTags
-
 import com.doronyg.photoarchivededuplicator.Diagnostics
-
+import com.doronyg.photoarchivededuplicator.LogTags
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.IO
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext

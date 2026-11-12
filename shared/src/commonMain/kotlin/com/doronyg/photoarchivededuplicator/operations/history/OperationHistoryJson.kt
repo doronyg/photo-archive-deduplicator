@@ -1,7 +1,7 @@
 package com.doronyg.photoarchivededuplicator.operations.history
 
-import kotlinx.coroutines.CancellationException
 import com.doronyg.photoarchivededuplicator.operations.BIN_DIRECTORY_MARKER_NAME
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull

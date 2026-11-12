@@ -1,13 +1,19 @@
 package com.doronyg.photoarchivededuplicator.recommendation
 
-import com.doronyg.photoarchivededuplicator.classification.*
+import com.doronyg.photoarchivededuplicator.classification.DirectoryClassification
+import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificationRecord
+import com.doronyg.photoarchivededuplicator.classification.OllamaSettings
 import com.doronyg.photoarchivededuplicator.scan.FileRecord
-import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.runTest
 import okio.Path.Companion.toPath
-import kotlin.test.*
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 class AiRecommendationStatisticsTest {
     private val context = OllamaSettings("http://ollama.test", "model").context()

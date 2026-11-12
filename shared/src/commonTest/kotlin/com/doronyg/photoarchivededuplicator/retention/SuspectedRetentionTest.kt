@@ -5,11 +5,12 @@ import com.doronyg.photoarchivededuplicator.exif.ExifMetadata
 import com.doronyg.photoarchivededuplicator.exif.ExifReadResult
 import com.doronyg.photoarchivededuplicator.exif.ExifRecord
 import com.doronyg.photoarchivededuplicator.exif.ExifStatus
-import com.doronyg.photoarchivededuplicator.scan.SuspectedDuplicateGroup
 import com.doronyg.photoarchivededuplicator.scan.ConcurrencyFixture
 import com.doronyg.photoarchivededuplicator.scan.DirectoryListing
+import com.doronyg.photoarchivededuplicator.scan.SuspectedDuplicateGroup
 import com.doronyg.photoarchivededuplicator.scan.concurrencyTest
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.test.runCurrent
@@ -17,7 +18,6 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class SuspectedRetentionTest {

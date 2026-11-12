@@ -1,13 +1,14 @@
 package com.doronyg.photoarchivededuplicator.exif
 
-import com.doronyg.photoarchivededuplicator.retention.RetentionScoreService
 import com.doronyg.photoarchivededuplicator.retention.RetentionConfig
+import com.doronyg.photoarchivededuplicator.retention.RetentionScoreService
 import com.doronyg.photoarchivededuplicator.retention.RetentionScorer
 import com.doronyg.photoarchivededuplicator.scan.ConcurrencyFixture
 import com.doronyg.photoarchivededuplicator.scan.DirectoryListing
 import com.doronyg.photoarchivededuplicator.scan.concurrencyTest
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
@@ -17,7 +18,6 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class ExifQueueControllerTest {

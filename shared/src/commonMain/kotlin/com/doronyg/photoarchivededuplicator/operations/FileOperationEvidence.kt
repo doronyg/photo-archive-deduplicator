@@ -4,7 +4,14 @@ import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificati
 import com.doronyg.photoarchivededuplicator.exif.ExifRecord
 import com.doronyg.photoarchivededuplicator.recommendation.FileRecommendation
 import com.doronyg.photoarchivededuplicator.retention.FileScore
-import kotlinx.serialization.json.*
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 internal fun operationEvidence(
     advice: FileRecommendation,

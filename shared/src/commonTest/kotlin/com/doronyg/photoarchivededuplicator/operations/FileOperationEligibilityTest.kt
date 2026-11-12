@@ -4,7 +4,11 @@ import com.doronyg.photoarchivededuplicator.recommendation.FileRecommendationRol
 import com.doronyg.photoarchivededuplicator.scan.FileRecord
 import kotlinx.serialization.json.buildJsonObject
 import okio.Path.Companion.toPath
-import kotlin.test.*
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertSame
+import kotlin.test.assertTrue
 
 class FileOperationEligibilityTest {
     private fun group(key: String, vararg names: String, findings: List<FileOperationFinding> = emptyList()) =

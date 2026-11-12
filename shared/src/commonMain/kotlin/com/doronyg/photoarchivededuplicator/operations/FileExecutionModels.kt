@@ -1,8 +1,8 @@
 package com.doronyg.photoarchivededuplicator.operations
 
-import okio.Path
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import okio.Path
 
 internal class FileExecutionControl {
     private val cancellation = CompletableDeferred<Unit>()

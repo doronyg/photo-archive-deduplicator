@@ -1,14 +1,14 @@
 package com.doronyg.photoarchivededuplicator.ui
 
-import com.doronyg.photoarchivededuplicator.scan.DuplicateCandidateFilter
-import com.doronyg.photoarchivededuplicator.scan.DuplicateCandidateGroup
-import com.doronyg.photoarchivededuplicator.scan.DuplicateSortRule
-import com.doronyg.photoarchivededuplicator.scan.DuplicateSortCriterion
-import com.doronyg.photoarchivededuplicator.retention.RetentionPresentation
-import com.doronyg.photoarchivededuplicator.retention.formatScoreValue
 import com.doronyg.photoarchivededuplicator.exif.ExifRecord
 import com.doronyg.photoarchivededuplicator.recommendation.DuplicateGroupRecommendation
 import com.doronyg.photoarchivededuplicator.recommendation.FileRecommendation
+import com.doronyg.photoarchivededuplicator.retention.RetentionPresentation
+import com.doronyg.photoarchivededuplicator.retention.formatScoreValue
+import com.doronyg.photoarchivededuplicator.scan.DuplicateCandidateFilter
+import com.doronyg.photoarchivededuplicator.scan.DuplicateCandidateGroup
+import com.doronyg.photoarchivededuplicator.scan.DuplicateSortCriterion
+import com.doronyg.photoarchivededuplicator.scan.DuplicateSortRule
 import com.doronyg.photoarchivededuplicator.scan.FileRecord
 import com.doronyg.photoarchivededuplicator.strings.AppStrings
 import kotlinx.coroutines.CoroutineDispatcher

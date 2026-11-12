@@ -1,8 +1,13 @@
 package com.doronyg.photoarchivededuplicator.ui
 
-import com.doronyg.photoarchivededuplicator.recommendation.*
+import com.doronyg.photoarchivededuplicator.recommendation.InventoryFileCounts
+import com.doronyg.photoarchivededuplicator.recommendation.RecommendationStatisticsReport
+import com.doronyg.photoarchivededuplicator.recommendation.aggregateInventoryStatistics
+import com.doronyg.photoarchivededuplicator.recommendation.aggregateRecommendationStatistics
 import kotlinx.coroutines.test.runTest
-import kotlin.test.*
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 class InventoryStatisticsPresentationTest {
     @Test

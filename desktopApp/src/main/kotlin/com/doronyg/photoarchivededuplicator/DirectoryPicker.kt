@@ -1,12 +1,12 @@
 package com.doronyg.photoarchivededuplicator
 
+import com.doronyg.photoarchivededuplicator.strings.AppStrings
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.awt.FileDialog
 import java.awt.Frame
 import java.io.File
 import javax.swing.JFileChooser
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import com.doronyg.photoarchivededuplicator.strings.AppStrings
 
 private const val MAC_DIRECTORY_DIALOG_PROPERTY = "apple.awt.fileDialogForDirectories"
 

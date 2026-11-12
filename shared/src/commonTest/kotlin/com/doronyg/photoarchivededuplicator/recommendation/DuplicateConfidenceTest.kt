@@ -1,11 +1,21 @@
 package com.doronyg.photoarchivededuplicator.recommendation
 
-import com.doronyg.photoarchivededuplicator.exif.*
-import com.doronyg.photoarchivededuplicator.retention.*
+import com.doronyg.photoarchivededuplicator.exif.ExifInput
+import com.doronyg.photoarchivededuplicator.exif.ExifMetadata
+import com.doronyg.photoarchivededuplicator.exif.ExifReadResult
+import com.doronyg.photoarchivededuplicator.exif.ExifRecord
+import com.doronyg.photoarchivededuplicator.exif.ExifStatus
+import com.doronyg.photoarchivededuplicator.retention.RetentionPresentation
+import com.doronyg.photoarchivededuplicator.retention.RetentionRank
+import com.doronyg.photoarchivededuplicator.retention.RetentionScorer
 import com.doronyg.photoarchivededuplicator.scan.FileRecord
 import okio.Path
 import okio.Path.Companion.toPath
-import kotlin.test.*
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 class DuplicateConfidenceTest {
     private val scorer = RetentionScorer()

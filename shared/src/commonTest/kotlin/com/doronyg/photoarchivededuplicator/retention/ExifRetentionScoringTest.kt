@@ -5,8 +5,8 @@ import com.doronyg.photoarchivededuplicator.exif.ExifMetadata
 import com.doronyg.photoarchivededuplicator.exif.ExifReadResult
 import com.doronyg.photoarchivededuplicator.exif.ExifRecord
 import com.doronyg.photoarchivededuplicator.exif.ExifStatus
-import com.doronyg.photoarchivededuplicator.scan.FileRecord
 import com.doronyg.photoarchivededuplicator.scan.DuplicateCandidateGroup
+import com.doronyg.photoarchivededuplicator.scan.FileRecord
 import okio.Path.Companion.toPath
 import kotlin.test.Test
 import kotlin.test.assertEquals

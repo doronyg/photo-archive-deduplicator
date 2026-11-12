@@ -6,11 +6,11 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.MediaStore
+import com.doronyg.photoarchivededuplicator.strings.AppStrings
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okio.Path
-import com.doronyg.photoarchivededuplicator.strings.AppStrings
 
 internal data class MediaOpenTarget(val contentUri: String, val mimeType: String)
 

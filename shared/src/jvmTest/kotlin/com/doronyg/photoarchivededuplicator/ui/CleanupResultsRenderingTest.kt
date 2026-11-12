@@ -26,10 +26,10 @@ import com.doronyg.photoarchivededuplicator.recommendation.aggregateAiRecommenda
 import com.doronyg.photoarchivededuplicator.recommendation.aggregateRecommendationStatistics
 import com.doronyg.photoarchivededuplicator.scan.InventorySummary
 import com.doronyg.photoarchivededuplicator.strings.AppStrings
+import kotlinx.coroutines.test.runTest
 import java.io.ByteArrayInputStream
 import java.io.File
 import javax.imageio.ImageIO
-import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse

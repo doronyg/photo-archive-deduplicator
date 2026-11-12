@@ -1,8 +1,20 @@
 package com.doronyg.photoarchivededuplicator.operations
 
-import com.doronyg.photoarchivededuplicator.recommendation.*
+import com.doronyg.photoarchivededuplicator.recommendation.DeletionAnalysisSnapshot
+import com.doronyg.photoarchivededuplicator.recommendation.DeletionRecommendationCategory
+import com.doronyg.photoarchivededuplicator.recommendation.DeletionRecommendationGroup
+import com.doronyg.photoarchivededuplicator.recommendation.DeletionRecommendationSource
+import com.doronyg.photoarchivededuplicator.recommendation.DeletionReviewFile
+import com.doronyg.photoarchivededuplicator.recommendation.FileRecommendation
+import com.doronyg.photoarchivededuplicator.recommendation.FileRecommendationRole
+import com.doronyg.photoarchivededuplicator.recommendation.RecommendationAction
+import com.doronyg.photoarchivededuplicator.recommendation.hasProtectedMember
 import com.doronyg.photoarchivededuplicator.strings.AppStrings
-import kotlinx.serialization.json.*
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 internal fun duplicateDeletionGroupId(selection: DuplicateDeletionSelection): String =
     selection.source.name + selection.files.map { it.path.toString() }.sorted()

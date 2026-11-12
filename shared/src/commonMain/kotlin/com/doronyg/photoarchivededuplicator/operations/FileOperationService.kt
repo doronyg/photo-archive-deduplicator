@@ -1,20 +1,20 @@
 package com.doronyg.photoarchivededuplicator.operations
 
-import com.doronyg.photoarchivededuplicator.IoLane
 import com.doronyg.photoarchivededuplicator.Diagnostics
+import com.doronyg.photoarchivededuplicator.IoLane
 import com.doronyg.photoarchivededuplicator.classification.DirectoryClassification
 import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificationContext
-import com.doronyg.photoarchivededuplicator.recommendation.DeletionRecommendationService
-import com.doronyg.photoarchivededuplicator.recommendation.FileRecommendationRole
-import com.doronyg.photoarchivededuplicator.recommendation.FileRecommendation
 import com.doronyg.photoarchivededuplicator.recommendation.ConfidenceAssessment
+import com.doronyg.photoarchivededuplicator.recommendation.DeletionRecommendationService
+import com.doronyg.photoarchivededuplicator.recommendation.FileRecommendation
+import com.doronyg.photoarchivededuplicator.recommendation.FileRecommendationRole
 import com.doronyg.photoarchivededuplicator.retention.RetentionScoreService
 import com.doronyg.photoarchivededuplicator.retention.RetentionScorer
 import com.doronyg.photoarchivededuplicator.scan.DirectoryRepository
 import com.doronyg.photoarchivededuplicator.scan.FileRecord
-import com.doronyg.photoarchivededuplicator.scan.isInTree
-import com.doronyg.photoarchivededuplicator.scan.isHistoryMetadata
 import com.doronyg.photoarchivededuplicator.scan.isBinMarkerMetadata
+import com.doronyg.photoarchivededuplicator.scan.isHistoryMetadata
+import com.doronyg.photoarchivededuplicator.scan.isInTree
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext

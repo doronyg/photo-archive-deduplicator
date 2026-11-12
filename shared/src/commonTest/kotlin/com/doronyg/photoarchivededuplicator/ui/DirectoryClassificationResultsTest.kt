@@ -1,10 +1,17 @@
 package com.doronyg.photoarchivededuplicator.ui
 
-import com.doronyg.photoarchivededuplicator.classification.*
+import com.doronyg.photoarchivededuplicator.classification.DirectoryClassification
+import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificationRecord
+import com.doronyg.photoarchivededuplicator.classification.OllamaSettings
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.runTest
 import okio.Path.Companion.toPath
-import kotlin.test.*
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class DirectoryClassificationResultsTest {
     private val context = OllamaSettings("http://ollama.test", "selected-model").context()

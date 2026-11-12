@@ -1,9 +1,9 @@
 package com.doronyg.photoarchivededuplicator.scan
 
+import okio.Path.Companion.toPath
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import okio.Path.Companion.toPath
 
 class InventoryBrowseTest {
     private val env = ScanTestEnvironment()

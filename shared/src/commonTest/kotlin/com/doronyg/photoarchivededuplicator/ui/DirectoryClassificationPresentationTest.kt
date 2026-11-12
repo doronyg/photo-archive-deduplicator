@@ -1,15 +1,20 @@
 package com.doronyg.photoarchivededuplicator.ui
 
-import com.doronyg.photoarchivededuplicator.classification.*
-import com.doronyg.photoarchivededuplicator.scan.FileRecord
+import com.doronyg.photoarchivededuplicator.classification.DirectoryClassification
+import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificationFailure
+import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificationJobState
+import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificationPhase
+import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificationRecord
+import com.doronyg.photoarchivededuplicator.classification.OllamaSettings
 import com.doronyg.photoarchivededuplicator.scan.DuplicateCandidateGroup
+import com.doronyg.photoarchivededuplicator.scan.FileRecord
+import kotlinx.coroutines.test.runTest
 import okio.Path.Companion.toPath
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
-import kotlin.test.assertFalse
-import kotlinx.coroutines.test.runTest
 
 class DirectoryClassificationPresentationTest {
     private val context = OllamaSettings("https://example.test", "chosen-model").context()

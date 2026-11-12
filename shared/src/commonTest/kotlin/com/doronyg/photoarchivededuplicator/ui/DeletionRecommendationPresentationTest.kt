@@ -1,12 +1,32 @@
 package com.doronyg.photoarchivededuplicator.ui
 
-import com.doronyg.photoarchivededuplicator.*
-import com.doronyg.photoarchivededuplicator.recommendation.*
-import com.doronyg.photoarchivededuplicator.exif.*
-import com.doronyg.photoarchivededuplicator.retention.*
+import com.doronyg.photoarchivededuplicator.UiChoices
+import com.doronyg.photoarchivededuplicator.UiTab
+import com.doronyg.photoarchivededuplicator.decodeUiChoices
+import com.doronyg.photoarchivededuplicator.encodeUiChoices
+import com.doronyg.photoarchivededuplicator.exif.ExifInput
+import com.doronyg.photoarchivededuplicator.exif.ExifMetadata
+import com.doronyg.photoarchivededuplicator.exif.ExifReadResult
+import com.doronyg.photoarchivededuplicator.exif.ExifRecord
+import com.doronyg.photoarchivededuplicator.exif.ExifStatus
+import com.doronyg.photoarchivededuplicator.recommendation.DeletionAnalysisSnapshot
+import com.doronyg.photoarchivededuplicator.recommendation.DeletionCategoryResults
+import com.doronyg.photoarchivededuplicator.recommendation.DeletionRecommendationCategory
+import com.doronyg.photoarchivededuplicator.recommendation.DeletionRecommendationReport
+import com.doronyg.photoarchivededuplicator.recommendation.DeletionRecommendationSummary
+import com.doronyg.photoarchivededuplicator.recommendation.DuplicateRecommendationEngine
+import com.doronyg.photoarchivededuplicator.recommendation.FileStatistics
+import com.doronyg.photoarchivededuplicator.recommendation.SameDirectoryMetadataProvider
+import com.doronyg.photoarchivededuplicator.retention.RetentionPresentation
+import com.doronyg.photoarchivededuplicator.retention.RetentionRank
+import com.doronyg.photoarchivededuplicator.retention.RetentionScorer
 import com.doronyg.photoarchivededuplicator.scan.FileRecord
 import okio.Path.Companion.toPath
-import kotlin.test.*
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class DeletionRecommendationPresentationTest {
     private val first = DeletionCategoryResults(

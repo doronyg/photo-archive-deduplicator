@@ -1,7 +1,7 @@
 package com.doronyg.photoarchivededuplicator.operations
 
-import okio.Path
 import okio.IOException
+import okio.Path
 
 /** Rejection before the native rename was invoked: neither photo path was mutated. */
 internal class FileMoveRejectedException(message: String, cause: Throwable? = null) : IOException(message, cause)

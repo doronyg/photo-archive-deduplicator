@@ -12,8 +12,8 @@ import com.doronyg.photoarchivededuplicator.scan.MediaItem
 import com.doronyg.photoarchivededuplicator.scan.MediaSource
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
-import okio.Path.Companion.toPath
 import okio.IOException
+import okio.Path.Companion.toPath
 
 private const val DATABASE_FILE_NAME = "inventory.db"
 private const val MILLIS_PER_SECOND = 1000L

@@ -1,17 +1,27 @@
 package com.doronyg.photoarchivededuplicator.operations
 
+import com.doronyg.photoarchivededuplicator.recommendation.DeletionRecommendationCategory
+import com.doronyg.photoarchivededuplicator.recommendation.DeletionRecommendationGroup
+import com.doronyg.photoarchivededuplicator.recommendation.DeletionReviewFile
+import com.doronyg.photoarchivededuplicator.recommendation.DuplicateRecommendationEngine
+import com.doronyg.photoarchivededuplicator.recommendation.FileRecommendationRole
 import com.doronyg.photoarchivededuplicator.retention.RetentionScoreService
+import com.doronyg.photoarchivededuplicator.scan.FileRecord
 import com.doronyg.photoarchivededuplicator.scan.concurrencyTest
 import com.doronyg.photoarchivededuplicator.scan.createFilesDatabase
-import com.doronyg.photoarchivededuplicator.scan.FileRecord
-import com.doronyg.photoarchivededuplicator.recommendation.*
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
+import kotlinx.serialization.json.buildJsonObject
 import okio.Path.Companion.toPath
-import kotlin.test.*
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
+import kotlin.test.assertNull
+import kotlin.test.assertSame
+import kotlin.test.assertTrue
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class FileOperationControllerTest {

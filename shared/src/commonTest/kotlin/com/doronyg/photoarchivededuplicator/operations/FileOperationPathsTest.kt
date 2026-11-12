@@ -3,8 +3,8 @@ package com.doronyg.photoarchivededuplicator.operations
 import okio.Path.Companion.toPath
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertNull
 import kotlin.test.assertNotEquals
+import kotlin.test.assertNull
 
 class FileOperationPathsTest {
     @Test

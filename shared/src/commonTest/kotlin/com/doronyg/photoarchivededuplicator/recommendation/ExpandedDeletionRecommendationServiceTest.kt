@@ -1,11 +1,19 @@
 package com.doronyg.photoarchivededuplicator.recommendation
 
-import com.doronyg.photoarchivededuplicator.classification.*
-import com.doronyg.photoarchivededuplicator.exif.*
+import com.doronyg.photoarchivededuplicator.classification.DirectoryClassification
+import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificationRecord
+import com.doronyg.photoarchivededuplicator.classification.OllamaSettings
+import com.doronyg.photoarchivededuplicator.exif.ExifInput
+import com.doronyg.photoarchivededuplicator.exif.ExifMetadata
+import com.doronyg.photoarchivededuplicator.exif.ExifReadResult
+import com.doronyg.photoarchivededuplicator.exif.ExifRecord
+import com.doronyg.photoarchivededuplicator.exif.ExifStatus
 import com.doronyg.photoarchivededuplicator.retention.RetentionScoreService
 import com.doronyg.photoarchivededuplicator.scan.DirectoryListing
 import com.doronyg.photoarchivededuplicator.scan.concurrencyTest
-import kotlin.test.*
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 class ExpandedDeletionRecommendationServiceTest {
     @Test

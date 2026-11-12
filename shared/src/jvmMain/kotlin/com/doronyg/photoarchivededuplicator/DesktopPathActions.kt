@@ -1,5 +1,6 @@
 package com.doronyg.photoarchivededuplicator
 
+import com.doronyg.photoarchivededuplicator.strings.AppStrings
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import okio.Path
@@ -7,7 +8,6 @@ import okio.Path.Companion.toPath
 import java.awt.Desktop
 import java.io.File
 import java.net.URI
-import com.doronyg.photoarchivededuplicator.strings.AppStrings
 
 fun desktopPathActions(
     diagnosticActions: PathActions = DesktopPathActions(),

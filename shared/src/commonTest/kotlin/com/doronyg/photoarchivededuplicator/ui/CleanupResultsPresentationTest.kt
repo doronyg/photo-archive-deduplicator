@@ -5,7 +5,13 @@ import com.doronyg.photoarchivededuplicator.operations.history.ArchiveIdentity
 import com.doronyg.photoarchivededuplicator.operations.history.HistoryProblem
 import com.doronyg.photoarchivededuplicator.operations.history.OperationHistorySnapshot
 import com.doronyg.photoarchivededuplicator.operations.history.OperationHistoryStatistics
-import com.doronyg.photoarchivededuplicator.recommendation.*
+import com.doronyg.photoarchivededuplicator.recommendation.FileStatistics
+import com.doronyg.photoarchivededuplicator.recommendation.InventoryFileCounts
+import com.doronyg.photoarchivededuplicator.recommendation.InventoryStatistics
+import com.doronyg.photoarchivededuplicator.recommendation.RecommendationStatisticsReport
+import com.doronyg.photoarchivededuplicator.recommendation.StatisticsFileType
+import com.doronyg.photoarchivededuplicator.recommendation.aggregateAiRecommendationStatistics
+import com.doronyg.photoarchivededuplicator.recommendation.aggregateRecommendationStatistics
 import com.doronyg.photoarchivededuplicator.scan.InventorySummary
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test

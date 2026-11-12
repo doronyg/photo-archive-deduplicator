@@ -3,13 +3,13 @@ package com.doronyg.photoarchivededuplicator.exif
 import com.doronyg.photoarchivededuplicator.scan.DirectoryListing
 import com.doronyg.photoarchivededuplicator.scan.concurrencyTest
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class ExifExtractionServiceTest {

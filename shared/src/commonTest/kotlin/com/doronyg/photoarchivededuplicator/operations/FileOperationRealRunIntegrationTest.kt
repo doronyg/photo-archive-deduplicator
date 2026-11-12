@@ -2,13 +2,20 @@ package com.doronyg.photoarchivededuplicator.operations
 
 import com.doronyg.photoarchivededuplicator.AppContainer
 import com.doronyg.photoarchivededuplicator.IoLane
-import com.doronyg.photoarchivededuplicator.exif.*
+import com.doronyg.photoarchivededuplicator.exif.ExifInput
+import com.doronyg.photoarchivededuplicator.exif.ExifMetadata
+import com.doronyg.photoarchivededuplicator.exif.ExifReadResult
+import com.doronyg.photoarchivededuplicator.exif.ExifRecord
+import com.doronyg.photoarchivededuplicator.exif.ExifSource
+import com.doronyg.photoarchivededuplicator.exif.ExifStatus
 import com.doronyg.photoarchivededuplicator.operations.history.OperationHistoryMoveStatus
-import com.doronyg.photoarchivededuplicator.operations.history.historyObject
 import com.doronyg.photoarchivededuplicator.operations.history.historyLong
+import com.doronyg.photoarchivededuplicator.operations.history.historyObject
 import com.doronyg.photoarchivededuplicator.recommendation.DeletionRecommendationService
 import com.doronyg.photoarchivededuplicator.recommendation.DeletionRecommendationSource
-import com.doronyg.photoarchivededuplicator.scan.*
+import com.doronyg.photoarchivededuplicator.scan.DirectoryListing
+import com.doronyg.photoarchivededuplicator.scan.DirectoryScanner
+import com.doronyg.photoarchivededuplicator.scan.createInMemoryDriver
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -18,7 +25,12 @@ import kotlinx.coroutines.test.runTest
 import okio.Path
 import okio.Path.Companion.toPath
 import okio.fakefilesystem.FakeFileSystem
-import kotlin.test.*
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
 
 @OptIn(ExperimentalCoroutinesApi::class)

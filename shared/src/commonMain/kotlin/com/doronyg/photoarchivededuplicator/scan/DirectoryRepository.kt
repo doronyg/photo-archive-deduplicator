@@ -1,7 +1,5 @@
 package com.doronyg.photoarchivededuplicator.scan
 
-import com.doronyg.photoarchivededuplicator.LogTags
-
 import app.cash.sqldelight.EnumColumnAdapter
 import app.cash.sqldelight.async.coroutines.awaitAsList
 import app.cash.sqldelight.async.coroutines.awaitAsOne
@@ -9,26 +7,27 @@ import app.cash.sqldelight.async.coroutines.awaitAsOneOrNull
 import app.cash.sqldelight.db.SqlDriver
 import com.doronyg.photoarchivededuplicator.Diagnostics
 import com.doronyg.photoarchivededuplicator.IoLane
+import com.doronyg.photoarchivededuplicator.LogTags
 import com.doronyg.photoarchivededuplicator.UiChoices
-import com.doronyg.photoarchivededuplicator.encodeUiChoices
-import com.doronyg.photoarchivededuplicator.loadUiChoicesInLane
 import com.doronyg.photoarchivededuplicator.classification.DirectoryClassification
 import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificationContext
 import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificationRecord
-import com.doronyg.photoarchivededuplicator.db.FilesDatabase
-import com.doronyg.photoarchivededuplicator.db.SelectForPaths
 import com.doronyg.photoarchivededuplicator.db.DirectoryAiClassification
+import com.doronyg.photoarchivededuplicator.db.FilesDatabase
 import com.doronyg.photoarchivededuplicator.db.ScanDirectory
 import com.doronyg.photoarchivededuplicator.db.ScanFile
+import com.doronyg.photoarchivededuplicator.db.SelectForPaths
+import com.doronyg.photoarchivededuplicator.encodeUiChoices
+import com.doronyg.photoarchivededuplicator.exif.EXIF_SURROUNDING_WHITESPACE
 import com.doronyg.photoarchivededuplicator.exif.ExifInput
 import com.doronyg.photoarchivededuplicator.exif.ExifMetadata
 import com.doronyg.photoarchivededuplicator.exif.ExifReadResult
 import com.doronyg.photoarchivededuplicator.exif.ExifRecord
 import com.doronyg.photoarchivededuplicator.exif.ExifStatus
-import com.doronyg.photoarchivededuplicator.exif.EXIF_SURROUNDING_WHITESPACE
 import com.doronyg.photoarchivededuplicator.exif.KIM_VERSION
 import com.doronyg.photoarchivededuplicator.exif.isValidExifOffset
 import com.doronyg.photoarchivededuplicator.exif.validatedExifTimestamp
+import com.doronyg.photoarchivededuplicator.loadUiChoicesInLane
 import com.doronyg.photoarchivededuplicator.retention.FileScore
 import com.doronyg.photoarchivededuplicator.retention.FileScoreInput
 import com.doronyg.photoarchivededuplicator.retention.ScoreFactor

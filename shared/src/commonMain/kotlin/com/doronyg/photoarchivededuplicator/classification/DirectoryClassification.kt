@@ -1,7 +1,7 @@
 package com.doronyg.photoarchivededuplicator.classification
 
-import io.ktor.http.URLProtocol
 import io.ktor.http.URLParserException
+import io.ktor.http.URLProtocol
 import io.ktor.http.Url
 import okio.Path
 

@@ -14,8 +14,8 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -28,18 +28,18 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.doronyg.photoarchivededuplicator.scan.DirectoryOverview
 import com.doronyg.photoarchivededuplicator.PathActions
 import com.doronyg.photoarchivededuplicator.UiPreferences
+import com.doronyg.photoarchivededuplicator.scan.DirectoryOverview
 import com.doronyg.photoarchivededuplicator.scan.DirectoryRepository
 import com.doronyg.photoarchivededuplicator.scan.DirectoryStatus
 import com.doronyg.photoarchivededuplicator.scan.FileRecord
 import com.doronyg.photoarchivededuplicator.scan.InventorySummary
 import com.doronyg.photoarchivededuplicator.strings.AppStrings
-import okio.Path
-import okio.Path.Companion.toPath
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import okio.Path
+import okio.Path.Companion.toPath
 
 private data class BrowseContent(
     val summary: InventorySummary,

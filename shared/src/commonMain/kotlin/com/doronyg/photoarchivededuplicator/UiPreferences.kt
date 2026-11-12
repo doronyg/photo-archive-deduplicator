@@ -1,8 +1,8 @@
 package com.doronyg.photoarchivededuplicator
 
 import app.cash.sqldelight.async.coroutines.awaitAsList
-import com.doronyg.photoarchivededuplicator.db.FilesDatabase
 import com.doronyg.photoarchivededuplicator.classification.OllamaSettings
+import com.doronyg.photoarchivededuplicator.db.FilesDatabase
 import com.doronyg.photoarchivededuplicator.recommendation.RecommendationAction
 import com.doronyg.photoarchivededuplicator.scan.DuplicateFileType
 import com.doronyg.photoarchivededuplicator.scan.DuplicateSortCriterion
@@ -27,12 +27,12 @@ enum class UiTab(val title: String) {
     BROWSE(AppStrings.browseTab),
     DUPLICATES(AppStrings.duplicatesTab),
     SUSPECTED_DUPLICATES(AppStrings.suspectedTab),
-    DELETION_RECOMMENDATIONS(AppStrings.recommendationsTab),
-    FILE_OPERATIONS(AppStrings.fileOperationsTab),
     STATISTICS(AppStrings.statisticsTab),
+    FILE_OPERATIONS(AppStrings.fileOperationsTab),
     OLLAMA(AppStrings.ollamaTab),
     EXCLUSIONS(AppStrings.exclusionsTab),
     LOGS(AppStrings.logsTab),
+    DELETION_RECOMMENDATIONS(AppStrings.recommendationsTab),
 }
 
 data class UiChoices(

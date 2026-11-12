@@ -2,18 +2,18 @@ package com.doronyg.photoarchivededuplicator.operations
 
 import com.doronyg.photoarchivededuplicator.IoLane
 import com.doronyg.photoarchivededuplicator.classification.DirectoryClassification
-import com.doronyg.photoarchivededuplicator.recommendation.DeletionRecommendationPolicy
 import com.doronyg.photoarchivededuplicator.operations.history.ARCHIVE_MARKER_NAME
 import com.doronyg.photoarchivededuplicator.operations.history.ArchiveBinding
 import com.doronyg.photoarchivededuplicator.operations.history.HISTORY_DIRECTORY_NAME
 import com.doronyg.photoarchivededuplicator.operations.history.archiveRelativePath
 import com.doronyg.photoarchivededuplicator.operations.history.parseIdentity
 import com.doronyg.photoarchivededuplicator.operations.history.resolvePortablePath
-import com.doronyg.photoarchivededuplicator.scan.isInTree
-import com.doronyg.photoarchivededuplicator.scan.isHistoryMetadata
+import com.doronyg.photoarchivededuplicator.recommendation.DeletionRecommendationPolicy
 import com.doronyg.photoarchivededuplicator.scan.isBinMarkerMetadata
-import kotlinx.coroutines.CoroutineDispatcher
+import com.doronyg.photoarchivededuplicator.scan.isHistoryMetadata
+import com.doronyg.photoarchivededuplicator.scan.isInTree
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive

@@ -1,10 +1,10 @@
 package com.doronyg.photoarchivededuplicator.strings
 
+import com.doronyg.photoarchivededuplicator.operations.FileExecutionPhase
+import com.doronyg.photoarchivededuplicator.operations.FileMoveExecutionStatus
 import com.doronyg.photoarchivededuplicator.operations.FileOperationFinding
 import com.doronyg.photoarchivededuplicator.operations.FileOperationIssueCode
 import com.doronyg.photoarchivededuplicator.operations.FileOperationValidationStatus
-import com.doronyg.photoarchivededuplicator.operations.FileMoveExecutionStatus
-import com.doronyg.photoarchivededuplicator.operations.FileExecutionPhase
 import com.doronyg.photoarchivededuplicator.recommendation.FileRecommendationRole
 
 internal object OperationStrings {

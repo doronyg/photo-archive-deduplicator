@@ -1,8 +1,8 @@
 package com.doronyg.photoarchivededuplicator.ui
 
 import com.doronyg.photoarchivededuplicator.exif.ExifQueuePhase
-import com.doronyg.photoarchivededuplicator.exif.ExifQueueState
 import com.doronyg.photoarchivededuplicator.exif.ExifQueuePurpose
+import com.doronyg.photoarchivededuplicator.exif.ExifQueueState
 import com.doronyg.photoarchivededuplicator.scan.SUSPECTED_IMAGE_MIN_SIZE_BYTES
 import com.doronyg.photoarchivededuplicator.strings.AppStrings
 

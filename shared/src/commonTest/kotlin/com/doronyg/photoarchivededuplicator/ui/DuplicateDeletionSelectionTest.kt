@@ -1,16 +1,22 @@
 package com.doronyg.photoarchivededuplicator.ui
 
+import com.doronyg.photoarchivededuplicator.classification.DirectoryClassification
+import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificationContext
+import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificationRecord
 import com.doronyg.photoarchivededuplicator.operations.DuplicateDeletionSelection
 import com.doronyg.photoarchivededuplicator.recommendation.DeletionRecommendationSource
 import com.doronyg.photoarchivededuplicator.recommendation.DuplicateRecommendationEngine
 import com.doronyg.photoarchivededuplicator.recommendation.FileRecommendationRole
 import com.doronyg.photoarchivededuplicator.recommendation.RecommendationAction
-import com.doronyg.photoarchivededuplicator.classification.DirectoryClassification
-import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificationRecord
-import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificationContext
 import com.doronyg.photoarchivededuplicator.scan.FileRecord
 import okio.Path.Companion.toPath
-import kotlin.test.*
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
+import kotlin.test.assertNotEquals
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class DuplicateDeletionSelectionTest {
     private val files = listOf("a", "b", "c").map {

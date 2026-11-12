@@ -1,32 +1,48 @@
 package com.doronyg.photoarchivededuplicator.operations
 
 import com.doronyg.photoarchivededuplicator.IoLane
-import com.doronyg.photoarchivededuplicator.operations.history.*
-import com.doronyg.photoarchivededuplicator.recommendation.FileRecommendationRole
-import com.doronyg.photoarchivededuplicator.recommendation.DeletionRecommendationPolicy
 import com.doronyg.photoarchivededuplicator.classification.DirectoryClassification
+import com.doronyg.photoarchivededuplicator.operations.history.ARCHIVE_MARKER_NAME
+import com.doronyg.photoarchivededuplicator.operations.history.ArchiveBinding
+import com.doronyg.photoarchivededuplicator.operations.history.HISTORY_DIRECTORY_NAME
+import com.doronyg.photoarchivededuplicator.operations.history.OperationHistoryMoveStatus
+import com.doronyg.photoarchivededuplicator.operations.history.OperationHistoryStore
+import com.doronyg.photoarchivededuplicator.operations.history.historyLong
+import com.doronyg.photoarchivededuplicator.operations.history.historyObject
+import com.doronyg.photoarchivededuplicator.operations.history.historyString
+import com.doronyg.photoarchivededuplicator.operations.history.parseHistoryOperation
+import com.doronyg.photoarchivededuplicator.recommendation.DeletionRecommendationPolicy
+import com.doronyg.photoarchivededuplicator.recommendation.FileRecommendationRole
 import com.doronyg.photoarchivededuplicator.scan.FileRecord
 import com.doronyg.photoarchivededuplicator.scan.TrackingIoDispatcher
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.boolean
-import okio.IOException
 import okio.FileSystem
 import okio.ForwardingFileSystem
+import okio.IOException
 import okio.Path
 import okio.Path.Companion.toPath
 import okio.fakefilesystem.FakeFileSystem
-import kotlin.test.*
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
+import kotlin.test.assertNotEquals
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
+import kotlin.test.assertSame
+import kotlin.test.assertTrue
+import kotlin.test.fail
 
 class FileOperationExecutorTest {
     @Test fun protectedPolicyRequiresOneRetainedSameDirectoryHighConfidenceSnapshot() = runTest {

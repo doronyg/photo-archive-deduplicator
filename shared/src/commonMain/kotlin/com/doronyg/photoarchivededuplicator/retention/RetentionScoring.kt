@@ -1,11 +1,11 @@
 package com.doronyg.photoarchivededuplicator.retention
 
-import com.doronyg.photoarchivededuplicator.scan.FileRecord
-import com.doronyg.photoarchivededuplicator.strings.AppStrings
 import com.doronyg.photoarchivededuplicator.exif.ExifInput
 import com.doronyg.photoarchivededuplicator.exif.ExifRecord
 import com.doronyg.photoarchivededuplicator.exif.ExifStatus
 import com.doronyg.photoarchivededuplicator.exif.validatedExifTimestamp
+import com.doronyg.photoarchivededuplicator.scan.FileRecord
+import com.doronyg.photoarchivededuplicator.strings.AppStrings
 import okio.Path
 import kotlin.math.floor
 import kotlin.time.Instant

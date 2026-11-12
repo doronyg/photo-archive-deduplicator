@@ -1,13 +1,29 @@
 package com.doronyg.photoarchivededuplicator.operations
 
-import com.doronyg.photoarchivededuplicator.classification.*
-import com.doronyg.photoarchivededuplicator.exif.*
-import com.doronyg.photoarchivededuplicator.recommendation.*
-import com.doronyg.photoarchivededuplicator.retention.*
+import com.doronyg.photoarchivededuplicator.classification.DirectoryClassification
+import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificationRecord
+import com.doronyg.photoarchivededuplicator.classification.OllamaSettings
+import com.doronyg.photoarchivededuplicator.exif.ExifInput
+import com.doronyg.photoarchivededuplicator.exif.ExifMetadata
+import com.doronyg.photoarchivededuplicator.exif.ExifReadResult
+import com.doronyg.photoarchivededuplicator.exif.ExifRecord
+import com.doronyg.photoarchivededuplicator.exif.ExifStatus
+import com.doronyg.photoarchivededuplicator.recommendation.DeletionAnalysisSnapshot
+import com.doronyg.photoarchivededuplicator.recommendation.DeletionRecommendationSource
+import com.doronyg.photoarchivededuplicator.recommendation.DuplicateRecommendationEngine
+import com.doronyg.photoarchivededuplicator.recommendation.FileRecommendationRole
+import com.doronyg.photoarchivededuplicator.recommendation.RecommendationAction
+import com.doronyg.photoarchivededuplicator.retention.RetentionPresentation
+import com.doronyg.photoarchivededuplicator.retention.RetentionRank
+import com.doronyg.photoarchivededuplicator.retention.RetentionScorer
 import com.doronyg.photoarchivededuplicator.scan.FileRecord
 import com.doronyg.photoarchivededuplicator.strings.AppStrings
 import okio.Path.Companion.toPath
-import kotlin.test.*
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertNotNull
+import kotlin.test.assertTrue
 
 class DuplicateDeletionSelectionsTest {
     private fun file(name: String, directory: String = "/photos/Family") =

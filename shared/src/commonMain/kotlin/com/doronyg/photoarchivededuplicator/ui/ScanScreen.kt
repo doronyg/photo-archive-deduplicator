@@ -19,16 +19,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.doronyg.photoarchivededuplicator.UiPreferences
 import com.doronyg.photoarchivededuplicator.scan.ScanController
 import com.doronyg.photoarchivededuplicator.scan.ScanProgress
 import com.doronyg.photoarchivededuplicator.scan.ScanState
-import com.doronyg.photoarchivededuplicator.UiPreferences
 import com.doronyg.photoarchivededuplicator.strings.AppStrings
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import okio.Path
 import okio.Path.Companion.toPath
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.launch
 
 /** How the user picks what to scan. */
 sealed interface ScanTarget {

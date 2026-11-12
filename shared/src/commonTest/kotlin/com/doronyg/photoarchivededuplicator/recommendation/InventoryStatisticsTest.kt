@@ -1,10 +1,13 @@
 package com.doronyg.photoarchivededuplicator.recommendation
 
-import com.doronyg.photoarchivededuplicator.scan.FileRecord
 import com.doronyg.photoarchivededuplicator.scan.DuplicateFileType
+import com.doronyg.photoarchivededuplicator.scan.FileRecord
 import kotlinx.coroutines.test.runTest
 import okio.Path.Companion.toPath
-import kotlin.test.*
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
 
 class InventoryStatisticsTest {
     private fun file(path: String): FileRecord {

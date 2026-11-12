@@ -2,8 +2,8 @@ package com.doronyg.photoarchivededuplicator.exif
 
 import android.content.ContentResolver
 import android.content.ContentUris
-import android.provider.MediaStore
 import android.net.Uri
+import android.provider.MediaStore
 import com.doronyg.photoarchivededuplicator.IoLane
 import com.doronyg.photoarchivededuplicator.scan.FileRecord
 import kotlinx.coroutines.currentCoroutineContext

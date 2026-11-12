@@ -1,6 +1,8 @@
 package com.doronyg.photoarchivededuplicator.recommendation
 
-import com.doronyg.photoarchivededuplicator.classification.*
+import com.doronyg.photoarchivededuplicator.classification.DirectoryClassification
+import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificationRecord
+import com.doronyg.photoarchivededuplicator.classification.OllamaSettings
 import com.doronyg.photoarchivededuplicator.exif.ExifInput
 import com.doronyg.photoarchivededuplicator.exif.ExifMetadata
 import com.doronyg.photoarchivededuplicator.exif.ExifReadResult

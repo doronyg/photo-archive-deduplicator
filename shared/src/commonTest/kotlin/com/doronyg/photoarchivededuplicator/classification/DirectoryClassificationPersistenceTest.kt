@@ -1,13 +1,19 @@
 package com.doronyg.photoarchivededuplicator.classification
 
-import com.doronyg.photoarchivededuplicator.scan.*
+import com.doronyg.photoarchivededuplicator.scan.concurrencyTest
+import com.doronyg.photoarchivededuplicator.scan.createFilesDatabase
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runCurrent
 import okio.Path.Companion.toPath
-import kotlin.test.*
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class DirectoryClassificationPersistenceTest {

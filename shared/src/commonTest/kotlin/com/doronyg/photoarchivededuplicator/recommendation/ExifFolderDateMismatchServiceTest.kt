@@ -1,11 +1,19 @@
 package com.doronyg.photoarchivededuplicator.recommendation
 
-import com.doronyg.photoarchivededuplicator.classification.*
-import com.doronyg.photoarchivededuplicator.exif.*
+import com.doronyg.photoarchivededuplicator.classification.DirectoryClassification
+import com.doronyg.photoarchivededuplicator.classification.DirectoryClassificationRecord
+import com.doronyg.photoarchivededuplicator.classification.OllamaSettings
+import com.doronyg.photoarchivededuplicator.exif.ExifInput
+import com.doronyg.photoarchivededuplicator.exif.ExifMetadata
+import com.doronyg.photoarchivededuplicator.exif.ExifReadResult
+import com.doronyg.photoarchivededuplicator.exif.ExifRecord
+import com.doronyg.photoarchivededuplicator.exif.ExifStatus
 import com.doronyg.photoarchivededuplicator.retention.RetentionScoreService
 import com.doronyg.photoarchivededuplicator.scan.DirectoryListing
 import com.doronyg.photoarchivededuplicator.scan.concurrencyTest
-import kotlin.test.*
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 class ExifFolderDateMismatchServiceTest {
     @Test
@@ -35,7 +43,8 @@ class ExifFolderDateMismatchServiceTest {
         val statements = f.driver.statements.size
         f.fs.onBlockingCall = { error("Date mismatch category must not read archive files") }
         val report = service.load()
-        assertEquals(listOf("same-directory-metadata", "exif-folder-date-mismatch", "regular-duplicates-full-confidence"),
+        assertEquals(listOf("same-directory-metadata", "exif-folder-date-mismatch", "regular-duplicates-full-confidence",
+            "folder-preserving-duplicates", "single-protected-directory", "preferred-backup-perfect-score"),
             report.categories.map { it.category.id })
         assertTrue(report.categories.single { it.category.id == "regular-duplicates-full-confidence" }.groups.isEmpty())
         val category = report.categories.single { it.category.id == "exif-folder-date-mismatch" }

@@ -5,14 +5,21 @@ import app.cash.sqldelight.db.QueryResult
 import app.cash.sqldelight.db.SqlDriver
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import com.doronyg.photoarchivededuplicator.db.FilesDatabase
-import com.doronyg.photoarchivededuplicator.scan.*
+import com.doronyg.photoarchivededuplicator.scan.DirectoryListing
+import com.doronyg.photoarchivededuplicator.scan.DirectoryRepository
+import com.doronyg.photoarchivededuplicator.scan.DirectoryStatus
+import com.doronyg.photoarchivededuplicator.scan.IoGuardedDriver
+import com.doronyg.photoarchivededuplicator.scan.TrackingIoDispatcher
+import com.doronyg.photoarchivededuplicator.scan.createFilesDatabase
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
 import okio.Path.Companion.toPath
 import java.io.File
 import java.util.UUID
-import kotlin.test.*
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 class FileScoreRestartTest {
     @Test

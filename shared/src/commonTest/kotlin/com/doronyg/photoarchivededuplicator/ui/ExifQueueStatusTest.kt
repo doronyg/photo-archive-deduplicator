@@ -1,8 +1,8 @@
 package com.doronyg.photoarchivededuplicator.ui
 
 import com.doronyg.photoarchivededuplicator.exif.ExifQueuePhase
-import com.doronyg.photoarchivededuplicator.exif.ExifQueueState
 import com.doronyg.photoarchivededuplicator.exif.ExifQueuePurpose
+import com.doronyg.photoarchivededuplicator.exif.ExifQueueState
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse

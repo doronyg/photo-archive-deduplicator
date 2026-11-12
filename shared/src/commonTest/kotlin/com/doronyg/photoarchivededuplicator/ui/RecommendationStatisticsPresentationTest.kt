@@ -2,19 +2,19 @@ package com.doronyg.photoarchivededuplicator.ui
 
 import com.doronyg.photoarchivededuplicator.UiChoices
 import com.doronyg.photoarchivededuplicator.UiTab
+import com.doronyg.photoarchivededuplicator.classification.OllamaSettings
 import com.doronyg.photoarchivededuplicator.decodeUiChoices
 import com.doronyg.photoarchivededuplicator.encodeUiChoices
 import com.doronyg.photoarchivededuplicator.recommendation.RecommendationStatisticsReport
-import com.doronyg.photoarchivededuplicator.recommendation.aggregateRecommendationStatistics
 import com.doronyg.photoarchivededuplicator.recommendation.aggregateAiRecommendationStatistics
-import com.doronyg.photoarchivededuplicator.classification.OllamaSettings
+import com.doronyg.photoarchivededuplicator.recommendation.aggregateRecommendationStatistics
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
-import kotlin.test.assertTrue
 import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 class RecommendationStatisticsPresentationTest {
     @Test

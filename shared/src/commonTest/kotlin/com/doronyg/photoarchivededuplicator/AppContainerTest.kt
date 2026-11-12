@@ -1,20 +1,20 @@
 package com.doronyg.photoarchivededuplicator
 
 import app.cash.sqldelight.db.SqlDriver
-import com.doronyg.photoarchivededuplicator.scan.InventoryScanner
-import com.doronyg.photoarchivededuplicator.scan.ScanEvent
-import com.doronyg.photoarchivededuplicator.scan.TrackingIoDispatcher
-import com.doronyg.photoarchivededuplicator.scan.createInMemoryDriver
-import com.doronyg.photoarchivededuplicator.scan.DirectoryListing
-import com.doronyg.photoarchivededuplicator.scan.SuspendingQueryDriver
-import com.doronyg.photoarchivededuplicator.scan.DirectoryRepository
-import com.doronyg.photoarchivededuplicator.scan.ScanState
-import com.doronyg.photoarchivededuplicator.exif.ExifSource
 import com.doronyg.photoarchivededuplicator.exif.ExifMetadata
-import com.doronyg.photoarchivededuplicator.exif.ExifReadResult
-import com.doronyg.photoarchivededuplicator.exif.ExifStatus
 import com.doronyg.photoarchivededuplicator.exif.ExifQueuePhase
 import com.doronyg.photoarchivededuplicator.exif.ExifQueuePurpose
+import com.doronyg.photoarchivededuplicator.exif.ExifReadResult
+import com.doronyg.photoarchivededuplicator.exif.ExifSource
+import com.doronyg.photoarchivededuplicator.exif.ExifStatus
+import com.doronyg.photoarchivededuplicator.scan.DirectoryListing
+import com.doronyg.photoarchivededuplicator.scan.DirectoryRepository
+import com.doronyg.photoarchivededuplicator.scan.InventoryScanner
+import com.doronyg.photoarchivededuplicator.scan.ScanEvent
+import com.doronyg.photoarchivededuplicator.scan.ScanState
+import com.doronyg.photoarchivededuplicator.scan.SuspendingQueryDriver
+import com.doronyg.photoarchivededuplicator.scan.TrackingIoDispatcher
+import com.doronyg.photoarchivededuplicator.scan.createInMemoryDriver
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -22,20 +22,20 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
-import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
 import okio.Path
 import okio.Path.Companion.toPath
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertTrue
-import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
 
 @OptIn(ExperimentalCoroutinesApi::class)
