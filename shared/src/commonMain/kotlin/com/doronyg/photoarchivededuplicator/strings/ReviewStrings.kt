@@ -5,6 +5,10 @@ internal object ReviewStrings {
     const val sameDirectoryName = "Same-directory metadata matches"
     const val sameDirectoryDescription = "Different filenames in the same folder with matching size and capture metadata."
     const val sameDirectoryEvidence = "Same folder, different filenames, equal sizes and matching capture metadata."
+    const val directorySubdividedName = "Metadata matches within each folder"
+    const val directorySubdividedDescription = "Assess folders independently in multi-folder groups, retaining at least one copy in every folder."
+    const val directorySubdividedEvidence = "Each folder is assessed independently; only same-folder copies are proposed for removal. At least one copy remains in every original folder."
+    const val directorySubdividedPreserved = "Preserved: this folder has no qualifying same-directory deletion plan."
     const val folderMismatchName = "EXIF and folder date mismatch"
     const val folderMismatchDescription = "Copies share a capture date, but only the retained copy matches its folder date."
     const val fullConfidenceRegularName = "Regular duplicates (100/100)"
@@ -36,6 +40,8 @@ internal object ReviewStrings {
     fun folderMismatchEvidence(date: String) =
         "Shared capture date: $date. The retained copy matches its folder date; redundant copies do not. " +
             "Only folder-date mismatches are shown."
+    fun directorySubdividedConfidence(score: Int) =
+        "Weakest qualifying within-folder duplicate confidence: $score/100. No cross-folder replacement is proposed."
     fun configurationError(message: String?) = "Check Ollama settings: $message"
     fun loadError(message: String?) = "Could not load recommendations: $message"
     fun summary(groups: Long, files: Long, size: String) = "$groups groups | $files files | $size"

@@ -18,6 +18,39 @@ import kotlin.test.assertTrue
 
 class DeletionRecommendationServiceTest {
     @Test
+    fun directorySubdivisionLoadsCompleteGroupsWithoutFilesystemReadsOrScoreWrites() = concurrencyTest { f ->
+        val directories = listOf(f.root / "Family", f.root / "Holiday")
+        for ((index, directory) in directories.withIndex()) {
+            f.repository.seedRoot(directory)
+            val stem = if (index == 0) "FAMILY" else "HOLIDAY"
+            f.repository.recordListing(directory, DirectoryListing(emptyList(), listOf("$stem.jpg", "$stem-001.jpg").map {
+                DirectoryListing.Entry(directory / it, 120_000, 1, 2)
+            }), 3)
+            for (file in f.repository.filesIn(directory)) {
+                f.repository.saveFileExif(ExifRecord(ExifInput.from(file), ExifReadResult(ExifStatus.EXTRACTED,
+                    ExifMetadata(capturedAt = "2023:02:18 12:44:25", make = "Canon", model = "Camera $index",
+                        width = 4000, height = 3000)), 4))
+            }
+        }
+        val retention = RetentionScoreService(f.repository, dispatcher = f.dispatcher)
+        val source = f.repository.suspectedDuplicates()
+        retention.assessSuspected(source)
+        val before = retention.storedSuspected(source)
+        val statements = f.driver.statements.size
+        f.fs.onBlockingCall = { error("Subdivision must use stored metadata only") }
+        val report = DeletionRecommendationService(f.repository, retention, f.dispatcher).load()
+        assertTrue(report.categories.single { it.category.id == "same-directory-metadata" }.groups.isEmpty())
+        val category = report.categories.single { it.category.id == "same-directory-metadata-by-directory" }
+        val group = category.groups.single()
+        assertEquals(RecommendationAction.KEEP_MULTIPLE, group.recommendation.action)
+        assertEquals(4, group.recommendation.files.size)
+        assertEquals(directories.toSet(), group.survivors.map { it.advice.file.directoryPath }.toSet())
+        assertEquals(DeletionRecommendationSummary(1, FileStatistics(2, 240_000)), category.summary)
+        assertEquals(before, retention.storedSuspected(source))
+        assertTrue(f.driver.statements.drop(statements).all { it.startsWith("SELECT") || it.startsWith("WITH") })
+    }
+
+    @Test
     fun fullConfidenceRegularCategoryUsesSavedDecisionsWithoutReadingFilesOrWritingScores() = concurrencyTest { f ->
         val keeperDirectory = f.root / "Photos" / "2018-08-26"
         val backupDirectory = f.root / "Backup" / "2018-08-26"

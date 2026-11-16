@@ -744,6 +744,18 @@ exactly one retained preferred copy with every other member a high-confidence
 redundant candidate explicitly depending on that survivor. Missing, outdated,
 contradictory or weak evidence does not qualify.
 
+The separate **Metadata matches within each folder** category extends this rule
+to complete multi-directory suspected groups without changing the original
+category. Partition by exact directory, recompute each local decision using the
+existing engine and pass it through the original same-directory provider. Combine
+qualifying local plans into one complete KEEP_MULTIPLE result per original group;
+retain all files in singleton or nonqualifying directories. Every candidate must
+depend on a survivor in its own directory, and every original directory must
+remain represented. Confidence describes the weakest qualifying local comparison,
+not cross-directory identity. Any protected member still excludes the whole group.
+File Operations reloads this provider through the existing fresh-recommendation
+validation path; no new execution policy, scoring algorithm or schema is needed.
+
 The **EXIF and folder date mismatch** category consumes complete regular duplicate
 groups, without imposing the suspected-image size threshold. Require current
 successful EXIF with equal camera-local capture dates and recognized complete

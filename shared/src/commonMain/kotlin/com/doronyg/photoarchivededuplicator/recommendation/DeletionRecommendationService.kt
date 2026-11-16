@@ -14,7 +14,8 @@ internal class DeletionRecommendationService(
     private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
     private val classificationContext: DirectoryClassificationContext? = null,
     private val providers: List<DeletionRecommendationProvider> =
-        listOf(SameDirectoryMetadataProvider(), ExifFolderDateMismatchProvider(), FullConfidenceRegularDuplicatesProvider(),
+        listOf(SameDirectoryMetadataProvider(), DirectorySubdividedMetadataProvider(),
+            ExifFolderDateMismatchProvider(), FullConfidenceRegularDuplicatesProvider(),
             FolderPreservingDuplicatesProvider(), SingleProtectedDirectoryProvider(), PreferredBackupPerfectScoreProvider()),
 ) {
     suspend fun load(): DeletionRecommendationReport = withContext(dispatcher) {

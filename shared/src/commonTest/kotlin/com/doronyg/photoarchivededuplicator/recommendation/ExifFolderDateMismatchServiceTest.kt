@@ -43,7 +43,8 @@ class ExifFolderDateMismatchServiceTest {
         val statements = f.driver.statements.size
         f.fs.onBlockingCall = { error("Date mismatch category must not read archive files") }
         val report = service.load()
-        assertEquals(listOf("same-directory-metadata", "exif-folder-date-mismatch", "regular-duplicates-full-confidence",
+        assertEquals(listOf("same-directory-metadata", "same-directory-metadata-by-directory",
+            "exif-folder-date-mismatch", "regular-duplicates-full-confidence",
             "folder-preserving-duplicates", "single-protected-directory", "preferred-backup-perfect-score"),
             report.categories.map { it.category.id })
         assertTrue(report.categories.single { it.category.id == "regular-duplicates-full-confidence" }.groups.isEmpty())
