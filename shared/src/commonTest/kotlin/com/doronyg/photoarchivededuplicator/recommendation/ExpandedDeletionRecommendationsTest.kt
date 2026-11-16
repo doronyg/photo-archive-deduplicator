@@ -19,6 +19,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.time.Instant
 
 class ExpandedDeletionRecommendationsTest {
     private val scorer = RetentionScorer()
@@ -77,7 +78,7 @@ class ExpandedDeletionRecommendationsTest {
     }
 
     @Test
-    fun preferredBackupUsesEngineChoicesAndRequiresARetainedCurrentPerfectScore() {
+    fun preferredBackupUsesEngineChoicesAndRequiresARetainedCurrentScoreOfAtLeast100() {
         val input = perfect()
         assertEquals(100.0, input.retention.getValue(input.files.first().path).score?.value)
         val group = assertNotNull(PreferredBackupPerfectScoreProvider().recommend(input))
@@ -90,6 +91,26 @@ class ExpandedDeletionRecommendationsTest {
             value.copy(score = value.score?.copy(value = if (path == input.files.last().path) 100.0 else 99.0))
         }
         assertNull(PreferredBackupPerfectScoreProvider().recommend(input.copy(retention = candidateOnly)))
+    }
+
+    @Test
+    fun preferredBackupAcceptsRetainedCurrentScoresAbove100WithoutChangingEngineChoices() {
+        val timestamp = Instant.parse("2023-02-18T12:44:25Z").toEpochMilliseconds()
+        val preferred = file("/Photos/2023-02-18")
+        for (keeper in listOf(
+            preferred.copy(createdAt = timestamp),
+            preferred.copy(modifiedAt = timestamp),
+            preferred.copy(modifiedAt = timestamp, createdAt = timestamp),
+        )) {
+            val input = snapshot(listOf(keeper, file("/Photos/Backup")), mapOf(
+                keeper.directoryPath.toString() to DirectoryClassification.PREFERRED,
+                "/Photos/Backup" to DirectoryClassification.BACKUP))
+            assertTrue(input.retention.getValue(keeper.path).score!!.value > 100.0)
+            val group = assertNotNull(PreferredBackupPerfectScoreProvider().recommend(input))
+            assertEquals(input.recommendation, group.recommendation)
+            assertEquals(keeper, group.survivors.single().advice.file)
+            assertEquals(input.files.last(), group.candidates.single().advice.file)
+        }
     }
 
     @Test

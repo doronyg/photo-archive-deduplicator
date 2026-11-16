@@ -29,7 +29,7 @@ object AppStrings {
     const val statisticsTab = "Cleanup Results"
     const val recommendationsTab = "Deletion Recommendations"
     const val fileOperationsTab = "File Operations"
-    const val ollamaTab = "Ollama Settings"
+    const val ollamaTab = "Ollama"
     const val exclusionsTab = "Exclusions"
     const val logsTab = "Logs"
     const val scrollNavigationForward = "Scroll navigation forward"

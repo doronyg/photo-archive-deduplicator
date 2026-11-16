@@ -65,6 +65,15 @@ internal val allUiChoices = UiChoices(
 @OptIn(ExperimentalCoroutinesApi::class)
 class UiPreferencesTest {
     @Test
+    fun navigationTabsFollowTheArchiveWorkflowOrder() {
+        assertEquals(listOf(
+            "Scan", "Exclusions", "Duplicates", "Suspected Duplicates",
+            "Deletion Recommendations", "File Operations", "Cleanup Results",
+            "Browse", "Ollama", "Logs",
+        ), UiTab.entries.map { it.title })
+    }
+
+    @Test
     fun historySettingsReadLegacyKeysAndWriteStorageNeutralKeys() {
         val legacy = mapOf(
             "nasHistoryArchiveRoot" to "/Photos",

@@ -18,8 +18,8 @@ import kotlin.test.assertTrue
 
 class RecommendationStatisticsPresentationTest {
     @Test
-    fun cleanupResultsTabFollowsSuspectedDuplicatesAndPreservesTheStatisticsPreference() {
-        assertEquals(UiTab.STATISTICS, UiTab.entries[UiTab.SUSPECTED_DUPLICATES.ordinal + 1])
+    fun cleanupResultsTabFollowsFileOperationsAndPreservesTheStatisticsPreference() {
+        assertEquals(UiTab.STATISTICS, UiTab.entries[UiTab.FILE_OPERATIONS.ordinal + 1])
         assertEquals("Cleanup Results", UiTab.STATISTICS.title)
         val choices = UiChoices(selectedTab = UiTab.STATISTICS)
         assertEquals("STATISTICS", encodeUiChoices(choices)["selectedTab"])

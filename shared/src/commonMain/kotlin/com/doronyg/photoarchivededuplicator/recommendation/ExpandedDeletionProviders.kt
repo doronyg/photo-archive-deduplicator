@@ -57,7 +57,10 @@ internal class PreferredBackupPerfectScoreProvider : DeletionRecommendationProvi
         }) return null
         val plan = currentSafeDeletionPlan(snapshot, scorer,
             snapshot.recommendation.mustPreserve.map { it.directoryPath }.toSet()) ?: return null
-        if (plan.mustPreserve.none { snapshot.retention[it.path]?.score?.value == 100.0 }) return null
+        if (plan.mustPreserve.none {
+            val score = snapshot.retention[it.path]?.score
+            score != null && score.value >= 100.0
+        }) return null
         return presentDeletionPlan(snapshot, plan, AppStrings.review.preferredBackupPerfectEvidence)
     }
 }

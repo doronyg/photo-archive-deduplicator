@@ -786,9 +786,9 @@ Three additional categories consume complete regular and suspected groups:
   The exception is explicit in saved operation evidence and revalidated before
   execution; it does not permit manual protected selections or cross-directory
   protected moves.
-- **Preferred/backup groups with a score-100 keeper** requires every directory to
+- **Preferred/backup groups with a score-100+ keeper** requires every directory to
   be explicitly classified PREFERRED or BACKUP and at least one engine-retained
-  file to have a current retention score of exactly 100. All existing engine
+  file to have a current retention score of at least 100. All existing engine
   keepers remain, including multiple keepers.
 
 All three require current saved EXIF/retention evidence, high duplicate confidence

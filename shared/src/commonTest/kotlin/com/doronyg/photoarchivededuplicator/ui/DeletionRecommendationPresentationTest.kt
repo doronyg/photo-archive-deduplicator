@@ -72,9 +72,9 @@ class DeletionRecommendationPresentationTest {
     }
 
     @Test
-    fun recommendationsTabPersistsByNameWithoutChangingOtherTabOrdering() {
+    fun recommendationsTabFollowsSuspectedDuplicatesAndPersistsByName() {
         assertEquals("Deletion Recommendations", UiTab.DELETION_RECOMMENDATIONS.title)
-        assertEquals(UiTab.STATISTICS, UiTab.entries[UiTab.SUSPECTED_DUPLICATES.ordinal + 1])
+        assertEquals(UiTab.DELETION_RECOMMENDATIONS, UiTab.entries[UiTab.SUSPECTED_DUPLICATES.ordinal + 1])
         val choices = UiChoices(selectedTab = UiTab.DELETION_RECOMMENDATIONS)
         assertEquals("DELETION_RECOMMENDATIONS", encodeUiChoices(choices)["selectedTab"])
         assertEquals(choices, decodeUiChoices(encodeUiChoices(choices)))

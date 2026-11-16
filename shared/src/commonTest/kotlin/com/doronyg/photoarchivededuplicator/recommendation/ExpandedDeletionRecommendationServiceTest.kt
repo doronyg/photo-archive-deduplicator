@@ -14,6 +14,7 @@ import com.doronyg.photoarchivededuplicator.scan.concurrencyTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import kotlin.time.Instant
 
 class ExpandedDeletionRecommendationServiceTest {
     @Test
@@ -53,11 +54,13 @@ class ExpandedDeletionRecommendationServiceTest {
         val profile = OllamaSettings("http://ollama.test", "model").context()
         val preferred = f.root / "Photos" / "2023-02-18"
         val backup = f.root / "Backup"
+        val timestamp = Instant.parse("2023-02-18T12:44:25Z").toEpochMilliseconds()
         for ((directory, type) in listOf(preferred to DirectoryClassification.PREFERRED,
             backup to DirectoryClassification.BACKUP)) {
             f.repository.seedRoot(directory)
             f.repository.recordListing(directory, DirectoryListing(emptyList(),
-                listOf(DirectoryListing.Entry(directory / "IMG.jpg", 120_000, 1, 2))), 3)
+                listOf(DirectoryListing.Entry(directory / "IMG.jpg", 120_000,
+                    if (directory == preferred) timestamp else 1, 2))), 3)
             val file = f.repository.filesIn(directory).single()
             f.repository.saveFileExif(ExifRecord(ExifInput.from(file), ExifReadResult(ExifStatus.EXTRACTED,
                 ExifMetadata(capturedAt = "2023:02:18 12:44:25", make = "Canon", model = "Camera",
@@ -76,7 +79,7 @@ class ExpandedDeletionRecommendationServiceTest {
         assertTrue(report.category().groups.isNotEmpty())
         assertTrue(report.category().groups.all { group ->
             group.survivors.single().advice.file.path == preferred / "IMG.jpg" &&
-                group.survivors.single().retention?.score?.value == 100.0 &&
+                group.survivors.single().retention?.score?.value == 102.0 &&
                 group.candidates.single().advice.file.path == backup / "IMG.jpg"
         })
         assertTrue(DeletionRecommendationService(f.repository, retention, f.dispatcher, profile.copy(model = "other"))
